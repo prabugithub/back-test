@@ -6,10 +6,11 @@ import {
   Target,
   Activity,
   ChevronDown,
-  Circle
+  Circle,
+  MousePointer
 } from 'lucide-react';
 
-export type DrawingTool = 'none' | 'trendline' | 'horizontal' | 'rectangle' | 'fibonacci' | 'riskReward';
+export type DrawingTool = 'none' | 'select' | 'trendline' | 'horizontal' | 'rectangle' | 'fibonacci' | 'riskReward';
 export type Indicator = 'none' | 'sma20' | 'sma50' | 'ema20' | 'ema50';
 
 interface ChartToolbarProps {
@@ -18,6 +19,8 @@ interface ChartToolbarProps {
   activeIndicators: Indicator[];
   onIndicatorToggle: (indicator: Indicator) => void;
   onClearDrawings: () => void;
+  onDeleteSelected: () => void;
+  hasSelection: boolean;
 }
 
 export function ChartToolbar({
@@ -26,10 +29,13 @@ export function ChartToolbar({
   activeIndicators,
   onIndicatorToggle,
   onClearDrawings,
+  onDeleteSelected,
+  hasSelection,
 }: ChartToolbarProps) {
   const [showIndicators, setShowIndicators] = useState(false);
 
   const tools: Array<{ id: DrawingTool; icon: any; label: string }> = [
+    { id: 'select', icon: MousePointer, label: 'Select' },
     { id: 'trendline', icon: TrendingUp, label: 'Trend Line' },
     { id: 'horizontal', icon: Minus, label: 'Horizontal Line' },
     { id: 'rectangle', icon: Square, label: 'Rectangle' },
@@ -66,8 +72,20 @@ export function ChartToolbar({
           );
         })}
         <button
+          onClick={onDeleteSelected}
+          disabled={!hasSelection}
+          className={`ml-2 px-3 py-1 text-xs rounded ${
+            hasSelection
+              ? 'bg-orange-50 text-orange-600 hover:bg-orange-100'
+              : 'bg-gray-50 text-gray-400 cursor-not-allowed'
+          }`}
+          title={hasSelection ? 'Delete selected drawing (Delete/Backspace)' : 'No drawing selected'}
+        >
+          Delete Selected
+        </button>
+        <button
           onClick={onClearDrawings}
-          className="ml-2 px-3 py-1 text-xs bg-red-50 text-red-600 rounded hover:bg-red-100"
+          className="px-3 py-1 text-xs bg-red-50 text-red-600 rounded hover:bg-red-100"
         >
           Clear All
         </button>
@@ -120,7 +138,12 @@ export function ChartToolbar({
 
       {/* Info */}
       <div className="ml-auto text-xs text-gray-500">
-        {activeTool !== 'none' && (
+        {activeTool === 'select' && (
+          <span className="text-blue-600 font-medium">
+            Click on a drawing to select it
+          </span>
+        )}
+        {activeTool !== 'none' && activeTool !== 'select' && (
           <span className="text-blue-600 font-medium">
             Click on chart to draw {tools.find(t => t.id === activeTool)?.label}
           </span>

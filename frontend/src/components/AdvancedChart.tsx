@@ -33,6 +33,9 @@ export function AdvancedChart() {
   // Initialize drawing functionality
   const {
     clearDrawings,
+    deleteSelectedDrawing,
+    selectedDrawingId,
+    isHoveringSelected,
     handleMouseDown,
     handleMouseMove,
     handleMouseUp,
@@ -300,6 +303,26 @@ export function AdvancedChart() {
     };
   }, []);
 
+  // Keyboard shortcuts
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      // Delete/Backspace to delete selected drawing
+      if ((e.key === 'Delete' || e.key === 'Backspace') && selectedDrawingId) {
+        e.preventDefault();
+        console.log('🗑️ Deleting selected drawing via keyboard');
+        deleteSelectedDrawing();
+      }
+      // Escape to exit drawing/select mode
+      if (e.key === 'Escape' && activeTool !== 'none') {
+        console.log('⎋ Exiting tool mode via Escape key');
+        setActiveTool('none');
+      }
+    };
+
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [selectedDrawingId, activeTool, deleteSelectedDrawing]);
+
   return (
     <div className="w-full">
       <ChartToolbar
@@ -308,6 +331,8 @@ export function AdvancedChart() {
         activeIndicators={activeIndicators}
         onIndicatorToggle={handleIndicatorToggle}
         onClearDrawings={handleClearDrawings}
+        onDeleteSelected={deleteSelectedDrawing}
+        hasSelection={!!selectedDrawingId}
       />
       <div
         className="relative"
@@ -338,7 +363,9 @@ export function AdvancedChart() {
           style={{
             width: '100%',
             height: '600px',
-            cursor: activeTool !== 'none' ? 'crosshair' : 'default',
+            cursor: activeTool === 'select' && isHoveringSelected ? 'move' :
+                    (activeTool === 'select' ? 'pointer' :
+                    (activeTool !== 'none' ? 'crosshair' : 'default')),
             pointerEvents: activeTool !== 'none' ? 'auto' : 'none',
             zIndex: 100,
             border: activeTool !== 'none' ? '2px dashed red' : 'none',
