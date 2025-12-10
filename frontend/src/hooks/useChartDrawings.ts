@@ -1,4 +1,4 @@
-import { useRef, useEffect, useState } from 'react';
+import { useRef, useEffect, useState, useCallback } from 'react';
 import type { DrawingTool } from '../components/ChartToolbar';
 
 export interface Point {
@@ -17,71 +17,77 @@ export interface Drawing {
 
 interface UseChartDrawingsProps {
   chartRef: React.MutableRefObject<any>;
+  canvasRef: React.MutableRefObject<HTMLCanvasElement | null>;
   activeTool: DrawingTool;
   onToolComplete?: () => void;
 }
 
-export function useChartDrawings({ chartRef, activeTool, onToolComplete }: UseChartDrawingsProps) {
-  const canvasRef = useRef<HTMLCanvasElement | null>(null);
+export function useChartDrawings({ chartRef, canvasRef, activeTool, onToolComplete }: UseChartDrawingsProps) {
   const [drawings, setDrawings] = useState<Drawing[]>([]);
   const [currentDrawing, setCurrentDrawing] = useState<Point[]>([]);
   const [isDrawing, setIsDrawing] = useState(false);
 
-  const getChartCoordinates = (event: MouseEvent, canvas: HTMLCanvasElement) => {
+  // Use refs to track current values without causing re-renders
+  const activeToolRef = useRef(activeTool);
+  const isDrawingRef = useRef(isDrawing);
+  const currentDrawingRef = useRef(currentDrawing);
+
+  // Keep refs in sync with state
+  useEffect(() => {
+    activeToolRef.current = activeTool;
+  }, [activeTool]);
+
+  useEffect(() => {
+    isDrawingRef.current = isDrawing;
+  }, [isDrawing]);
+
+  useEffect(() => {
+    currentDrawingRef.current = currentDrawing;
+  }, [currentDrawing]);
+
+  const getChartCoordinates = useCallback((event: MouseEvent, canvas: HTMLCanvasElement) => {
     const rect = canvas.getBoundingClientRect();
     const x = event.clientX - rect.left;
     const y = event.clientY - rect.top;
 
-    // Try to convert to price and time if chart is available
-    let price, time;
-    try {
-      if (chartRef.current) {
-        const timeScale = chartRef.current.timeScale();
-        const priceScale = chartRef.current.priceScale();
+    return { x, y };
+  }, []);
 
-        time = timeScale.coordinateToTime(x);
-        price = priceScale.coordinateToPrice(y);
-      }
-    } catch (e) {
-      // If conversion fails, just use pixel coordinates
-    }
-
-    return { x, y, price, time };
-  };
-
-  const handleMouseDown = (event: MouseEvent) => {
-    if (activeTool === 'none' || !canvasRef.current) return;
+  const handleMouseDown = useCallback((event: MouseEvent) => {
+    console.log('handleMouseDown called', { activeTool: activeToolRef.current, hasCanvas: !!canvasRef.current });
+    if (activeToolRef.current === 'none' || !canvasRef.current) return;
 
     const point = getChartCoordinates(event, canvasRef.current);
+    console.log('Drawing started at:', point);
     setCurrentDrawing([point]);
     setIsDrawing(true);
-  };
+  }, []);
 
-  const handleMouseMove = (event: MouseEvent) => {
-    if (!isDrawing || activeTool === 'none' || !canvasRef.current) return;
+  const handleMouseMove = useCallback((event: MouseEvent) => {
+    if (!isDrawingRef.current || activeToolRef.current === 'none' || !canvasRef.current) return;
 
     const point = getChartCoordinates(event, canvasRef.current);
     setCurrentDrawing((prev) => {
       // For most tools, we only need start and end point
       if (prev.length === 0) return [point];
-      if (activeTool === 'trendline' || activeTool === 'horizontal' ||
-          activeTool === 'rectangle' || activeTool === 'fibonacci' ||
-          activeTool === 'riskReward') {
+      if (activeToolRef.current === 'trendline' || activeToolRef.current === 'horizontal' ||
+          activeToolRef.current === 'rectangle' || activeToolRef.current === 'fibonacci' ||
+          activeToolRef.current === 'riskReward') {
         return [prev[0], point];
       }
       return [...prev, point];
     });
-  };
+  }, []);
 
-  const handleMouseUp = () => {
-    if (!isDrawing || activeTool === 'none') return;
+  const handleMouseUp = useCallback(() => {
+    if (!isDrawingRef.current || activeToolRef.current === 'none') return;
 
-    if (currentDrawing.length >= 2) {
+    if (currentDrawingRef.current.length >= 2) {
       const newDrawing: Drawing = {
         id: `drawing-${Date.now()}-${Math.random()}`,
-        type: activeTool,
-        points: currentDrawing,
-        color: getDrawingColor(activeTool),
+        type: activeToolRef.current,
+        points: currentDrawingRef.current,
+        color: getDrawingColor(activeToolRef.current),
       };
       setDrawings((prev) => [...prev, newDrawing]);
     }
@@ -89,9 +95,9 @@ export function useChartDrawings({ chartRef, activeTool, onToolComplete }: UseCh
     setCurrentDrawing([]);
     setIsDrawing(false);
     onToolComplete?.();
-  };
+  }, [onToolComplete]);
 
-  const getDrawingColor = (tool: DrawingTool): string => {
+  const getDrawingColor = useCallback((tool: DrawingTool): string => {
     switch (tool) {
       case 'trendline': return '#2962FF';
       case 'horizontal': return '#FF6D00';
@@ -100,7 +106,7 @@ export function useChartDrawings({ chartRef, activeTool, onToolComplete }: UseCh
       case 'riskReward': return '#F44336';
       default: return '#000000';
     }
-  };
+  }, []);
 
   const drawLine = (ctx: CanvasRenderingContext2D, p1: Point, p2: Point, color: string, width = 2) => {
     ctx.strokeStyle = color;
@@ -198,7 +204,9 @@ export function useChartDrawings({ chartRef, activeTool, onToolComplete }: UseCh
   const renderDrawing = (ctx: CanvasRenderingContext2D, drawing: Drawing) => {
     if (drawing.points.length < 2) return;
 
-    const [p1, p2] = drawing.points;
+    // Use pixel coordinates directly
+    const p1 = drawing.points[0];
+    const p2 = drawing.points[1];
     const color = drawing.color || '#000000';
 
     switch (drawing.type) {
@@ -234,12 +242,12 @@ export function useChartDrawings({ chartRef, activeTool, onToolComplete }: UseCh
     drawings.forEach((drawing) => renderDrawing(ctx, drawing));
 
     // Draw current drawing in progress
-    if (currentDrawing.length >= 2) {
+    if (currentDrawingRef.current.length >= 2) {
       const tempDrawing: Drawing = {
         id: 'temp',
-        type: activeTool,
-        points: currentDrawing,
-        color: getDrawingColor(activeTool),
+        type: activeToolRef.current,
+        points: currentDrawingRef.current,
+        color: getDrawingColor(activeToolRef.current),
       };
       renderDrawing(ctx, tempDrawing);
     }
@@ -255,7 +263,6 @@ export function useChartDrawings({ chartRef, activeTool, onToolComplete }: UseCh
   };
 
   return {
-    canvasRef,
     drawings,
     clearDrawings,
     handleMouseDown,

@@ -28,16 +28,17 @@ export function AdvancedChart() {
   const visibleCandles = candles.slice(0, currentIndex + 1);
 
   const isFirstLoadRef = useRef(true);
+  const canvasRef = useRef<HTMLCanvasElement | null>(null); // Create canvas ref here, not in hook
 
   // Initialize drawing functionality
   const {
-    canvasRef,
     clearDrawings,
     handleMouseDown,
     handleMouseMove,
     handleMouseUp,
   } = useChartDrawings({
     chartRef,
+    canvasRef, // Pass the ref to the hook
     activeTool,
     onToolComplete: () => setActiveTool('none'),
   });
@@ -211,12 +212,22 @@ export function AdvancedChart() {
     setActiveTool('none');
   };
 
-  // Set up canvas overlay when chart is ready
+  // Set up canvas size when chart is ready
   useEffect(() => {
-    if (!chartContainerRef.current || !canvasRef.current) return;
+    if (!chartContainerRef.current || !canvasRef.current) {
+      console.log('⚠️ Canvas setup skipped - refs not ready:', {
+        hasChartContainer: !!chartContainerRef.current,
+        hasCanvas: !!canvasRef.current
+      });
+      return;
+    }
 
     const canvas = canvasRef.current;
     const container = chartContainerRef.current;
+
+    console.log('✅ Setting up canvas - ONCE ONLY');
+    console.log('Canvas element:', canvas);
+    console.log('Canvas computed style:', window.getComputedStyle(canvas));
 
     // Match canvas size to chart container
     const resizeCanvas = () => {
@@ -224,7 +235,14 @@ export function AdvancedChart() {
       canvas.width = rect.width;
       canvas.height = 600;
 
-      console.log('Canvas resized:', { width: canvas.width, height: canvas.height });
+      const canvasRect = canvas.getBoundingClientRect();
+      console.log('📐 Canvas resized:', {
+        width: canvas.width,
+        height: canvas.height,
+        canvasRect,
+        pointerEvents: canvas.style.pointerEvents,
+        zIndex: canvas.style.zIndex
+      });
     };
 
     // Initial resize
@@ -232,18 +250,55 @@ export function AdvancedChart() {
 
     window.addEventListener('resize', resizeCanvas);
 
-    // Add mouse event listeners
-    canvas.addEventListener('mousedown', handleMouseDown);
-    canvas.addEventListener('mousemove', handleMouseMove);
-    canvas.addEventListener('mouseup', handleMouseUp);
+    return () => {
+      console.log('🧹 Cleaning up resize listener ONLY');
+      window.removeEventListener('resize', resizeCanvas);
+    };
+  }, []); // Empty dependency array - only run once!
+
+  // Log when activeTool changes
+  useEffect(() => {
+    console.log('🎨 Active tool changed to:', activeTool);
+    console.log('Canvas ref exists:', !!canvasRef.current);
+    if (canvasRef.current) {
+      const canvas = canvasRef.current;
+      console.log('Canvas pointer events:', canvas.style.pointerEvents);
+      console.log('Canvas cursor:', canvas.style.cursor);
+      console.log('Canvas position in DOM:', canvas.getBoundingClientRect());
+
+      // Test if canvas is actually in the DOM and visible
+      const isInDOM = document.body.contains(canvas);
+      const rect = canvas.getBoundingClientRect();
+      const isVisible = rect.width > 0 && rect.height > 0;
+      console.log('Canvas in DOM:', isInDOM, 'Visible:', isVisible);
+    }
+  }, [activeTool]);
+
+  // Test handler attachment on mount
+  useEffect(() => {
+    if (!canvasRef.current) return;
+
+    console.log('🧪 Testing canvas event handling...');
+    const canvas = canvasRef.current;
+
+    // Add a direct test listener
+    const testClick = (e: MouseEvent) => {
+      console.log('🎯 DIRECT addEventListener CLICK detected!', {
+        x: e.clientX,
+        y: e.clientY,
+        target: e.target,
+        currentTarget: e.currentTarget
+      });
+    };
+
+    canvas.addEventListener('click', testClick, { capture: true });
+    console.log('Test listener attached to canvas');
 
     return () => {
-      window.removeEventListener('resize', resizeCanvas);
-      canvas.removeEventListener('mousedown', handleMouseDown);
-      canvas.removeEventListener('mousemove', handleMouseMove);
-      canvas.removeEventListener('mouseup', handleMouseUp);
+      canvas.removeEventListener('click', testClick, { capture: true });
+      console.log('Test listener removed');
     };
-  }, [handleMouseDown, handleMouseMove, handleMouseUp]);
+  }, []);
 
   return (
     <div className="w-full">
@@ -254,19 +309,66 @@ export function AdvancedChart() {
         onIndicatorToggle={handleIndicatorToggle}
         onClearDrawings={handleClearDrawings}
       />
-      <div className="relative" style={{ width: '100%', height: '600px' }}>
-        <div ref={chartContainerRef} className="w-full h-full" />
+      <div
+        className="relative"
+        style={{
+          width: '100%',
+          height: '600px',
+          pointerEvents: activeTool !== 'none' ? 'none' : 'auto', // Disable parent when drawing
+        }}
+        onClick={() => console.log('🔴 PARENT CONTAINER clicked!')}
+      >
+        <div
+          ref={chartContainerRef}
+          style={{
+            position: 'absolute',
+            top: 0,
+            left: 0,
+            width: '100%',
+            height: '600px',
+            pointerEvents: activeTool !== 'none' ? 'none' : 'auto', // Disable when drawing
+            zIndex: 1, // Below canvas (which is zIndex: 100)
+          }}
+          onClick={() => console.log('🟡 CHART CONTAINER clicked!')}
+        />
         {/* Canvas overlay for drawings */}
         <canvas
           ref={canvasRef}
-          className="absolute top-0 left-0 w-full h-full"
+          className="absolute top-0 left-0"
           style={{
+            width: '100%',
+            height: '600px',
             cursor: activeTool !== 'none' ? 'crosshair' : 'default',
-            pointerEvents: 'auto',
+            pointerEvents: activeTool !== 'none' ? 'auto' : 'none',
+            zIndex: 100,
+            border: activeTool !== 'none' ? '2px dashed red' : 'none',
+            backgroundColor: activeTool !== 'none' ? 'rgba(255, 0, 0, 0.05)' : 'transparent',
+            touchAction: 'none', // Prevent touch scrolling
+          }}
+          onMouseDown={(e) => {
+            console.log('🖱️ React onMouseDown fired! Active tool:', activeTool, 'Event:', e);
+            e.preventDefault();
+            e.stopPropagation();
+            handleMouseDown(e.nativeEvent);
+          }}
+          onMouseMove={(e) => {
+            console.log('🖱️ React onMouseMove fired!');
+            handleMouseMove(e.nativeEvent);
+          }}
+          onMouseUp={(e) => {
+            console.log('🖱️ React onMouseUp fired!');
+            e.preventDefault();
+            e.stopPropagation();
+            handleMouseUp();
+          }}
+          onClick={(e) => {
+            console.log('🖱️ Canvas CLICK! Active tool:', activeTool, 'Event:', e);
+            e.preventDefault();
+            e.stopPropagation();
           }}
         />
         {activeTool !== 'none' && (
-          <div className="absolute top-2 right-2 bg-blue-50 border border-blue-200 rounded px-3 py-2 text-sm z-10">
+          <div className="absolute top-2 right-2 bg-blue-50 border border-blue-200 rounded px-3 py-2 text-sm" style={{ zIndex: 200 }}>
             <strong>Drawing Mode:</strong> {activeTool}
             <button
               onClick={() => setActiveTool('none')}
