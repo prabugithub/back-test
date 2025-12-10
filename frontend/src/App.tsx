@@ -1,6 +1,6 @@
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { InstrumentSelector } from './components/InstrumentSelector';
-import { CandlestickChart } from './components/CandlestickChart';
+import { AdvancedChart } from './components/AdvancedChart';
 import { PlaybackControls } from './components/PlaybackControls';
 import { TradingPanel } from './components/TradingPanel';
 import { SessionStats } from './components/SessionStats';
@@ -56,8 +56,8 @@ function App() {
             /* Backtesting View */
             <div className="space-y-6">
               {/* Chart Section */}
-              <div className="bg-white rounded-lg shadow-sm p-4">
-                <CandlestickChart />
+              <div className="bg-white rounded-lg shadow-sm overflow-hidden">
+                <AdvancedChart />
               </div>
 
               {/* Controls */}

@@ -15,7 +15,8 @@
       "Bash(npm run dev:*)",
       "Bash(netstat:*)",
       "Bash(findstr:*)",
-      "Bash(taskkill //F //PID 49188)"
+      "Bash(taskkill //F //PID 49188)",
+      "Bash(git add:*)"
     ]
   }
 }
