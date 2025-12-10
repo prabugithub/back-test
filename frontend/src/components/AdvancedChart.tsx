@@ -5,17 +5,13 @@ import {
   CandlestickSeries,
   HistogramSeries,
   LineSeries,
-  LineStyle,
 } from 'lightweight-charts';
 import { useSessionStore } from '../stores/sessionStore';
-import { ChartToolbar, DrawingTool, Indicator } from './ChartToolbar';
-import { calculateSMA, calculateEMA, calculateFibonacciLevels } from '../utils/indicators';
-
-interface Drawing {
-  id: string;
-  type: DrawingTool;
-  data: any;
-}
+import { ChartToolbar } from './ChartToolbar';
+import type { DrawingTool } from './ChartToolbar';
+import type { Indicator } from './ChartToolbar';
+import { calculateSMA, calculateEMA } from '../utils/indicators';
+import { useChartDrawings } from '../hooks/useChartDrawings';
 
 export function AdvancedChart() {
   const chartContainerRef = useRef<HTMLDivElement>(null);
@@ -26,14 +22,25 @@ export function AdvancedChart() {
 
   const [activeTool, setActiveTool] = useState<DrawingTool>('none');
   const [activeIndicators, setActiveIndicators] = useState<Indicator[]>([]);
-  const [drawings, setDrawings] = useState<Drawing[]>([]);
-  const [drawingInProgress, setDrawingInProgress] = useState<any>(null);
 
   const candles = useSessionStore((s) => s.candles);
   const currentIndex = useSessionStore((s) => s.currentIndex);
   const visibleCandles = candles.slice(0, currentIndex + 1);
 
   const isFirstLoadRef = useRef(true);
+
+  // Initialize drawing functionality
+  const {
+    canvasRef,
+    clearDrawings,
+    handleMouseDown,
+    handleMouseMove,
+    handleMouseUp,
+  } = useChartDrawings({
+    chartRef,
+    activeTool,
+    onToolComplete: () => setActiveTool('none'),
+  });
 
   // Initialize chart
   useEffect(() => {
@@ -200,13 +207,43 @@ export function AdvancedChart() {
   };
 
   const handleClearDrawings = () => {
-    setDrawings([]);
+    clearDrawings();
     setActiveTool('none');
   };
 
-  // Note: Full drawing implementation requires canvas overlay or chart plugin
-  // This is a simplified version showing the UI structure
-  // For production, you'd need to implement mouse event handlers and drawing logic
+  // Set up canvas overlay when chart is ready
+  useEffect(() => {
+    if (!chartContainerRef.current || !canvasRef.current) return;
+
+    const canvas = canvasRef.current;
+    const container = chartContainerRef.current;
+
+    // Match canvas size to chart container
+    const resizeCanvas = () => {
+      const rect = container.getBoundingClientRect();
+      canvas.width = rect.width;
+      canvas.height = 600;
+
+      console.log('Canvas resized:', { width: canvas.width, height: canvas.height });
+    };
+
+    // Initial resize
+    setTimeout(resizeCanvas, 100);
+
+    window.addEventListener('resize', resizeCanvas);
+
+    // Add mouse event listeners
+    canvas.addEventListener('mousedown', handleMouseDown);
+    canvas.addEventListener('mousemove', handleMouseMove);
+    canvas.addEventListener('mouseup', handleMouseUp);
+
+    return () => {
+      window.removeEventListener('resize', resizeCanvas);
+      canvas.removeEventListener('mousedown', handleMouseDown);
+      canvas.removeEventListener('mousemove', handleMouseMove);
+      canvas.removeEventListener('mouseup', handleMouseUp);
+    };
+  }, [handleMouseDown, handleMouseMove, handleMouseUp]);
 
   return (
     <div className="w-full">
@@ -217,10 +254,19 @@ export function AdvancedChart() {
         onIndicatorToggle={handleIndicatorToggle}
         onClearDrawings={handleClearDrawings}
       />
-      <div className="relative">
-        <div ref={chartContainerRef} className="w-full" />
+      <div className="relative" style={{ width: '100%', height: '600px' }}>
+        <div ref={chartContainerRef} className="w-full h-full" />
+        {/* Canvas overlay for drawings */}
+        <canvas
+          ref={canvasRef}
+          className="absolute top-0 left-0 w-full h-full"
+          style={{
+            cursor: activeTool !== 'none' ? 'crosshair' : 'default',
+            pointerEvents: 'auto',
+          }}
+        />
         {activeTool !== 'none' && (
-          <div className="absolute top-2 right-2 bg-blue-50 border border-blue-200 rounded px-3 py-2 text-sm">
+          <div className="absolute top-2 right-2 bg-blue-50 border border-blue-200 rounded px-3 py-2 text-sm z-10">
             <strong>Drawing Mode:</strong> {activeTool}
             <button
               onClick={() => setActiveTool('none')}

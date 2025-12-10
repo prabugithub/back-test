@@ -16,7 +16,8 @@
       "Bash(netstat:*)",
       "Bash(findstr:*)",
       "Bash(taskkill //F //PID 49188)",
-      "Bash(git add:*)"
+      "Bash(git add:*)",
+      "Bash(git commit -m \"$(cat <<''EOF''\nfeat: add advanced charting with technical indicators and drawing tools\n\n## New Features\n\n### Technical Indicators\n- Added SMA 20/50 (Simple Moving Average)\n- Added EMA 20/50 (Exponential Moving Average)\n- Indicators toggle via toolbar\n- Client-side calculation for performance\n- Color-coded indicator lines\n\n### Drawing Tools Framework\n- Trend line tool for support/resistance\n- Horizontal line for key price levels\n- Rectangle tool for zones\n- Fibonacci retracement levels\n- Risk/Reward ratio visualizer\n- Clear all drawings button\n\n### Chart Enhancements\n- New ChartToolbar component with tool selection\n- AdvancedChart component replacing CandlestickChart\n- Indicator calculation utilities\n- Better chart organization and structure\n\n### Documentation\n- ANGEL_ONE_TOKENS.md - Comprehensive token reference for stocks/indices\n- FEATURES.md - Complete feature documentation\n- Updated App.tsx to use AdvancedChart\n\n## Technical Details\n- Implemented indicator calculation algorithms (SMA, EMA, Fibonacci)\n- Created reusable ChartToolbar component\n- Added drawing tool state management\n- Optimized for smooth performance\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nCo-Authored-By: Claude Sonnet 4.5 <noreply@anthropic.com>\nEOF\n)\")"
     ]
   }
 }
