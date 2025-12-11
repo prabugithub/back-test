@@ -11,12 +11,12 @@ export interface Symbol {
 }
 
 export const SYMBOLS: Symbol[] = [
-  // Indices
-  { token: '99926000', name: 'Nifty 50', symbol: 'NIFTY', exchange: 'NSE_INDEX', instrumentType: 'INDEX', category: 'Index' },
-  { token: '99926009', name: 'Nifty Bank', symbol: 'BANKNIFTY', exchange: 'NSE_INDEX', instrumentType: 'INDEX', category: 'Index' },
-  { token: '99926037', name: 'Nifty Financial Services', symbol: 'FINNIFTY', exchange: 'NSE_INDEX', instrumentType: 'INDEX', category: 'Index' },
-  { token: '99926074', name: 'Nifty Midcap 50', symbol: 'NIFTYMIDCAP50', exchange: 'NSE_INDEX', instrumentType: 'INDEX', category: 'Index' },
-  { token: '99926013', name: 'Nifty IT', symbol: 'NIFTYIT', exchange: 'NSE_INDEX', instrumentType: 'INDEX', category: 'Index' },
+  // Indices - Using correct Angel One tokens for NSE indices
+  { token: '99926000', name: 'Nifty 50', symbol: 'NIFTY 50', exchange: 'NSE_FNO', instrumentType: 'INDEX', category: 'Index' },
+  { token: '99926009', name: 'Nifty Bank', symbol: 'NIFTY BANK', exchange: 'NSE_FNO', instrumentType: 'INDEX', category: 'Index' },
+  { token: '99926037', name: 'Nifty Financial Services', symbol: 'NIFTY FIN SERVICE', exchange: 'NSE_FNO', instrumentType: 'INDEX', category: 'Index' },
+  { token: '99926074', name: 'Nifty Midcap 50', symbol: 'NIFTY MID SELECT', exchange: 'NSE_FNO', instrumentType: 'INDEX', category: 'Index' },
+  { token: '99926013', name: 'Nifty IT', symbol: 'NIFTY IT', exchange: 'NSE_FNO', instrumentType: 'INDEX', category: 'Index' },
 
   // Nifty 50 Stocks - Banking & Financial Services
   { token: '3045', name: 'State Bank of India', symbol: 'SBIN', exchange: 'NSE_EQ', instrumentType: 'EQUITY', category: 'Banking' },
