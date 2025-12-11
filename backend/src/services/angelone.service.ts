@@ -144,6 +144,7 @@ export async function fetchHistoricalCandles(params: {
       '15': 'FIFTEEN_MINUTE',
       '30': 'THIRTY_MINUTE',
       '60': 'ONE_HOUR',
+      '1D': 'ONE_DAY',
     };
 
     const angelInterval = intervalMap[params.interval] || 'FIVE_MINUTE';
