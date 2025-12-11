@@ -96,10 +96,20 @@ async function fetchFromAngelOne(params: GetCandlesRequest): Promise<Candle[]> {
   const fromDateTime = `${params.fromDate} 09:15`;
   const toDateTime = `${params.toDate} 15:30`;
 
+  // Map exchange segment to Angel One exchange format
+  // NSE_EQ, NSE_FNO, NSE_INDEX all map to 'NSE'
+  // BSE_EQ maps to 'BSE'
+  let exchange = 'NSE';
+  if (params.exchangeSegment.startsWith('NSE')) {
+    exchange = 'NSE';
+  } else if (params.exchangeSegment.startsWith('BSE')) {
+    exchange = 'BSE';
+  }
+
   const candleData = await retryApiCall(() =>
     fetchHistoricalCandles({
       symbolToken: params.securityId,  // Using securityId as symbolToken
-      exchange: params.exchangeSegment === 'NSE_EQ' ? 'NSE' : params.exchangeSegment,
+      exchange: exchange,
       interval: params.interval,
       fromDate: fromDateTime,
       toDate: toDateTime,
