@@ -11,7 +11,7 @@ export interface Symbol {
 }
 
 export const SYMBOLS: Symbol[] = [
-  // Indices - Using correct Angel One tokens for NSE indices
+  // Indices - Using Yahoo Finance for historical data (FREE)
   { token: '99926000', name: 'Nifty 50', symbol: 'NIFTY 50', exchange: 'NSE_FNO', instrumentType: 'INDEX', category: 'Index' },
   { token: '99926009', name: 'Nifty Bank', symbol: 'NIFTY BANK', exchange: 'NSE_FNO', instrumentType: 'INDEX', category: 'Index' },
   { token: '99926037', name: 'Nifty Financial Services', symbol: 'NIFTY FIN SERVICE', exchange: 'NSE_FNO', instrumentType: 'INDEX', category: 'Index' },

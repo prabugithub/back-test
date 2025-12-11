@@ -1,5 +1,6 @@
 import { getDatabase, saveDatabase } from '../config/database';
 import { fetchHistoricalCandles, retryApiCall } from './angelone.service';
+import { shouldUseYahooFinance, fetchYahooHistoricalData } from './yahoo.service';
 import { Candle, GetCandlesRequest } from '../types';
 import { format } from 'date-fns';
 import logger from '../utils/logger';
@@ -87,10 +88,40 @@ function getCachedCandles(params: GetCandlesRequest): Candle[] {
 }
 
 /**
- * Fetch candles from Angel One API
- * Angel One expects dates in format: "YYYY-MM-DD HH:MM"
+ * Fetch candles from appropriate data source
+ * Uses Yahoo Finance for indices, Angel One for stocks
  */
 async function fetchFromAngelOne(params: GetCandlesRequest): Promise<Candle[]> {
+  // Check if this is an index that should use Yahoo Finance
+  if (shouldUseYahooFinance(params.securityId)) {
+    logger.info('Using Yahoo Finance for index data', { token: params.securityId });
+
+    const candleData = await fetchYahooHistoricalData({
+      token: params.securityId,
+      fromDate: params.fromDate,
+      toDate: params.toDate,
+      interval: params.interval,
+    });
+
+    // Convert to our Candle format
+    const candles: Candle[] = candleData.map((c) => ({
+      timestamp: c.timestamp,
+      open: c.open,
+      high: c.high,
+      low: c.low,
+      close: c.close,
+      volume: c.volume,
+    }));
+
+    // Sort by timestamp
+    candles.sort((a, b) => a.timestamp - b.timestamp);
+
+    return candles;
+  }
+
+  // Use Angel One for stocks
+  logger.info('Using Angel One for stock data', { token: params.securityId });
+
   // Angel One uses symbolToken instead of securityId
   // Format dates to Angel One format
   const fromDateTime = `${params.fromDate} 09:15`;

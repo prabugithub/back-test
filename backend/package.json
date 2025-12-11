@@ -24,7 +24,8 @@
     "smartapi-javascript": "^1.0.27",
     "sql.js": "^1.10.3",
     "uuid": "^13.0.0",
-    "winston": "^3.11.0"
+    "winston": "^3.11.0",
+    "yahoo-finance2": "^3.10.2"
   },
   "devDependencies": {
     "@types/cors": "^2.8.17",

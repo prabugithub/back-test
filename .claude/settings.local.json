@@ -22,7 +22,10 @@
       "Bash(cd:*)",
       "Bash(git commit:*)",
       "Bash(timeout 5 bash:*)",
-      "Bash(timeout 3 bash:*)"
+      "Bash(timeout 3 bash:*)",
+      "Bash(taskkill:*)",
+      "Bash(curl:*)",
+      "Bash(node:*)"
     ]
   }
 }
