@@ -2,7 +2,6 @@ import { useState, useEffect } from 'react';
 import { Play, Pause, ChevronLeft, ChevronRight, FastForward, CalendarClock, Calendar, Settings, X } from 'lucide-react';
 import { useSessionStore } from '../stores/sessionStore';
 import { formatTimestamp } from '../utils/formatters';
-import { fetchCandles } from '../services/api';
 import { parseColumnarData, resampleCandles, type ColumnarData } from '../utils/resampler';
 
 // Dynamic import for local data
@@ -22,7 +21,6 @@ export function PlaybackControls({ onOpenHistory }: { onOpenHistory?: () => void
     jump,
     executeTrade,
     loadCandles,
-    instrument,
   } = useSessionStore();
 
   const [customJump, setCustomJump] = useState('10');
