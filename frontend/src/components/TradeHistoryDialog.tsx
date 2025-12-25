@@ -2,7 +2,7 @@ import { useRef, useEffect, useMemo, useState } from 'react';
 import { X, ChevronRight, ChevronDown } from 'lucide-react';
 import { useSessionStore } from '../stores/sessionStore';
 import { formatCurrency, formatTime } from '../utils/formatters';
-import { groupTradesIntoPositions, calculatePerformanceStats, GroupedPosition } from '../utils/tradeAnalysis';
+import { groupTradesIntoPositions, calculatePerformanceStats } from '../utils/tradeAnalysis';
 
 interface TradeHistoryDialogProps {
     isOpen: boolean;

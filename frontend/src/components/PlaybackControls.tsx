@@ -225,10 +225,10 @@ export function PlaybackControls({ onOpenHistory }: { onOpenHistory?: () => void
 
         <button
           onClick={onOpenHistory}
-          className="px-3 py-1.5 text-xs font-medium text-gray-600 bg-gray-50 hover:bg-gray-100 rounded border border-gray-200"
-          title="View Trade History"
+          className="px-3 py-1.5 text-xs font-bold text-blue-700 bg-blue-50 hover:bg-blue-100 rounded border border-blue-200"
+          title="View Trade History & Performance"
         >
-          History
+          Analysis
         </button>
         <button
           onClick={resetSession}

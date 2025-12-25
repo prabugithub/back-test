@@ -2,7 +2,7 @@ import { useState, useRef, useEffect } from 'react';
 import { useSessionStore } from '../stores/sessionStore';
 import { formatCurrency } from '../utils/formatters';
 
-export function PositionOverlay() {
+export function PositionOverlay({ onOpenDetail }: { onOpenDetail?: () => void }) {
     const position = useSessionStore((s) => s.position);
     const candles = useSessionStore((s) => s.candles);
     const currentIndex = useSessionStore((s) => s.currentIndex);
@@ -108,11 +108,21 @@ export function PositionOverlay() {
                     <span className="text-gray-600">Avg Price:</span>
                     <span className="font-medium">{formatCurrency(position.averagePrice)}</span>
                 </div>
-                <div className="flex justify-between text-sm mt-1">
-                    <span className="font-semibold text-gray-700">P&L:</span>
-                    <span className={`font-bold ${isProfit ? 'text-green-600' : 'text-red-600'}`}>
-                        {formatCurrency(unrealizedPnL)}
-                    </span>
+                <div className="flex justify-between text-sm mt-1 items-end">
+                    <div>
+                        <span className="font-semibold text-gray-700 block text-[10px] leading-tight mb-0.5">Unrealized P&L</span>
+                        <span className={`font-bold ${isProfit ? 'text-green-600' : 'text-red-600'}`}>
+                            {formatCurrency(unrealizedPnL)}
+                        </span>
+                    </div>
+                    {onOpenDetail && (
+                        <button
+                            onClick={(e) => { e.stopPropagation(); onOpenDetail(); }}
+                            className="text-[10px] text-blue-600 underline hover:text-blue-800"
+                        >
+                            Analysis
+                        </button>
+                    )}
                 </div>
             </div>
         </div>
