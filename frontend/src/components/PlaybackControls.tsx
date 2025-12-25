@@ -180,11 +180,14 @@ export function PlaybackControls({ onOpenHistory }: { onOpenHistory?: () => void
         <div className="font-medium text-gray-900 text-sm">
           {currentCandle ? formatTimestamp(currentCandle.timestamp) : '--'}
         </div>
-        <div className="w-64 bg-gray-200 rounded-full h-1.5 mt-1 overflow-hidden">
+        <div className="w-64 bg-gray-200 rounded-full h-1.5 mt-1 mb-0.5 overflow-hidden">
           <div
             className="bg-blue-500 h-full transition-all duration-200"
             style={{ width: `${progress}%` }}
           />
+        </div>
+        <div className="text-[10px] text-gray-400">
+          {currentIndex + 1} / {candles.length} Candles
         </div>
       </div>
 
