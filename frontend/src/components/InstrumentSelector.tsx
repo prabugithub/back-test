@@ -88,7 +88,18 @@ export function InstrumentSelector() {
             throw new Error('Invalid JSON data format: Missing required columns');
           }
 
-          const allCandles = parseColumnarData(rawData as ColumnarData);
+          let allCandles = parseColumnarData(rawData as ColumnarData);
+
+          // Filter by date range if provided
+          if (fromDate) {
+            const fromTs = new Date(fromDate).getTime() / 1000;
+            allCandles = allCandles.filter(c => c.timestamp >= fromTs);
+          }
+          if (toDate) {
+            // Add one day to include the end date fully
+            const toTs = (new Date(toDate).getTime() / 1000) + 86400;
+            allCandles = allCandles.filter(c => c.timestamp < toTs);
+          }
 
           // Determine timeframe in minutes
           let timeframeMinutes = 1;
@@ -358,6 +369,32 @@ export function InstrumentSelector() {
             <p className="mt-1 text-xs text-gray-500">
               The system will automatically aggregate the 1-minute data into your selected timeframe.
             </p>
+          </div>
+
+          <div className="grid grid-cols-2 gap-4">
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">
+                From Date
+              </label>
+              <input
+                type="date"
+                value={fromDate}
+                onChange={(e) => setFromDate(e.target.value)}
+                className="w-full px-3 py-2 border rounded focus:outline-none focus:ring-2 focus:ring-blue-500"
+              />
+            </div>
+
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">
+                To Date
+              </label>
+              <input
+                type="date"
+                value={toDate}
+                onChange={(e) => setToDate(e.target.value)}
+                className="w-full px-3 py-2 border rounded focus:outline-none focus:ring-2 focus:ring-blue-500"
+              />
+            </div>
           </div>
         </div>
       )}

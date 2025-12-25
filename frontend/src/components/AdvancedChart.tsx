@@ -51,7 +51,7 @@ export function AdvancedChart() {
 
     const chart = createChart(chartContainerRef.current, {
       width: chartContainerRef.current.clientWidth,
-      height: 600,
+      height: chartContainerRef.current.clientHeight,
       layout: {
         background: { type: ColorType.Solid, color: '#ffffff' },
         textColor: '#333',
@@ -106,6 +106,7 @@ export function AdvancedChart() {
       if (chartContainerRef.current && chartRef.current) {
         chartRef.current.applyOptions({
           width: chartContainerRef.current.clientWidth,
+          height: chartContainerRef.current.clientHeight,
         });
       }
     };
@@ -226,7 +227,7 @@ export function AdvancedChart() {
     const resizeCanvas = () => {
       const rect = container.getBoundingClientRect();
       canvas.width = rect.width;
-      canvas.height = 600;
+      canvas.height = rect.height;
     };
 
     // Initial resize
@@ -266,7 +267,7 @@ export function AdvancedChart() {
   }, [selectedDrawingId, activeTool, deleteSelectedDrawing]);
 
   return (
-    <div className="w-full">
+    <div className="w-full h-full flex flex-col">
       <ChartToolbar
         activeTool={activeTool}
         onToolChange={setActiveTool}
@@ -277,10 +278,10 @@ export function AdvancedChart() {
         hasSelection={!!selectedDrawingId}
       />
       <div
-        className="relative"
+        className="relative flex-1"
         style={{
           width: '100%',
-          height: '600px',
+          minHeight: '0', // Important for flex container
           pointerEvents: activeTool !== 'none' ? 'none' : 'auto', // Disable parent when drawing
         }}
       >
@@ -291,7 +292,7 @@ export function AdvancedChart() {
             top: 0,
             left: 0,
             width: '100%',
-            height: '600px',
+            height: '100%',
             pointerEvents: activeTool !== 'none' ? 'none' : 'auto', // Disable when drawing
             zIndex: 1, // Below canvas (which is zIndex: 100)
           }}
@@ -299,10 +300,8 @@ export function AdvancedChart() {
         {/* Canvas overlay for drawings */}
         <canvas
           ref={canvasRef}
-          className="absolute top-0 left-0"
+          className="absolute top-0 left-0 w-full h-full"
           style={{
-            width: '100%',
-            height: '600px',
             cursor: activeTool === 'select' && isHoveringSelected ? 'move' :
               (activeTool === 'select' ? 'pointer' :
                 (activeTool !== 'none' ? 'crosshair' : 'default')),

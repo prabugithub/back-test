@@ -10,92 +10,64 @@ const queryClient = new QueryClient();
 
 function App() {
   const candles = useSessionStore((s) => s.candles);
-  const resetSession = useSessionStore((s) => s.resetSession);
+  // const resetSession = useSessionStore((s) => s.resetSession);
 
   const hasData = candles.length > 0;
 
   return (
     <QueryClientProvider client={queryClient}>
-      <div className="min-h-screen bg-gray-100">
-        {/* Header */}
-        <header className="bg-white shadow-sm">
-          <div className="max-w-7xl mx-auto px-4 py-4">
-            <div className="flex items-center justify-between">
-              <h1 className="text-2xl font-bold text-gray-900">
-                Manual Backtesting System
-              </h1>
-              {hasData && (
-                <button
-                  onClick={resetSession}
-                  className="px-4 py-2 text-sm bg-gray-200 hover:bg-gray-300 rounded transition-colors"
-                >
-                  Reset Session
-                </button>
-              )}
-            </div>
-          </div>
-        </header>
-
-        {/* Main Content */}
-        <main className="max-w-7xl mx-auto px-4 py-6">
+      <div className="h-screen w-screen bg-gray-100 flex overflow-hidden">
+        {/* Main Content Area */}
+        <main className="flex-1 flex flex-col relative min-w-0">
           {!hasData ? (
-            /* Data Loading View */
-            <div className="max-w-2xl mx-auto">
-              <div className="mb-6 p-4 bg-blue-50 border border-blue-200 rounded-lg">
-                <h2 className="font-semibold text-blue-900 mb-2">
-                  Welcome to Manual Backtesting
-                </h2>
-                <p className="text-blue-800 text-sm">
-                  Load historical candle data to start backtesting. Enter the security ID,
-                  select the timeframe, and date range below.
-                </p>
+            <div className="flex-1 flex flex-col items-center justify-center p-8 bg-white">
+              <div className="max-w-2xl w-full">
+                <div className="mb-6 p-4 bg-blue-50 border border-blue-200 rounded-lg">
+                  <h2 className="font-semibold text-blue-900 mb-2">
+                    Welcome to Manual Backtesting
+                  </h2>
+                  <p className="text-blue-800 text-sm">
+                    Load historical candle data to start backtesting. Enter the security ID,
+                    select the timeframe, and date range below.
+                  </p>
+                </div>
+                <InstrumentSelector />
               </div>
-              <InstrumentSelector />
             </div>
           ) : (
-            /* Backtesting View */
-            <div className="space-y-6">
-              {/* Chart Section */}
-              <div className="bg-white rounded-lg shadow-sm overflow-hidden">
+            <div className="flex-1 flex flex-col relative h-full">
+              {/* Chart Area */}
+              <div className="flex-1 relative min-h-0">
                 <AdvancedChart />
               </div>
-
-              {/* Controls */}
-              <PlaybackControls />
-
-              {/* Trading and Stats Grid */}
-              <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-                {/* Trading Panel */}
-                <div className="md:col-span-1">
-                  <TradingPanel />
+              {/* Controls Bar */}
+              <div className="flex-none p-2 bg-white border-b z-10 flex gap-2 items-center">
+                <div className="flex-1">
+                  <PlaybackControls />
                 </div>
-
-                {/* Session Stats */}
-                <div className="md:col-span-2">
-                  <SessionStats />
-                </div>
-              </div>
-
-              {/* Load New Data Button */}
-              <div className="text-center">
+                {/* Compact Stats or Buttons could go here */}
                 <button
                   onClick={() => useSessionStore.getState().loadCandles([], '')}
-                  className="px-6 py-2 text-sm bg-gray-200 hover:bg-gray-300 rounded transition-colors"
+                  className="px-3 py-1 text-xs bg-gray-100 text-gray-600 hover:bg-gray-200 rounded"
                 >
-                  Load Different Data
+                  New Data
                 </button>
               </div>
             </div>
           )}
         </main>
 
-        {/* Footer */}
-        <footer className="mt-12 py-6 text-center text-sm text-gray-600">
-          <p>Manual Backtesting System - MVP v1.0</p>
-          <p className="mt-1">
-            Use keyboard shortcuts: Space (Play/Pause), ← → (Step)
-          </p>
-        </footer>
+        {/* Right Sidebar - Trading Panel */}
+        {hasData && (
+          <aside className="w-64 bg-white border-l shadow-lg z-20 flex flex-col">
+            <TradingPanel />
+
+            {/* Stats or other tools can be stacked here */}
+            <div className="border-t p-2 overflow-y-auto flex-1">
+              <SessionStats />
+            </div>
+          </aside>
+        )}
       </div>
     </QueryClientProvider>
   );

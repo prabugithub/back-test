@@ -18,6 +18,7 @@ interface SessionStore {
   play: () => void;
   pause: () => void;
   step: (direction: 'forward' | 'backward') => void;
+  jump: (count: number) => void;
   setSpeed: (speed: number) => void;
   setCurrentIndex: (index: number) => void;
   executeTrade: (type: 'BUY' | 'SELL', quantity: number) => void;
@@ -172,6 +173,18 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
     }
 
     return (currentCandle.close - position.averagePrice) * position.quantity;
+  },
+
+  jump: (count) => {
+    const { currentIndex, candles } = get();
+    const newIndex = currentIndex + count;
+    if (newIndex >= 0 && newIndex < candles.length) {
+      set({ currentIndex: newIndex });
+    } else if (newIndex < 0) {
+      set({ currentIndex: 0 });
+    } else {
+      set({ currentIndex: candles.length - 1 });
+    }
   },
 
   getRealizedPnL: () => {
