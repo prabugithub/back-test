@@ -90,35 +90,35 @@ export function PositionOverlay({ onOpenDetail }: { onOpenDetail?: () => void })
 
     return (
         <div
-            className="bg-white/95 backdrop-blur-sm border border-gray-300 shadow-xl rounded-lg p-3 z-[150] min-w-[200px] cursor-move select-none"
+            className="bg-white border-2 border-gray-400 shadow-2xl rounded-lg p-3 z-[150] min-w-[220px] cursor-move select-none"
             onMouseDown={handleMouseDown}
             style={style}
         >
-            <div className="flex justify-between items-center mb-2 border-b pb-1">
-                <span className={`text-xs font-bold px-1.5 py-0.5 rounded ${direction === 'LONG' ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-700'}`}>
+            <div className="flex justify-between items-center mb-2 border-b-2 border-gray-200 pb-2">
+                <span className={`text-xs font-bold px-2 py-1 rounded ${direction === 'LONG' ? 'bg-green-500 text-white' : 'bg-red-500 text-white'}`}>
                     {direction}
                 </span>
-                <span className="text-xs text-gray-500 font-mono">
+                <span className="text-xs text-gray-700 font-bold font-mono">
                     {absQty} Qty
                 </span>
             </div>
 
-            <div className="flex flex-col gap-1">
+            <div className="flex flex-col gap-1.5">
                 <div className="flex justify-between text-xs">
-                    <span className="text-gray-600">Avg Price:</span>
-                    <span className="font-medium">{formatCurrency(position.averagePrice)}</span>
+                    <span className="text-gray-600 font-medium">Avg Price:</span>
+                    <span className="font-bold text-gray-900">{formatCurrency(position.averagePrice)}</span>
                 </div>
                 <div className="flex justify-between text-sm mt-1 items-end">
                     <div>
-                        <span className="font-semibold text-gray-700 block text-[10px] leading-tight mb-0.5">Unrealized P&L</span>
-                        <span className={`font-bold ${isProfit ? 'text-green-600' : 'text-red-600'}`}>
+                        <span className="font-semibold text-gray-600 block text-[10px] leading-tight mb-0.5">Unrealized P&L</span>
+                        <span className={`font-bold text-base ${isProfit ? 'text-green-600' : 'text-red-600'}`}>
                             {formatCurrency(unrealizedPnL)}
                         </span>
                     </div>
                     {onOpenDetail && (
                         <button
                             onClick={(e) => { e.stopPropagation(); onOpenDetail(); }}
-                            className="text-[10px] text-blue-600 underline hover:text-blue-800"
+                            className="text-[10px] px-2 py-1 bg-blue-500 text-white rounded hover:bg-blue-600 font-semibold"
                         >
                             Analysis
                         </button>

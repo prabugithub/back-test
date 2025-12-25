@@ -14,9 +14,59 @@ export function TradeHistoryDialog({ isOpen, onClose }: TradeHistoryDialogProps)
     const dialogRef = useRef<HTMLDivElement>(null);
     const [expandedPosId, setExpandedPosId] = useState<string | null>(null);
 
+    // Drag state
+    const [offset, setOffset] = useState<{ x: number, y: number } | null>(null);
+    const isDragging = useRef(false);
+    const dragStart = useRef({ x: 0, y: 0 });
+    const startOffset = useRef({ x: 0, y: 0 });
+
     // Group trades and calculate stats
     const positions = useMemo(() => groupTradesIntoPositions(trades), [trades]);
     const stats = useMemo(() => calculatePerformanceStats(positions), [positions]);
+
+    const handleMouseDown = (e: React.MouseEvent) => {
+        // Only allow dragging from the header
+        if ((e.target as HTMLElement).closest('.dialog-header')) {
+            isDragging.current = true;
+            dragStart.current = { x: e.clientX, y: e.clientY };
+
+            const rect = dialogRef.current?.getBoundingClientRect();
+            if (rect) {
+                if (!offset) {
+                    startOffset.current = { x: rect.left, y: rect.top };
+                    setOffset({ x: rect.left, y: rect.top });
+                } else {
+                    startOffset.current = { x: offset.x, y: offset.y };
+                }
+            }
+        }
+    };
+
+    useEffect(() => {
+        const handleMouseMove = (e: MouseEvent) => {
+            if (!isDragging.current) return;
+
+            const dx = e.clientX - dragStart.current.x;
+            const dy = e.clientY - dragStart.current.y;
+
+            setOffset({
+                x: startOffset.current.x + dx,
+                y: startOffset.current.y + dy
+            });
+        };
+
+        const handleMouseUp = () => {
+            isDragging.current = false;
+        };
+
+        window.addEventListener('mousemove', handleMouseMove);
+        window.addEventListener('mouseup', handleMouseUp);
+
+        return () => {
+            window.removeEventListener('mousemove', handleMouseMove);
+            window.removeEventListener('mouseup', handleMouseUp);
+        };
+    }, []);
 
     useEffect(() => {
         function handleClickOutside(event: MouseEvent) {
@@ -34,17 +84,43 @@ export function TradeHistoryDialog({ isOpen, onClose }: TradeHistoryDialogProps)
 
     if (!isOpen) return null;
 
+    // Style object: use offset if dragged, otherwise centered
+    const dialogStyle: React.CSSProperties = offset ? {
+        left: `${offset.x}px`,
+        top: `${offset.y}px`,
+        position: 'fixed' as const,
+        margin: 0,
+        width: '1200px',
+        maxWidth: '90vw',
+        height: '85vh',
+        maxHeight: '85vh'
+    } : {
+        width: '1200px',
+        maxWidth: '90vw',
+        height: '85vh',
+        maxHeight: '85vh'
+    };
+
     return (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black bg-opacity-50">
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black bg-opacity-60">
             <div
                 ref={dialogRef}
-                className="bg-white rounded-lg shadow-xl w-full max-w-5xl max-h-[85vh] flex flex-col m-4"
+                onMouseDown={handleMouseDown}
+                className="bg-white rounded-lg shadow-2xl flex flex-col overflow-hidden border-2 border-gray-300"
+                style={dialogStyle}
             >
                 {/* Header */}
-                <div className="flex items-center justify-between p-4 border-b">
-                    <h2 className="text-xl font-bold text-gray-800">Trade Analysis</h2>
-                    <button onClick={onClose} className="p-1 hover:bg-gray-100 rounded text-gray-500">
-                        <X size={24} />
+                <div className="dialog-header flex items-center justify-between px-4 py-3 border-b-2 border-gray-200 cursor-move select-none bg-gradient-to-r from-blue-50 to-indigo-50">
+                    <div className="flex items-center gap-2">
+                        <div className="w-2 h-2 rounded-full bg-blue-500"></div>
+                        <h2 className="text-lg font-bold text-gray-800">Trade Analysis</h2>
+                    </div>
+                    <button
+                        onClick={onClose}
+                        className="p-1.5 hover:bg-red-100 rounded-md text-gray-600 hover:text-red-600 transition-colors"
+                        onMouseDown={(e) => e.stopPropagation()}
+                    >
+                        <X size={20} />
                     </button>
                 </div>
 
