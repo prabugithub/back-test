@@ -2,15 +2,18 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { InstrumentSelector } from './components/InstrumentSelector';
 import { AdvancedChart } from './components/AdvancedChart';
 import { PlaybackControls } from './components/PlaybackControls';
-import { TradingPanel } from './components/TradingPanel';
-import { SessionStats } from './components/SessionStats';
+
+// import { SessionStats } from './components/SessionStats'; // Now in dialog
+import { TradeHistoryDialog } from './components/TradeHistoryDialog';
+import { PositionOverlay } from './components/PositionOverlay';
 import { useSessionStore } from './stores/sessionStore';
+import { useState } from 'react';
 
 const queryClient = new QueryClient();
 
 function App() {
   const candles = useSessionStore((s) => s.candles);
-  // const resetSession = useSessionStore((s) => s.resetSession);
+  const [isTradeHistoryOpen, setIsTradeHistoryOpen] = useState(false);
 
   const hasData = candles.length > 0;
 
@@ -39,11 +42,19 @@ function App() {
               {/* Chart Area */}
               <div className="flex-1 relative min-h-0">
                 <AdvancedChart />
+                <PositionOverlay />
               </div>
+
+              {isTradeHistoryOpen && (
+                <TradeHistoryDialog
+                  isOpen={isTradeHistoryOpen}
+                  onClose={() => setIsTradeHistoryOpen(false)}
+                />
+              )}
               {/* Controls Bar */}
               <div className="flex-none p-2 bg-white border-b z-10 flex gap-2 items-center">
                 <div className="flex-1">
-                  <PlaybackControls />
+                  <PlaybackControls onOpenHistory={() => setIsTradeHistoryOpen(true)} />
                 </div>
                 {/* Compact Stats or Buttons could go here */}
                 <button
@@ -57,17 +68,7 @@ function App() {
           )}
         </main>
 
-        {/* Right Sidebar - Trading Panel */}
-        {hasData && (
-          <aside className="w-64 bg-white border-l shadow-lg z-20 flex flex-col">
-            <TradingPanel />
 
-            {/* Stats or other tools can be stacked here */}
-            <div className="border-t p-2 overflow-y-auto flex-1">
-              <SessionStats />
-            </div>
-          </aside>
-        )}
       </div>
     </QueryClientProvider>
   );

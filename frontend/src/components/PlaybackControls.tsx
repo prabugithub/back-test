@@ -3,7 +3,7 @@ import { Play, Pause, ChevronLeft, ChevronRight, FastForward, CalendarClock } fr
 import { useSessionStore } from '../stores/sessionStore';
 import { formatTimestamp } from '../utils/formatters';
 
-export function PlaybackControls() {
+export function PlaybackControls({ onOpenHistory }: { onOpenHistory?: () => void }) {
   const {
     isPlaying,
     speed,
@@ -208,6 +208,13 @@ export function PlaybackControls() {
           </button>
         </div>
 
+        <button
+          onClick={onOpenHistory}
+          className="px-3 py-1.5 text-xs font-medium text-gray-600 bg-gray-50 hover:bg-gray-100 rounded border border-gray-200"
+          title="View Trade History"
+        >
+          History
+        </button>
         <button
           onClick={resetSession}
           className="px-3 py-1.5 text-xs font-medium text-red-600 bg-red-50 hover:bg-red-100 rounded border border-red-200"
