@@ -16,10 +16,13 @@ A complete **Manual Backtesting System MVP** for Indian stock market with the fo
 
 2. **Frontend Web App (React + TypeScript + Vite)**
    - Visual candlestick charts using Lightweight Charts
+   - Advanced CHART functionality with Drawing Tools
+   - Technical Indicators (SMA, EMA)
    - Playback controls (Play/Pause/Step/Speed)
    - Manual trading interface (Buy/Sell buttons)
    - Real-time P&L tracking (Realized + Unrealized)
    - Session statistics with trade history
+   - Chart Drawing Tools (Trendline, Rectangle, Fibonacci, Risk/Reward)
    - Responsive UI with Tailwind CSS
    - Keyboard shortcuts for playback control
 
@@ -71,13 +74,16 @@ backend/
 frontend/
 ├── src/
 │   ├── components/
-│   │   ├── CandlestickChart.tsx     ✅ Chart display
+│   │   ├── AdvancedChart.tsx        ✅ Chart display with tools
+│   │   ├── ChartToolbar.tsx         ✅ Tools & Indicators UI
 │   │   ├── PlaybackControls.tsx     ✅ Play/Pause/Step controls
 │   │   ├── TradingPanel.tsx         ✅ Buy/Sell interface
 │   │   ├── SessionStats.tsx         ✅ P&L & trade history
 │   │   └── InstrumentSelector.tsx   ✅ Data loading form
 │   ├── stores/
 │   │   └── sessionStore.ts          ✅ Zustand state management
+│   ├── hooks/
+│   │   └── useChartDrawings.ts      ✅ Canvas drawing logic
 │   ├── services/
 │   │   └── api.ts                   ✅ Backend API client
 │   ├── types/
@@ -170,7 +176,6 @@ The current implementation uses the dhanhq npm package which may need adjustment
 - ❌ Multiple timeframe support (only 5-min is primary focus)
 - ❌ Timeframe switching during replay
 - ❌ Automated strategy backtesting
-- ❌ Technical indicators overlay
 - ❌ Limit orders, stop loss, take profit
 - ❌ Slippage modeling
 - ❌ Session persistence (save/load)

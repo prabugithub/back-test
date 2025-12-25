@@ -40,7 +40,6 @@ export function AdvancedChart() {
     handleMouseMove,
     handleMouseUp,
   } = useChartDrawings({
-    chartRef,
     canvasRef, // Pass the ref to the hook
     activeTool,
     onToolComplete: () => setActiveTool('none'),
@@ -218,34 +217,16 @@ export function AdvancedChart() {
   // Set up canvas size when chart is ready
   useEffect(() => {
     if (!chartContainerRef.current || !canvasRef.current) {
-      console.log('⚠️ Canvas setup skipped - refs not ready:', {
-        hasChartContainer: !!chartContainerRef.current,
-        hasCanvas: !!canvasRef.current
-      });
       return;
     }
 
     const canvas = canvasRef.current;
     const container = chartContainerRef.current;
 
-    console.log('✅ Setting up canvas - ONCE ONLY');
-    console.log('Canvas element:', canvas);
-    console.log('Canvas computed style:', window.getComputedStyle(canvas));
-
-    // Match canvas size to chart container
     const resizeCanvas = () => {
       const rect = container.getBoundingClientRect();
       canvas.width = rect.width;
       canvas.height = 600;
-
-      const canvasRect = canvas.getBoundingClientRect();
-      console.log('📐 Canvas resized:', {
-        width: canvas.width,
-        height: canvas.height,
-        canvasRect,
-        pointerEvents: canvas.style.pointerEvents,
-        zIndex: canvas.style.zIndex
-      });
     };
 
     // Initial resize
@@ -254,54 +235,17 @@ export function AdvancedChart() {
     window.addEventListener('resize', resizeCanvas);
 
     return () => {
-      console.log('🧹 Cleaning up resize listener ONLY');
       window.removeEventListener('resize', resizeCanvas);
     };
   }, []); // Empty dependency array - only run once!
 
   // Log when activeTool changes
   useEffect(() => {
-    console.log('🎨 Active tool changed to:', activeTool);
-    console.log('Canvas ref exists:', !!canvasRef.current);
-    if (canvasRef.current) {
-      const canvas = canvasRef.current;
-      console.log('Canvas pointer events:', canvas.style.pointerEvents);
-      console.log('Canvas cursor:', canvas.style.cursor);
-      console.log('Canvas position in DOM:', canvas.getBoundingClientRect());
-
-      // Test if canvas is actually in the DOM and visible
-      const isInDOM = document.body.contains(canvas);
-      const rect = canvas.getBoundingClientRect();
-      const isVisible = rect.width > 0 && rect.height > 0;
-      console.log('Canvas in DOM:', isInDOM, 'Visible:', isVisible);
-    }
+    // Only keeping this generic log if useful, but can remove
+    // console.log('🎨 Active tool changed to:', activeTool); 
   }, [activeTool]);
 
-  // Test handler attachment on mount
-  useEffect(() => {
-    if (!canvasRef.current) return;
 
-    console.log('🧪 Testing canvas event handling...');
-    const canvas = canvasRef.current;
-
-    // Add a direct test listener
-    const testClick = (e: MouseEvent) => {
-      console.log('🎯 DIRECT addEventListener CLICK detected!', {
-        x: e.clientX,
-        y: e.clientY,
-        target: e.target,
-        currentTarget: e.currentTarget
-      });
-    };
-
-    canvas.addEventListener('click', testClick, { capture: true });
-    console.log('Test listener attached to canvas');
-
-    return () => {
-      canvas.removeEventListener('click', testClick, { capture: true });
-      console.log('Test listener removed');
-    };
-  }, []);
 
   // Keyboard shortcuts
   useEffect(() => {
@@ -309,12 +253,10 @@ export function AdvancedChart() {
       // Delete/Backspace to delete selected drawing
       if ((e.key === 'Delete' || e.key === 'Backspace') && selectedDrawingId) {
         e.preventDefault();
-        console.log('🗑️ Deleting selected drawing via keyboard');
         deleteSelectedDrawing();
       }
       // Escape to exit drawing/select mode
       if (e.key === 'Escape' && activeTool !== 'none') {
-        console.log('⎋ Exiting tool mode via Escape key');
         setActiveTool('none');
       }
     };
@@ -341,7 +283,6 @@ export function AdvancedChart() {
           height: '600px',
           pointerEvents: activeTool !== 'none' ? 'none' : 'auto', // Disable parent when drawing
         }}
-        onClick={() => console.log('🔴 PARENT CONTAINER clicked!')}
       >
         <div
           ref={chartContainerRef}
@@ -354,7 +295,6 @@ export function AdvancedChart() {
             pointerEvents: activeTool !== 'none' ? 'none' : 'auto', // Disable when drawing
             zIndex: 1, // Below canvas (which is zIndex: 100)
           }}
-          onClick={() => console.log('🟡 CHART CONTAINER clicked!')}
         />
         {/* Canvas overlay for drawings */}
         <canvas
@@ -364,32 +304,26 @@ export function AdvancedChart() {
             width: '100%',
             height: '600px',
             cursor: activeTool === 'select' && isHoveringSelected ? 'move' :
-                    (activeTool === 'select' ? 'pointer' :
-                    (activeTool !== 'none' ? 'crosshair' : 'default')),
+              (activeTool === 'select' ? 'pointer' :
+                (activeTool !== 'none' ? 'crosshair' : 'default')),
             pointerEvents: activeTool !== 'none' ? 'auto' : 'none',
             zIndex: 100,
-            border: activeTool !== 'none' ? '2px dashed red' : 'none',
-            backgroundColor: activeTool !== 'none' ? 'rgba(255, 0, 0, 0.05)' : 'transparent',
             touchAction: 'none', // Prevent touch scrolling
           }}
           onMouseDown={(e) => {
-            console.log('🖱️ React onMouseDown fired! Active tool:', activeTool, 'Event:', e);
             e.preventDefault();
             e.stopPropagation();
             handleMouseDown(e.nativeEvent);
           }}
           onMouseMove={(e) => {
-            console.log('🖱️ React onMouseMove fired!');
             handleMouseMove(e.nativeEvent);
           }}
           onMouseUp={(e) => {
-            console.log('🖱️ React onMouseUp fired!');
             e.preventDefault();
             e.stopPropagation();
             handleMouseUp();
           }}
           onClick={(e) => {
-            console.log('🖱️ Canvas CLICK! Active tool:', activeTool, 'Event:', e);
             e.preventDefault();
             e.stopPropagation();
           }}

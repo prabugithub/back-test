@@ -16,13 +16,12 @@ export interface Drawing {
 }
 
 interface UseChartDrawingsProps {
-  chartRef: React.MutableRefObject<any>;
   canvasRef: React.MutableRefObject<HTMLCanvasElement | null>;
   activeTool: DrawingTool;
   onToolComplete?: () => void;
 }
 
-export function useChartDrawings({ chartRef, canvasRef, activeTool, onToolComplete }: UseChartDrawingsProps) {
+export function useChartDrawings({ canvasRef, activeTool, onToolComplete }: UseChartDrawingsProps) {
   const [drawings, setDrawings] = useState<Drawing[]>([]);
   const [currentDrawing, setCurrentDrawing] = useState<Point[]>([]);
   const [isDrawing, setIsDrawing] = useState(false);
@@ -149,8 +148,8 @@ export function useChartDrawings({ chartRef, canvasRef, activeTool, onToolComple
 
     // Check if near any of the 3 lines
     return Math.abs(point.y - entry) <= threshold ||
-           Math.abs(point.y - target) <= threshold ||
-           Math.abs(point.y - stopLoss) <= threshold;
+      Math.abs(point.y - target) <= threshold ||
+      Math.abs(point.y - stopLoss) <= threshold;
   };
 
   const isPointOnDrawing = (point: Point, drawing: Drawing): boolean => {
@@ -192,19 +191,14 @@ export function useChartDrawings({ chartRef, canvasRef, activeTool, onToolComple
   }, [selectedDrawingId]);
 
   const handleMouseDown = useCallback((event: MouseEvent) => {
-    console.log('handleMouseDown called', { activeTool: activeToolRef.current, hasCanvas: !!canvasRef.current });
     if (!canvasRef.current) return;
-
     const point = getChartCoordinates(event, canvasRef.current);
 
     // Handle selection mode
     if (activeToolRef.current === 'select') {
       const foundDrawing = findDrawingAtPoint(point, drawings);
       if (foundDrawing) {
-        // Check if clicking on already selected drawing - start dragging
         if (foundDrawing.id === selectedDrawingIdRef.current) {
-          console.log('Starting drag for selected drawing:', foundDrawing.id);
-          // Calculate offset from first point of drawing
           const firstPoint = foundDrawing.points[0];
           setDragOffset({
             x: point.x - firstPoint.x,
@@ -212,13 +206,10 @@ export function useChartDrawings({ chartRef, canvasRef, activeTool, onToolComple
           });
           setIsDragging(true);
         } else {
-          // Select new drawing
-          console.log('Selected drawing:', foundDrawing.id);
           setSelectedDrawingId(foundDrawing.id);
           setIsDragging(false);
         }
       } else {
-        console.log('Deselected - clicked empty area');
         setSelectedDrawingId(null);
         setIsDragging(false);
       }
@@ -232,7 +223,6 @@ export function useChartDrawings({ chartRef, canvasRef, activeTool, onToolComple
     setSelectedDrawingId(null);
     setIsDragging(false);
 
-    console.log('Drawing started at:', point);
     setCurrentDrawing([point]);
     setIsDrawing(true);
   }, [drawings, getChartCoordinates]);
@@ -244,7 +234,6 @@ export function useChartDrawings({ chartRef, canvasRef, activeTool, onToolComple
 
     // Handle dragging selected drawing
     if (isDraggingRef.current && activeToolRef.current === 'select' && selectedDrawingIdRef.current) {
-      console.log('Dragging drawing to:', point);
 
       setDrawings((prevDrawings) => {
         return prevDrawings.map((drawing) => {
@@ -290,8 +279,8 @@ export function useChartDrawings({ chartRef, canvasRef, activeTool, onToolComple
       // For most tools, we only need start and end point
       if (prev.length === 0) return [point];
       if (activeToolRef.current === 'trendline' || activeToolRef.current === 'horizontal' ||
-          activeToolRef.current === 'rectangle' || activeToolRef.current === 'fibonacci' ||
-          activeToolRef.current === 'riskReward') {
+        activeToolRef.current === 'rectangle' || activeToolRef.current === 'fibonacci' ||
+        activeToolRef.current === 'riskReward') {
         return [prev[0], point];
       }
       return [...prev, point];
@@ -300,8 +289,8 @@ export function useChartDrawings({ chartRef, canvasRef, activeTool, onToolComple
 
   const handleMouseUp = useCallback(() => {
     // Stop dragging if in drag mode
+    // Stop dragging if in drag mode
     if (isDraggingRef.current) {
-      console.log('Finished dragging');
       setIsDragging(false);
       return;
     }
@@ -379,7 +368,7 @@ export function useChartDrawings({ chartRef, canvasRef, activeTool, onToolComple
     });
   };
 
-  const drawRiskReward = (ctx: CanvasRenderingContext2D, p1: Point, p2: Point, color: string) => {
+  const drawRiskReward = (ctx: CanvasRenderingContext2D, p1: Point, p2: Point, _color: string) => {
     // Entry at p1, target at p2
     const entry = p1.y;
     const target = p2.y;
