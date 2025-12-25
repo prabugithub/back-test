@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { Play, Pause, ChevronLeft, ChevronRight, FastForward, CalendarClock, Calendar, Settings, X } from 'lucide-react';
+import { Play, Pause, ChevronLeft, ChevronRight, FastForward, CalendarClock, Settings, X } from 'lucide-react';
 import { useSessionStore } from '../stores/sessionStore';
 import { formatTimestamp } from '../utils/formatters';
 import { parseColumnarData, resampleCandles, type ColumnarData } from '../utils/resampler';
