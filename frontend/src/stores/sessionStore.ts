@@ -101,43 +101,81 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
       instrument,
     };
 
-    // Update position using FIFO logic
-    let newPosition = position ? { ...position } : {
-      instrument,
-      quantity: 0,
-      averagePrice: 0,
-      realizedPnL: 0,
-      unrealizedPnL: 0,
-    };
+    // Simplified Position Management allowing Long and Short
+    const currentQty = position ? position.quantity : 0;
+    const currentAvgPrice = position ? position.averagePrice : 0;
 
-    if (type === 'BUY') {
-      // Add to position
-      const totalCost = newPosition.quantity * newPosition.averagePrice + quantity * currentPrice;
-      const totalQuantity = newPosition.quantity + quantity;
-      newPosition.averagePrice = totalCost / totalQuantity;
-      newPosition.quantity = totalQuantity;
-    } else {
-      // SELL - reduce position
-      if (newPosition.quantity >= quantity) {
-        // Calculate realized P&L
-        const pnl = (currentPrice - newPosition.averagePrice) * quantity;
-        trade.pnl = pnl;
-        newPosition.realizedPnL += pnl;
-        newPosition.quantity -= quantity;
+    // Determine trade direction sign: Buy = +1, Sell = -1
+    const tradeSign = type === 'BUY' ? 1 : -1;
+    const tradeQtySigned = quantity * tradeSign;
 
-        // Reset average price if position closed
-        if (newPosition.quantity === 0) {
-          newPosition.averagePrice = 0;
-        }
-      } else {
-        console.error(`Cannot sell ${quantity} shares. Current position: ${newPosition.quantity}`);
-        return;
-      }
+    let newQty = currentQty + tradeQtySigned;
+    let newAvgPrice = currentAvgPrice;
+    let newRealizedPnL = position ? position.realizedPnL : 0;
+    let tradePnL = undefined;
+
+    // Logic:
+    // 1. Increasing position (Long->More Long OR Short->More Short OR Flat->Open)
+    // 2. Decreasing position (Long->Less Long OR Short->Less Short) -> Realize P&L
+    // 3. Flipping position (Long->Short OR Short->Long) -> Realize P&L on closed portion, Open new remaining
+
+    const isSameDirection = (currentQty >= 0 && tradeSign > 0) || (currentQty <= 0 && tradeSign < 0);
+
+    // Case 0: Opening from flat
+    if (currentQty === 0) {
+      newAvgPrice = currentPrice;
     }
+    // Case 1: Increasing Position (Adding to winner/loser)
+    else if (isSameDirection) {
+      const totalValue = (Math.abs(currentQty) * currentAvgPrice) + (quantity * currentPrice);
+      const totalShares = Math.abs(currentQty) + quantity;
+      newAvgPrice = totalValue / totalShares;
+    }
+    // Case 2 & 3: Reducing or Flipping
+    else {
+      // We are reducing the current position. 
+      // How much are we closing? 
+      // If current is +10 and we Sell 5 (qty=5, sign=-1), we close 5.
+      // If current is +10 and we Sell 20, we close 10, and open -10.
+
+      const qtyClosing = Math.min(Math.abs(currentQty), quantity);
+
+      // Calculate P&L on the closed portion
+      // Long Close: (Exit - Entry) * Qty
+      // Short Close: (Entry - Exit) * Qty
+      const pnlPerShare = currentQty > 0 ? (currentPrice - currentAvgPrice) : (currentAvgPrice - currentPrice);
+      const realizedParams = pnlPerShare * qtyClosing;
+
+      tradePnL = realizedParams; // P&L for this specific trade (or the closing portion of it)
+      newRealizedPnL += realizedParams;
+
+      // Check if we flipped
+      // remaining trade quantity after closing
+      const qtyRemaining = quantity - qtyClosing;
+
+      if (qtyRemaining > 0) {
+        // We flipped direction. New position is formed by the remainder.
+        // New Entry Price is current price.
+        newAvgPrice = currentPrice;
+      }
+      // If we didn't flip, we just reduced size. Avg Price stays same.
+      // (unless we closed fully, but then qty is 0, handled by generic check)
+    }
+
+    // Assign P&L to the trade record for display
+    trade.pnl = tradePnL;
+
+    const newPositionState: Position = {
+      instrument,
+      quantity: newQty,
+      averagePrice: newAvgPrice,
+      realizedPnL: newRealizedPnL,
+      unrealizedPnL: 0, // Recalculated by getter
+    };
 
     set({
       trades: [...trades, trade],
-      position: newPosition.quantity > 0 ? newPosition : null,
+      position: newQty !== 0 ? newPositionState : null, // If qty is 0, position is null/closed
     });
   },
 

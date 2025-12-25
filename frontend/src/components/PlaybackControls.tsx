@@ -20,6 +20,8 @@ export function PlaybackControls({ onOpenHistory }: { onOpenHistory?: () => void
 
 
   const [customJump, setCustomJump] = useState('10');
+  const [tradeQuantity, setTradeQuantity] = useState(65);
+
 
   const resetSession = useSessionStore((s) => s.resetSession);
 
@@ -189,23 +191,33 @@ export function PlaybackControls({ onOpenHistory }: { onOpenHistory?: () => void
       {/* Right: Quick Actions (Buy/Sell & Reset) */}
       <div className="flex items-center gap-4">
         {/* Mini Trading Buttons */}
-        <div className="flex items-center gap-1">
-          <button
-            onClick={() => executeTrade('BUY', 1)}
-            disabled={!currentCandle}
-            className="px-3 py-1 bg-green-600 text-white rounded text-xs font-bold hover:bg-green-700 disabled:opacity-50"
-            title="Buy 1 Qty"
-          >
-            BUY
-          </button>
-          <button
-            onClick={() => executeTrade('SELL', 1)}
-            disabled={!currentCandle}
-            className="px-3 py-1 bg-red-600 text-white rounded text-xs font-bold hover:bg-red-700 disabled:opacity-50"
-            title="Sell 1 Qty"
-          >
-            SELL
-          </button>
+        <div className="flex items-center gap-2">
+          <input
+            type="number"
+            min="1"
+            value={tradeQuantity}
+            onChange={(e) => setTradeQuantity(Math.max(1, parseInt(e.target.value) || 1))}
+            className="w-12 px-1 py-1 border rounded text-center text-xs font-medium"
+            title="Trade Quantity"
+          />
+          <div className="flex items-center gap-1">
+            <button
+              onClick={() => executeTrade('BUY', tradeQuantity)}
+              disabled={!currentCandle}
+              className="px-3 py-1 bg-green-600 text-white rounded text-xs font-bold hover:bg-green-700 disabled:opacity-50"
+              title={`Buy ${tradeQuantity}`}
+            >
+              BUY
+            </button>
+            <button
+              onClick={() => executeTrade('SELL', tradeQuantity)}
+              disabled={!currentCandle}
+              className="px-3 py-1 bg-red-600 text-white rounded text-xs font-bold hover:bg-red-700 disabled:opacity-50"
+              title={`Sell ${tradeQuantity}`}
+            >
+              SELL
+            </button>
+          </div>
         </div>
 
         <button
