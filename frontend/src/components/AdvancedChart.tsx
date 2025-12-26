@@ -5,12 +5,13 @@ import {
   CandlestickSeries,
   HistogramSeries,
   LineSeries,
+  createSeriesMarkers,
 } from 'lightweight-charts';
 import { useSessionStore } from '../stores/sessionStore';
 import { ChartToolbar } from './ChartToolbar';
 import type { DrawingTool } from './ChartToolbar';
 import type { Indicator } from './ChartToolbar';
-import { calculateSMA, calculateEMA } from '../utils/indicators';
+import { calculateSMA, calculateEMA, calculatePivotPoints } from '../utils/indicators';
 import { useChartDrawings } from '../hooks/useChartDrawings';
 
 export function AdvancedChart() {
@@ -18,6 +19,7 @@ export function AdvancedChart() {
   const chartRef = useRef<any>(null);
   const candleSeriesRef = useRef<any>(null);
   const volumeSeriesRef = useRef<any>(null);
+  const markersPrimitiveRef = useRef<any>(null);
   const indicatorSeriesRef = useRef<Map<string, any>>(new Map());
 
   const [activeTool, setActiveTool] = useState<DrawingTool>('none');
@@ -98,9 +100,13 @@ export function AdvancedChart() {
       },
     });
 
+    const markersPrimitive = createSeriesMarkers(candleSeries, []);
+    candleSeries.attachPrimitive(markersPrimitive);
+
     chartRef.current = chart;
     candleSeriesRef.current = candleSeries;
     volumeSeriesRef.current = volumeSeries;
+    markersPrimitiveRef.current = markersPrimitive;
 
     const handleResize = () => {
       if (chartContainerRef.current && chartRef.current) {
@@ -167,6 +173,11 @@ export function AdvancedChart() {
     });
     indicatorSeriesRef.current.clear();
 
+    // Clear markers initially
+    if (markersPrimitiveRef.current) {
+      markersPrimitiveRef.current.setMarkers([]);
+    }
+
     // Add active indicators
     activeIndicators.forEach((indicator) => {
       let data: any[] = [];
@@ -188,6 +199,24 @@ export function AdvancedChart() {
         case 'ema50':
           data = calculateEMA(visibleCandles, 50);
           color = '#D81B60';
+          break;
+        // Update pivot point case
+        case 'pivotPoints':
+          const allPivots = calculatePivotPoints(visibleCandles);
+
+          if (allPivots.length > 0) {
+            const markers = allPivots.map(p => ({
+              time: p.time as any,
+              position: p.type === 'bullish' ? 'belowBar' : 'aboveBar',
+              color: p.type === 'bullish' ? '#26a69a' : '#ef5350',
+              shape: p.type === 'bullish' ? 'arrowUp' : 'arrowDown',
+              text: p.type === 'bullish' ? '' : '',
+            }));
+
+            if (markersPrimitiveRef.current) {
+              markersPrimitiveRef.current.setMarkers(markers);
+            }
+          }
           break;
       }
 

@@ -11,7 +11,7 @@ import {
 } from 'lucide-react';
 
 export type DrawingTool = 'none' | 'select' | 'trendline' | 'horizontal' | 'rectangle' | 'fibonacci' | 'riskReward';
-export type Indicator = 'none' | 'sma20' | 'sma50' | 'ema20' | 'ema50';
+export type Indicator = 'none' | 'sma20' | 'sma50' | 'ema20' | 'ema50' | 'pivotPoints';
 
 interface ChartToolbarProps {
   activeTool: DrawingTool;
@@ -48,6 +48,7 @@ export function ChartToolbar({
     { id: 'sma50', label: 'SMA 50', color: '#FF6D00' },
     { id: 'ema20', label: 'EMA 20', color: '#00897B' },
     { id: 'ema50', label: 'EMA 50', color: '#D81B60' },
+    { id: 'pivotPoints', label: 'Pivot Points', color: '#6A1B9A' },
   ];
 
   return (
@@ -62,9 +63,8 @@ export function ChartToolbar({
             <button
               key={tool.id}
               onClick={() => onToolChange(isActive ? 'none' : tool.id)}
-              className={`p-2 rounded hover:bg-gray-100 transition-colors ${
-                isActive ? 'bg-blue-100 text-blue-600' : 'text-gray-700'
-              }`}
+              className={`p-2 rounded hover:bg-gray-100 transition-colors ${isActive ? 'bg-blue-100 text-blue-600' : 'text-gray-700'
+                }`}
               title={tool.label}
             >
               <Icon size={18} />
@@ -74,11 +74,10 @@ export function ChartToolbar({
         <button
           onClick={onDeleteSelected}
           disabled={!hasSelection}
-          className={`ml-2 px-3 py-1 text-xs rounded ${
-            hasSelection
+          className={`ml-2 px-3 py-1 text-xs rounded ${hasSelection
               ? 'bg-orange-50 text-orange-600 hover:bg-orange-100'
               : 'bg-gray-50 text-gray-400 cursor-not-allowed'
-          }`}
+            }`}
           title={hasSelection ? 'Delete selected drawing (Delete/Backspace)' : 'No drawing selected'}
         >
           Delete Selected
