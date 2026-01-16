@@ -136,9 +136,9 @@ export function useChartDrawings({ canvasRef, activeTool, onToolComplete }: UseC
 
   const isPointOnRiskReward = (point: Point, p1: Point, p2: Point, threshold = 8): boolean => {
     const entry = p1.y;
-    const target = p2.y;
-    const distance = Math.abs(target - entry);
-    const stopLoss = entry + (entry > target ? distance : -distance);
+    const riskLevel = p2.y;
+    const riskDistance = Math.abs(riskLevel - entry);
+    const isUpward = riskLevel < entry;
 
     const minX = Math.min(p1.x, p2.x);
     const maxX = Math.max(p1.x, p2.x);
@@ -146,10 +146,23 @@ export function useChartDrawings({ canvasRef, activeTool, onToolComplete }: UseC
     // Check if point is within X bounds
     if (point.x < minX || point.x > maxX) return false;
 
-    // Check if near any of the 3 lines
-    return Math.abs(point.y - entry) <= threshold ||
-      Math.abs(point.y - target) <= threshold ||
-      Math.abs(point.y - stopLoss) <= threshold;
+    // Check entry line
+    if (Math.abs(point.y - entry) <= threshold) return true;
+
+    // Check all reward and risk levels (1:1, 1:2, 1:3 on both sides)
+    const ratios = [1, 2, 3];
+
+    for (const ratio of ratios) {
+      // Reward levels (opposite direction from risk)
+      const rewardY = entry + (isUpward ? -riskDistance * ratio : riskDistance * ratio);
+      if (Math.abs(point.y - rewardY) <= threshold) return true;
+
+      // Risk levels (same direction as p2)
+      const riskY = entry + (isUpward ? riskDistance * ratio : -riskDistance * ratio);
+      if (Math.abs(point.y - riskY) <= threshold) return true;
+    }
+
+    return false;
   };
 
   const isPointOnDrawing = (point: Point, drawing: Drawing): boolean => {
@@ -369,52 +382,69 @@ export function useChartDrawings({ canvasRef, activeTool, onToolComplete }: UseC
   };
 
   const drawRiskReward = (ctx: CanvasRenderingContext2D, p1: Point, p2: Point, _color: string) => {
-    // Entry at p1, target at p2
+    // Entry at p1, risk level at p2
     const entry = p1.y;
-    const target = p2.y;
-    const distance = Math.abs(target - entry);
+    const riskLevel = p2.y;
+    const riskDistance = Math.abs(riskLevel - entry);
 
-    // Stop loss is same distance in opposite direction
-    const stopLoss = entry + (entry > target ? distance : -distance);
+    // Determine direction (true = upward targets, false = downward targets)
+    const isUpward = riskLevel < entry;
 
-    // Draw entry line (green)
-    ctx.strokeStyle = '#4CAF50';
+    // Draw entry line (yellow/gold)
+    ctx.strokeStyle = '#FFC107';
     ctx.lineWidth = 2;
     ctx.beginPath();
     ctx.moveTo(p1.x, entry);
     ctx.lineTo(p2.x, entry);
     ctx.stroke();
 
-    // Draw target line (blue)
-    ctx.strokeStyle = '#2196F3';
-    ctx.beginPath();
-    ctx.moveTo(p1.x, target);
-    ctx.lineTo(p2.x, target);
-    ctx.stroke();
-
-    // Draw stop loss line (red)
-    ctx.strokeStyle = '#F44336';
-    ctx.beginPath();
-    ctx.moveTo(p1.x, stopLoss);
-    ctx.lineTo(p2.x, stopLoss);
-    ctx.stroke();
-
-    // Draw labels
+    // Draw entry label
     ctx.font = '12px sans-serif';
-    ctx.fillStyle = '#4CAF50';
+    ctx.fillStyle = '#FFC107';
     ctx.fillText('Entry', p2.x + 5, entry + 4);
-    ctx.fillStyle = '#2196F3';
-    ctx.fillText('Target (1:1)', p2.x + 5, target + 4);
-    ctx.fillStyle = '#F44336';
-    ctx.fillText('Stop Loss', p2.x + 5, stopLoss + 4);
 
-    // Calculate R:R ratio
-    const reward = Math.abs(target - entry);
-    const risk = Math.abs(entry - stopLoss);
-    const ratio = (reward / risk).toFixed(2);
+    // Risk-reward ratios to display
+    const ratios = [
+      { ratio: 1, color: '#4CAF50', label: '1:1' },
+      { ratio: 2, color: '#2196F3', label: '1:2' },
+      { ratio: 3, color: '#9C27B0', label: '1:3' }
+    ];
 
-    ctx.fillStyle = '#000';
-    ctx.fillText(`R:R = 1:${ratio}`, (p1.x + p2.x) / 2, entry - 10);
+    // Draw reward levels (in the direction opposite to risk)
+    ratios.forEach(({ ratio, color, label }) => {
+      const rewardY = entry + (isUpward ? -riskDistance * ratio : riskDistance * ratio);
+
+      ctx.strokeStyle = color;
+      ctx.lineWidth = 1.5;
+      ctx.setLineDash([5, 5]);
+      ctx.beginPath();
+      ctx.moveTo(p1.x, rewardY);
+      ctx.lineTo(p2.x, rewardY);
+      ctx.stroke();
+      ctx.setLineDash([]);
+
+      // Draw label
+      ctx.fillStyle = color;
+      ctx.fillText(label, p2.x + 5, rewardY + 4);
+    });
+
+    // Draw risk levels (in the same direction as p2)
+    ratios.forEach(({ ratio, color, label }) => {
+      const riskY = entry + (isUpward ? riskDistance * ratio : -riskDistance * ratio);
+
+      ctx.strokeStyle = color;
+      ctx.lineWidth = 1.5;
+      ctx.setLineDash([5, 5]);
+      ctx.beginPath();
+      ctx.moveTo(p1.x, riskY);
+      ctx.lineTo(p2.x, riskY);
+      ctx.stroke();
+      ctx.setLineDash([]);
+
+      // Draw label
+      ctx.fillStyle = color;
+      ctx.fillText(label, p2.x + 5, riskY + 4);
+    });
   };
 
   const drawSelectionHandles = (ctx: CanvasRenderingContext2D, points: Point[]) => {

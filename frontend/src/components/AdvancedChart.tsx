@@ -101,7 +101,7 @@ export function AdvancedChart() {
     });
 
     const markersPrimitive = createSeriesMarkers(candleSeries, []);
-    candleSeries.attachPrimitive(markersPrimitive);
+    candleSeries.attachPrimitive(markersPrimitive as any);
 
     chartRef.current = chart;
     candleSeriesRef.current = candleSeries;

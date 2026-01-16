@@ -73,30 +73,51 @@ export interface PivotPoint {
 }
 
 /**
- * Calculate Pivot Points (Bullish and Bearish)
- * Based on candlestick pattern analysis
+ * Calculate Reversal Pivot Points (Bullish and Bearish)
+ * Based on advanced candlestick pattern analysis
+ * Detects reversal patterns using multiple candle confirmation
  */
 export function calculatePivotPoints(candles: Candle[]): PivotPoint[] {
   const result: PivotPoint[] = [];
 
-  // Need at least 4 candles to detect pivots (current + 3 previous)
-  for (let i = 3; i < candles.length; i++) {
-    const current = candles[i];
-    const prev = candles[i - 1];
-    const prev2 = candles[i - 2];
+  // Need at least 5 candles to detect pivots (current + 4 previous)
+  for (let i = 4; i < candles.length; i++) {
+    const current = candles[i];      // index 0 in Pine Script
+    const prev = candles[i - 1];     // index 1 in Pine Script
+    const prev2 = candles[i - 2];    // index 2 in Pine Script
+    const prev3 = candles[i - 3];    // index 3 in Pine Script
 
-    // Bullish Pivot Conditions
-    // Condition 1: Current close > previous high AND current close > previous open AND current close > current open
+    // ============================================
+    // BULLISH REVERSAL PIVOT LOGIC
+    // ============================================
+
+    // Check if previous candle was a pivot to avoid consecutive signals
+    const isPreviousBullPivot =
+      prev.close > prev2.high &&
+      prev.close > prev.open &&
+      prev3.close < prev3.open;
+
+    // Condition 1: Current breaks previous high (simple pattern)
     const condition1_bull =
       current.close > prev.high &&
-      current.close > prev.open &&
       current.close > current.open;
 
-    // Condition 3: Candle 2 (two back) is bearish AND previous candle closes below candle 2's open
-    const condition3_bull =
-      prev2.close < prev2.open && prev.close < prev2.open;
+    // Condition 1 OR: Three-candle bullish reversal pattern
+    const condition1_bull_or =
+      current.close > current.open &&           // Current is bullish
+      prev.close > prev.open &&                 // Previous is bullish
+      prev.close < current.close &&             // Current closes higher than previous
+      prev2.close < prev2.open &&               // Two back is bearish
+      prev2.close < prev3.low &&                // Two back closes below three back's low
+      !isPreviousBullPivot;
 
-    const bullishPivot = condition1_bull && condition3_bull;
+    // Condition 3: Two back is bearish and breaks below three back's low
+    const condition3_bull =
+      prev2.close < prev2.open &&
+      prev2.close < prev3.low;
+
+    // Combined bullish signal
+    const bullishPivot = (condition1_bull_or || condition1_bull) && condition3_bull;
 
     if (bullishPivot) {
       result.push({
@@ -106,15 +127,37 @@ export function calculatePivotPoints(candles: Candle[]): PivotPoint[] {
       });
     }
 
-    // Bearish Pivot Conditions
-    // Condition 1: Current low < previous low AND current close < current open
+    // ============================================
+    // BEARISH REVERSAL PIVOT LOGIC
+    // ============================================
+
+    // Check if previous candle was a pivot to avoid consecutive signals
+    const isPreviousBearPivot =
+      prev.close < prev2.low &&
+      prev.close < prev.open &&
+      prev3.close > prev3.open;
+
+    // Condition 1: Current breaks previous low (simple pattern)
     const condition1_bear =
-      current.low < prev.low && current.close < current.open;
+      current.close < prev.low &&
+      current.close < current.open;
 
-    // Condition 2: Previous high > two candles back high
-    const condition2_bear = prev.high > prev2.high;
+    // Condition 1 OR: Three-candle bearish reversal pattern
+    const condition1_bear_or =
+      current.close < current.open &&           // Current is bearish
+      prev.close < prev.open &&                 // Previous is bearish
+      prev.close > current.close &&             // Current closes lower than previous
+      prev2.close > prev2.open &&               // Two back is bullish
+      prev2.close > prev3.high &&               // Two back closes above three back's high
+      !isPreviousBearPivot;
 
-    const bearishPivot = condition1_bear && condition2_bear;
+    // Condition 3: Two back is bullish and breaks above three back's high
+    const condition3_bear =
+      prev2.close > prev2.open &&
+      prev2.close > prev3.high;
+
+    // Combined bearish signal
+    const bearishPivot = condition1_bear_or || condition1_bear && condition3_bear;
 
     if (bearishPivot) {
       result.push({
