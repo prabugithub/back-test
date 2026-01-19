@@ -6,9 +6,20 @@ import type { Candle } from '../types';
 export function calculateSMA(candles: Candle[], period: number) {
   const result: Array<{ time: number; value: number }> = [];
 
+  // Validate we have enough candles
+  if (!candles || candles.length < period) {
+    console.warn(`Not enough candles for SMA calculation. Need ${period}, have ${candles?.length || 0}`);
+    return result;
+  }
+
   for (let i = period - 1; i < candles.length; i++) {
     let sum = 0;
     for (let j = 0; j < period; j++) {
+      // Additional safety check
+      if (!candles[i - j] || typeof candles[i - j].close !== 'number') {
+        console.warn(`Invalid candle data at index ${i - j}`);
+        return result;
+      }
       sum += candles[i - j].close;
     }
     result.push({
@@ -25,11 +36,23 @@ export function calculateSMA(candles: Candle[], period: number) {
  */
 export function calculateEMA(candles: Candle[], period: number) {
   const result: Array<{ time: number; value: number }> = [];
+
+  // Validate we have enough candles
+  if (!candles || candles.length < period) {
+    console.warn(`Not enough candles for EMA calculation. Need ${period}, have ${candles?.length || 0}`);
+    return result;
+  }
+
   const multiplier = 2 / (period + 1);
 
   // First EMA is SMA
   let sum = 0;
   for (let i = 0; i < period; i++) {
+    // Additional safety check
+    if (!candles[i] || typeof candles[i].close !== 'number') {
+      console.warn(`Invalid candle data at index ${i}`);
+      return result;
+    }
     sum += candles[i].close;
   }
   let ema = sum / period;
@@ -40,6 +63,10 @@ export function calculateEMA(candles: Candle[], period: number) {
 
   // Calculate EMA for remaining candles
   for (let i = period; i < candles.length; i++) {
+    if (!candles[i] || typeof candles[i].close !== 'number') {
+      console.warn(`Invalid candle data at index ${i}`);
+      break;
+    }
     ema = (candles[i].close - ema) * multiplier + ema;
     result.push({
       time: candles[i].timestamp,
@@ -80,8 +107,20 @@ export interface PivotPoint {
 export function calculatePivotPoints(candles: Candle[]): PivotPoint[] {
   const result: PivotPoint[] = [];
 
+  // Validate we have enough candles
+  if (!candles || candles.length < 5) {
+    console.warn(`Not enough candles for pivot point calculation. Need 5, have ${candles?.length || 0}`);
+    return result;
+  }
+
   // Need at least 5 candles to detect pivots (current + 4 previous)
   for (let i = 4; i < candles.length; i++) {
+    // Additional safety check for each candle
+    if (!candles[i] || !candles[i - 1] || !candles[i - 2] || !candles[i - 3]) {
+      console.warn(`Invalid candle data at index ${i}`);
+      continue;
+    }
+
     const current = candles[i];      // index 0 in Pine Script
     const prev = candles[i - 1];     // index 1 in Pine Script
     const prev2 = candles[i - 2];    // index 2 in Pine Script
