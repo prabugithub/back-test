@@ -219,32 +219,45 @@ export function useChartDrawings({ canvasRef, activeTool, onToolComplete }: UseC
     if (!canvasRef.current) return;
     const point = getChartCoordinates(event, canvasRef.current);
 
-    // Handle selection mode
-    if (activeToolRef.current === 'select') {
-      const foundDrawing = findDrawingAtPoint(point, drawings);
-      if (foundDrawing) {
-        if (foundDrawing.id === selectedDrawingIdRef.current) {
+    // Handle drawing mode or selection mode
+    if (activeToolRef.current === 'none') return;
+
+    const foundDrawing = findDrawingAtPoint(point, drawings);
+
+    // If we click on a drawing, select it (regardless of current tool)
+    if (foundDrawing) {
+      if (foundDrawing.id === selectedDrawingIdRef.current) {
+        // If already selected, start dragging if in select mode
+        if (activeToolRef.current === 'select') {
           const firstPoint = foundDrawing.points[0];
           setDragOffset({
             x: point.x - firstPoint.x,
             y: point.y - firstPoint.y,
           });
           setIsDragging(true);
-        } else {
-          setSelectedDrawingId(foundDrawing.id);
-          setIsDragging(false);
         }
       } else {
-        setSelectedDrawingId(null);
+        setSelectedDrawingId(foundDrawing.id);
         setIsDragging(false);
       }
+
+      // If we are in select mode, we are done
+      if (activeToolRef.current === 'select') return;
+
+      // If we are in a drawing mode but just selected something, 
+      // maybe we still want to allow starting a new drawing if we drag?
+      // For now, let's treat selecting as consuming the click.
       return;
     }
 
-    // Handle drawing mode
-    if (activeToolRef.current === 'none') return;
+    // No drawing found, handle modes
+    if (activeToolRef.current === 'select') {
+      setSelectedDrawingId(null);
+      setIsDragging(false);
+      return;
+    }
 
-    // Clear selection when starting a new drawing
+    // Handle starting a new drawing
     setSelectedDrawingId(null);
     setIsDragging(false);
 
@@ -319,36 +332,6 @@ export function useChartDrawings({ canvasRef, activeTool, onToolComplete }: UseC
     });
   }, [drawings, getChartCoordinates]);
 
-  const handleMouseUp = useCallback(() => {
-    // Stop dragging if in drag mode
-    // Stop dragging if in drag mode
-    if (isDraggingRef.current) {
-      setIsDragging(false);
-      return;
-    }
-
-    // Handle normal drawing completion
-    if (!isDrawingRef.current || activeToolRef.current === 'none') return;
-
-    // For freehand, accept any drawing with at least 2 points
-    // For other tools, require at least 2 points
-    const minPoints = activeToolRef.current === 'freehand' ? 2 : 2;
-
-    if (currentDrawingRef.current.length >= minPoints) {
-      const newDrawing: Drawing = {
-        id: `drawing-${Date.now()}-${Math.random()}`,
-        type: activeToolRef.current,
-        points: currentDrawingRef.current,
-        color: getDrawingColor(activeToolRef.current),
-      };
-      setDrawings((prev) => [...prev, newDrawing]);
-    }
-
-    setCurrentDrawing([]);
-    setIsDrawing(false);
-    onToolComplete?.();
-  }, [onToolComplete]);
-
   const getDrawingColor = useCallback((tool: DrawingTool): string => {
     switch (tool) {
       case 'freehand': return '#E91E63';
@@ -360,6 +343,43 @@ export function useChartDrawings({ canvasRef, activeTool, onToolComplete }: UseC
       default: return '#000000';
     }
   }, []);
+
+  const handleMouseUp = useCallback(() => {
+    // Stop dragging if in drag mode
+    if (isDraggingRef.current) {
+      setIsDragging(false);
+      return;
+    }
+
+    // Handle normal drawing completion
+    if (!isDrawingRef.current || activeToolRef.current === 'none') return;
+
+    // For freehand, accept any drawing with at least 2 points
+    const minPoints = 2;
+
+    if (currentDrawingRef.current.length >= minPoints) {
+      const newId = `drawing-${Date.now()}-${Math.random()}`;
+      const newDrawing: Drawing = {
+        id: newId,
+        type: activeToolRef.current,
+        points: currentDrawingRef.current,
+        color: getDrawingColor(activeToolRef.current),
+      };
+      setDrawings((prev) => [...prev, newDrawing]);
+
+      // Select the newly created drawing
+      setSelectedDrawingId(newId);
+    }
+
+    setCurrentDrawing([]);
+    setIsDrawing(false);
+
+    // Only complete the tool if it's NOT freehand
+    // This allows continuous drawing for freehand
+    if (activeToolRef.current !== 'freehand') {
+      onToolComplete?.();
+    }
+  }, [onToolComplete, getDrawingColor]);
 
   const drawLine = (ctx: CanvasRenderingContext2D, p1: Point, p2: Point, color: string, width = 2) => {
     ctx.strokeStyle = color;

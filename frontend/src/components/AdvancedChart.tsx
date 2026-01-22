@@ -341,7 +341,6 @@ export function AdvancedChart() {
         style={{
           width: '100%',
           minHeight: '0', // Important for flex container
-          pointerEvents: activeTool !== 'none' ? 'none' : 'auto', // Disable parent when drawing
         }}
       >
         <div
@@ -374,6 +373,7 @@ export function AdvancedChart() {
             handleMouseDown(e.nativeEvent);
           }}
           onMouseMove={(e) => {
+            e.stopPropagation();
             handleMouseMove(e.nativeEvent);
           }}
           onMouseUp={(e) => {
