@@ -165,6 +165,16 @@ export function useChartDrawings({ canvasRef, activeTool, onToolComplete }: UseC
     return false;
   };
 
+  const isPointOnFreehand = (point: Point, points: Point[], threshold = 8): boolean => {
+    // Check if point is near any segment of the freehand path
+    for (let i = 0; i < points.length - 1; i++) {
+      if (isPointNearLine(point, points[i], points[i + 1], threshold)) {
+        return true;
+      }
+    }
+    return false;
+  };
+
   const isPointOnDrawing = (point: Point, drawing: Drawing): boolean => {
     if (drawing.points.length < 2) return false;
 
@@ -182,6 +192,8 @@ export function useChartDrawings({ canvasRef, activeTool, onToolComplete }: UseC
         return isPointOnFibonacci(point, p1, p2);
       case 'riskReward':
         return isPointOnRiskReward(point, p1, p2);
+      case 'freehand':
+        return isPointOnFreehand(point, drawing.points);
       default:
         return false;
     }
@@ -291,6 +303,13 @@ export function useChartDrawings({ canvasRef, activeTool, onToolComplete }: UseC
     setCurrentDrawing((prev) => {
       // For most tools, we only need start and end point
       if (prev.length === 0) return [point];
+
+      // For freehand, continuously add points
+      if (activeToolRef.current === 'freehand') {
+        return [...prev, point];
+      }
+
+      // For other tools, only keep start and current end point
       if (activeToolRef.current === 'trendline' || activeToolRef.current === 'horizontal' ||
         activeToolRef.current === 'rectangle' || activeToolRef.current === 'fibonacci' ||
         activeToolRef.current === 'riskReward') {
@@ -311,7 +330,11 @@ export function useChartDrawings({ canvasRef, activeTool, onToolComplete }: UseC
     // Handle normal drawing completion
     if (!isDrawingRef.current || activeToolRef.current === 'none') return;
 
-    if (currentDrawingRef.current.length >= 2) {
+    // For freehand, accept any drawing with at least 2 points
+    // For other tools, require at least 2 points
+    const minPoints = activeToolRef.current === 'freehand' ? 2 : 2;
+
+    if (currentDrawingRef.current.length >= minPoints) {
       const newDrawing: Drawing = {
         id: `drawing-${Date.now()}-${Math.random()}`,
         type: activeToolRef.current,
@@ -328,6 +351,7 @@ export function useChartDrawings({ canvasRef, activeTool, onToolComplete }: UseC
 
   const getDrawingColor = useCallback((tool: DrawingTool): string => {
     switch (tool) {
+      case 'freehand': return '#E91E63';
       case 'trendline': return '#2962FF';
       case 'horizontal': return '#FF6D00';
       case 'rectangle': return '#00897B40';
@@ -447,6 +471,25 @@ export function useChartDrawings({ canvasRef, activeTool, onToolComplete }: UseC
     });
   };
 
+  const drawFreehand = (ctx: CanvasRenderingContext2D, points: Point[], color: string, width = 2) => {
+    if (points.length < 2) return;
+
+    ctx.strokeStyle = color;
+    ctx.lineWidth = width;
+    ctx.lineCap = 'round';
+    ctx.lineJoin = 'round';
+
+    ctx.beginPath();
+    ctx.moveTo(points[0].x, points[0].y);
+
+    // Draw smooth path through all points
+    for (let i = 1; i < points.length; i++) {
+      ctx.lineTo(points[i].x, points[i].y);
+    }
+
+    ctx.stroke();
+  };
+
   const drawSelectionHandles = (ctx: CanvasRenderingContext2D, points: Point[]) => {
     ctx.fillStyle = '#2196F3';
     points.forEach(point => {
@@ -468,6 +511,9 @@ export function useChartDrawings({ canvasRef, activeTool, onToolComplete }: UseC
     const lineWidth = isSelected ? 4 : 2;
 
     switch (drawing.type) {
+      case 'freehand':
+        drawFreehand(ctx, drawing.points, color, lineWidth);
+        break;
       case 'trendline':
         drawLine(ctx, p1, p2, color, lineWidth);
         break;

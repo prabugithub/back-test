@@ -1,5 +1,7 @@
 import { create } from 'zustand';
 import type { Candle, Trade, Position } from '../types';
+import { saveTradeSession } from '../utils/tradeStorage';
+import { groupTradesIntoPositions, calculatePerformanceStats } from '../utils/tradeAnalysis';
 
 interface SessionStore {
   // Data
@@ -23,6 +25,7 @@ interface SessionStore {
   setCurrentIndex: (index: number) => void;
   executeTrade: (type: 'BUY' | 'SELL', quantity: number) => void;
   resetSession: () => void;
+  saveCurrentSession: () => void;
 
   // Computed getters
   getCurrentCandle: () => Candle | null;
@@ -186,6 +189,24 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
       position: null,
       isPlaying: false,
     });
+  },
+
+  saveCurrentSession: () => {
+    const { instrument, trades } = get();
+    if (trades.length === 0) return;
+
+    // Calculate stats ensuring we have at least defaults
+    const positions = groupTradesIntoPositions(trades);
+    const stats = calculatePerformanceStats(positions);
+
+    saveTradeSession(
+      instrument,
+      trades,
+      {
+        totalPnL: stats.totalPnL,
+        winRate: stats.winRate
+      }
+    );
   },
 
   // Computed getters

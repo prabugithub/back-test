@@ -7,10 +7,11 @@ import {
   Activity,
   ChevronDown,
   Circle,
-  MousePointer
+  MousePointer,
+  Pen
 } from 'lucide-react';
 
-export type DrawingTool = 'none' | 'select' | 'trendline' | 'horizontal' | 'rectangle' | 'fibonacci' | 'riskReward';
+export type DrawingTool = 'none' | 'select' | 'trendline' | 'horizontal' | 'rectangle' | 'fibonacci' | 'riskReward' | 'freehand';
 export type Indicator = 'none' | 'sma20' | 'sma50' | 'ema20' | 'ema50' | 'pivotPoints';
 
 interface ChartToolbarProps {
@@ -34,13 +35,14 @@ export function ChartToolbar({
 }: ChartToolbarProps) {
   const [showIndicators, setShowIndicators] = useState(false);
 
-  const tools: Array<{ id: DrawingTool; icon: any; label: string }> = [
-    { id: 'select', icon: MousePointer, label: 'Select' },
-    { id: 'trendline', icon: TrendingUp, label: 'Trend Line' },
-    { id: 'horizontal', icon: Minus, label: 'Horizontal Line' },
-    { id: 'rectangle', icon: Square, label: 'Rectangle' },
-    { id: 'fibonacci', icon: Circle, label: 'Fibonacci' },
-    { id: 'riskReward', icon: Target, label: 'Risk/Reward' },
+  const tools: Array<{ id: DrawingTool; icon: any; label: string; shortcut: string }> = [
+    { id: 'select', icon: MousePointer, label: 'Select', shortcut: 'V or 1' },
+    { id: 'freehand', icon: Pen, label: 'Free Draw', shortcut: '2' },
+    { id: 'trendline', icon: TrendingUp, label: 'Trend Line', shortcut: '3' },
+    { id: 'horizontal', icon: Minus, label: 'Horizontal Line', shortcut: '4' },
+    { id: 'rectangle', icon: Square, label: 'Rectangle', shortcut: '5' },
+    { id: 'fibonacci', icon: Circle, label: 'Fibonacci', shortcut: '6' },
+    { id: 'riskReward', icon: Target, label: 'Risk/Reward', shortcut: '7' },
   ];
 
   const indicators: Array<{ id: Indicator; label: string; color: string }> = [
@@ -65,7 +67,7 @@ export function ChartToolbar({
               onClick={() => onToolChange(isActive ? 'none' : tool.id)}
               className={`p-2 rounded hover:bg-gray-100 transition-colors ${isActive ? 'bg-blue-100 text-blue-600' : 'text-gray-700'
                 }`}
-              title={tool.label}
+              title={`${tool.label} (${tool.shortcut})`}
             >
               <Icon size={18} />
             </button>
@@ -75,8 +77,8 @@ export function ChartToolbar({
           onClick={onDeleteSelected}
           disabled={!hasSelection}
           className={`ml-2 px-3 py-1 text-xs rounded ${hasSelection
-              ? 'bg-orange-50 text-orange-600 hover:bg-orange-100'
-              : 'bg-gray-50 text-gray-400 cursor-not-allowed'
+            ? 'bg-orange-50 text-orange-600 hover:bg-orange-100'
+            : 'bg-gray-50 text-gray-400 cursor-not-allowed'
             }`}
           title={hasSelection ? 'Delete selected drawing (Delete/Backspace)' : 'No drawing selected'}
         >

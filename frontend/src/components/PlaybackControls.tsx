@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { Play, Pause, ChevronLeft, ChevronRight, FastForward, CalendarClock, Settings, X } from 'lucide-react';
+import { Play, Pause, ChevronLeft, ChevronRight, FastForward, CalendarClock, Settings, X, Calendar } from 'lucide-react';
 import { useSessionStore } from '../stores/sessionStore';
 import { formatTimestamp } from '../utils/formatters';
 import { parseColumnarData, resampleCandles, type ColumnarData } from '../utils/resampler';
@@ -26,6 +26,8 @@ export function PlaybackControls({ onOpenHistory }: { onOpenHistory?: () => void
   const [customJump, setCustomJump] = useState('10');
   const [tradeQuantity, setTradeQuantity] = useState(65);
   const [showSettings, setShowSettings] = useState(false);
+  const [showDatePicker, setShowDatePicker] = useState(false);
+  const [jumpToDate, setJumpToDate] = useState('');
 
   // Data loading settings
   const [timeframe, setTimeframe] = useState('5');
@@ -94,6 +96,33 @@ export function PlaybackControls({ onOpenHistory }: { onOpenHistory?: () => void
     }
 
     setCurrentIndex(nextIndex);
+  };
+
+  // Helper to jump to a specific date
+  const handleJumpToDate = () => {
+    if (!jumpToDate || candles.length === 0) return;
+
+    const targetDate = new Date(jumpToDate);
+    const targetTimestamp = targetDate.getTime() / 1000;
+
+    // Find the closest candle to the target date
+    let closestIndex = 0;
+    let minDiff = Math.abs(candles[0].timestamp - targetTimestamp);
+
+    for (let i = 1; i < candles.length; i++) {
+      const diff = Math.abs(candles[i].timestamp - targetTimestamp);
+      if (diff < minDiff) {
+        minDiff = diff;
+        closestIndex = i;
+      }
+      // If we've passed the target date, we can stop searching
+      if (candles[i].timestamp > targetTimestamp) {
+        break;
+      }
+    }
+
+    setCurrentIndex(closestIndex);
+    setShowDatePicker(false);
   };
 
   // Use selector to get current candle
@@ -200,6 +229,13 @@ export function PlaybackControls({ onOpenHistory }: { onOpenHistory?: () => void
               title="+1 Day"
             >
               <CalendarClock size={12} /> 1D
+            </button>
+            <button
+              onClick={() => setShowDatePicker(true)}
+              className="px-1.5 py-1 text-xs bg-blue-100 hover:bg-blue-200 text-blue-700 rounded flex gap-0.5 items-center"
+              title="Jump to Date"
+            >
+              <Calendar size={12} /> Date
             </button>
 
             {/* Custom Jump */}
@@ -359,6 +395,71 @@ export function PlaybackControls({ onOpenHistory }: { onOpenHistory?: () => void
             >
               {isReloading ? 'Loading...' : 'Apply Changes'}
             </button>
+          </div>
+        </div>
+      )}
+
+      {/* Date Picker Modal */}
+      {showDatePicker && (
+        <div className="absolute bottom-full right-0 mb-2 bg-white border-2 border-blue-300 rounded-lg shadow-2xl p-4 z-50 min-w-[320px]">
+          <div className="flex items-center justify-between mb-3 pb-2 border-b">
+            <h3 className="font-bold text-sm text-gray-800 flex items-center gap-2">
+              <Calendar size={16} className="text-blue-600" />
+              Jump to Date
+            </h3>
+            <button
+              onClick={() => setShowDatePicker(false)}
+              className="text-gray-400 hover:text-gray-600"
+            >
+              <X size={16} />
+            </button>
+          </div>
+
+          <div className="space-y-3">
+            {/* Date Range Info */}
+            {candles.length > 0 && (
+              <div className="text-xs text-gray-600 bg-gray-50 p-2 rounded">
+                <div className="flex justify-between">
+                  <span className="font-medium">Available Range:</span>
+                </div>
+                <div className="mt-1">
+                  <div>From: {formatTimestamp(candles[0].timestamp)}</div>
+                  <div>To: {formatTimestamp(candles[candles.length - 1].timestamp)}</div>
+                </div>
+              </div>
+            )}
+
+            {/* Date Input */}
+            <div>
+              <label className="block text-xs font-medium text-gray-700 mb-1">
+                Select Date
+              </label>
+              <input
+                type="date"
+                value={jumpToDate}
+                onChange={(e) => setJumpToDate(e.target.value)}
+                min={candles.length > 0 ? new Date(candles[0].timestamp * 1000).toISOString().split('T')[0] : undefined}
+                max={candles.length > 0 ? new Date(candles[candles.length - 1].timestamp * 1000).toISOString().split('T')[0] : undefined}
+                className="w-full px-3 py-2 text-sm border border-gray-300 rounded focus:outline-none focus:ring-2 focus:ring-blue-500"
+              />
+            </div>
+
+            {/* Action Buttons */}
+            <div className="flex gap-2">
+              <button
+                onClick={() => setShowDatePicker(false)}
+                className="flex-1 px-3 py-2 bg-gray-100 text-gray-700 rounded font-medium text-sm hover:bg-gray-200"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={handleJumpToDate}
+                disabled={!jumpToDate}
+                className="flex-1 px-3 py-2 bg-blue-600 text-white rounded font-medium text-sm hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed"
+              >
+                Jump to Date
+              </button>
+            </div>
           </div>
         </div>
       )}

@@ -280,14 +280,44 @@ export function AdvancedChart() {
   // Keyboard shortcuts
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
+      // Ignore if user is typing in an input field
+      const target = e.target as HTMLElement;
+      if (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA') {
+        return;
+      }
+
       // Delete/Backspace to delete selected drawing
       if ((e.key === 'Delete' || e.key === 'Backspace') && selectedDrawingId) {
         e.preventDefault();
         deleteSelectedDrawing();
+        return;
       }
+
       // Escape to exit drawing/select mode
       if (e.key === 'Escape' && activeTool !== 'none') {
+        e.preventDefault();
         setActiveTool('none');
+        return;
+      }
+
+      // Drawing tool shortcuts (1-7 for tools, V for select)
+      const toolMap: { [key: string]: DrawingTool } = {
+        'v': 'select',
+        '1': 'select',
+        '2': 'freehand',
+        '3': 'trendline',
+        '4': 'horizontal',
+        '5': 'rectangle',
+        '6': 'fibonacci',
+        '7': 'riskReward',
+      };
+
+      const key = e.key.toLowerCase();
+      if (toolMap[key]) {
+        e.preventDefault();
+        const newTool = toolMap[key];
+        // Toggle off if already active
+        setActiveTool(activeTool === newTool ? 'none' : newTool);
       }
     };
 

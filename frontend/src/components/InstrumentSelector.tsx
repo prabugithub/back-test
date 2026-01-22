@@ -16,7 +16,7 @@ export function InstrumentSelector() {
   const [instrument, setInstrument] = useState('EQUITY');
   const [interval, setInterval] = useState('5');
   const [fromDate, setFromDate] = useState('2024-01-01');
-  const [toDate, setToDate] = useState('2024-01-31');
+  const [toDate, setToDate] = useState('2025-07-25');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
