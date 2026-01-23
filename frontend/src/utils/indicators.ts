@@ -187,13 +187,13 @@ export function calculatePivotPoints(candles: Candle[]): PivotPoint[] {
       prev.close < prev.open &&                 // Previous is bearish
       prev.close > current.close &&             // Current closes lower than previous
       prev2.close > prev2.open &&               // Two back is bullish
-      prev2.close > prev3.high &&               // Two back closes above three back's high
+      (prev.high > prev2.high || prev2.close > prev3.high) &&               // Two back closes above three back's high
       !isPreviousBearPivot;
 
     // Condition 3: Two back is bullish and breaks above three back's high
     const condition3_bear =
       prev2.close > prev2.open &&
-      prev2.close > prev3.high;
+      (prev.high > prev2.high || prev2.close > prev3.high);
 
     // Combined bearish signal
     const bearishPivot = condition1_bear_or || condition1_bear && condition3_bear;

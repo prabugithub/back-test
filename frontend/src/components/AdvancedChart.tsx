@@ -23,10 +23,11 @@ export function AdvancedChart() {
   const indicatorSeriesRef = useRef<Map<string, any>>(new Map());
 
   const [activeTool, setActiveTool] = useState<DrawingTool>('none');
-  const [activeIndicators, setActiveIndicators] = useState<Indicator[]>([]);
+  const [activeIndicators, setActiveIndicators] = useState<Indicator[]>(['ema21', 'pivotPoints']);
 
   const candles = useSessionStore((s) => s.candles);
   const currentIndex = useSessionStore((s) => s.currentIndex);
+  const trades = useSessionStore((s) => s.trades);
   const visibleCandles = candles.slice(0, currentIndex + 1);
 
   const isFirstLoadRef = useRef(true);
@@ -163,60 +164,37 @@ export function AdvancedChart() {
     isFirstLoadRef.current = true;
   }, [candles.length]);
 
-  // Update indicators
+  // Update indicator line series
   useEffect(() => {
     if (!chartRef.current || visibleCandles.length === 0) return;
 
-    // Clear old indicator series
+    // Clear old indicator series (LineSeries only)
     indicatorSeriesRef.current.forEach((series) => {
       chartRef.current.removeSeries(series);
     });
     indicatorSeriesRef.current.clear();
 
-    // Clear markers initially
-    if (markersPrimitiveRef.current) {
-      markersPrimitiveRef.current.setMarkers([]);
-    }
-
-    // Add active indicators
+    // Add active line-based indicators
     activeIndicators.forEach((indicator) => {
       let data: any[] = [];
       let color = '';
 
       switch (indicator) {
-        case 'sma20':
-          data = calculateSMA(visibleCandles, 20);
+        case 'sma21':
+          data = calculateSMA(visibleCandles, 21);
           color = '#2962FF';
           break;
-        case 'sma50':
-          data = calculateSMA(visibleCandles, 50);
+        case 'sma60':
+          data = calculateSMA(visibleCandles, 60);
           color = '#FF6D00';
           break;
-        case 'ema20':
-          data = calculateEMA(visibleCandles, 20);
+        case 'ema21':
+          data = calculateEMA(visibleCandles, 21);
           color = '#00897B';
           break;
-        case 'ema50':
-          data = calculateEMA(visibleCandles, 50);
+        case 'ema60':
+          data = calculateEMA(visibleCandles, 60);
           color = '#D81B60';
-          break;
-        // Update pivot point case
-        case 'pivotPoints':
-          const allPivots = calculatePivotPoints(visibleCandles);
-
-          if (allPivots.length > 0) {
-            const markers = allPivots.map(p => ({
-              time: p.time as any,
-              position: p.type === 'bullish' ? 'belowBar' : 'aboveBar',
-              color: p.type === 'bullish' ? '#26a69a' : '#ef5350',
-              shape: p.type === 'bullish' ? 'arrowUp' : 'arrowDown',
-              text: p.type === 'bullish' ? '' : '',
-            }));
-
-            if (markersPrimitiveRef.current) {
-              markersPrimitiveRef.current.setMarkers(markers);
-            }
-          }
           break;
       }
 
@@ -230,6 +208,47 @@ export function AdvancedChart() {
       }
     });
   }, [activeIndicators, visibleCandles]);
+
+  // Update markers (Trades and Pivot Points)
+  useEffect(() => {
+    if (!markersPrimitiveRef.current || visibleCandles.length === 0) return;
+
+    const allMarkers: any[] = [];
+
+    // 1. Add Trade Markers
+    trades.forEach((trade) => {
+      // Only show markers for trades that are within the current visible range
+      if (trade.timestamp <= visibleCandles[visibleCandles.length - 1].timestamp) {
+        allMarkers.push({
+          time: trade.timestamp as any,
+          position: trade.type === 'BUY' ? 'belowBar' : 'aboveBar',
+          color: trade.type === 'BUY' ? '#26a69a' : '#ef5350',
+          shape: trade.type === 'BUY' ? 'arrowUp' : 'arrowDown',
+          text: `${trade.type === 'BUY' ? 'B' : 'S'}@${trade.price.toFixed(2)}`,
+          size: 2,
+        });
+      }
+    });
+
+    // 2. Add Pivot Point Markers if active
+    if (activeIndicators.includes('pivotPoints')) {
+      const allPivots = calculatePivotPoints(visibleCandles);
+      allPivots.forEach((p) => {
+        allMarkers.push({
+          time: p.time as any,
+          position: p.type === 'bullish' ? 'belowBar' : 'aboveBar',
+          color: p.type === 'bullish' ? '#26a69a' : '#ef5350',
+          shape: p.type === 'bullish' ? 'arrowUp' : 'arrowDown',
+          text: '',
+        });
+      });
+    }
+
+    // Sort markers by time
+    allMarkers.sort((a, b) => (a.time as number) - (b.time as number));
+
+    markersPrimitiveRef.current.setMarkers(allMarkers);
+  }, [activeIndicators, visibleCandles, trades]);
 
   const handleIndicatorToggle = (indicator: Indicator) => {
     setActiveIndicators((prev) =>

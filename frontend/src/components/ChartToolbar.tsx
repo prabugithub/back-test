@@ -12,7 +12,7 @@ import {
 } from 'lucide-react';
 
 export type DrawingTool = 'none' | 'select' | 'trendline' | 'horizontal' | 'rectangle' | 'fibonacci' | 'riskReward' | 'freehand';
-export type Indicator = 'none' | 'sma20' | 'sma50' | 'ema20' | 'ema50' | 'pivotPoints';
+export type Indicator = 'none' | 'sma21' | 'sma60' | 'ema21' | 'ema60' | 'pivotPoints';
 
 interface ChartToolbarProps {
   activeTool: DrawingTool;
@@ -46,10 +46,10 @@ export function ChartToolbar({
   ];
 
   const indicators: Array<{ id: Indicator; label: string; color: string }> = [
-    { id: 'sma20', label: 'SMA 20', color: '#2962FF' },
-    { id: 'sma50', label: 'SMA 50', color: '#FF6D00' },
-    { id: 'ema20', label: 'EMA 20', color: '#00897B' },
-    { id: 'ema50', label: 'EMA 50', color: '#D81B60' },
+    { id: 'sma21', label: 'SMA 21', color: '#2962FF' },
+    { id: 'sma60', label: 'SMA 60', color: '#FF6D00' },
+    { id: 'ema21', label: 'EMA 21', color: '#00897B' },
+    { id: 'ema60', label: 'EMA 60', color: '#D81B60' },
     { id: 'pivotPoints', label: 'Pivot Points', color: '#6A1B9A' },
   ];
 
