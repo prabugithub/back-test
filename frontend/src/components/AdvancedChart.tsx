@@ -47,7 +47,6 @@ export function AdvancedChart() {
   }, []);
 
   const handleCalloutTrigger = useCallback((p1: Point, p2: Point) => {
-    // For callout, point 2 is where the text box is, so show dialog there
     setPendingTextPoint(p2);
     setPendingCalloutPoints({ p1, p2 });
     setIsTextDialogOpen(true);
@@ -66,7 +65,7 @@ export function AdvancedChart() {
   } = useChartDrawings({
     canvasRef,
     activeTool,
-    onToolComplete: () => setActiveTool('none'),
+    onToolComplete: () => setActiveTool('select'),
     chartApi: chart,
     seriesApi: series,
     onTextToolTrigger: handleTextToolTrigger,
@@ -356,9 +355,9 @@ export function AdvancedChart() {
         return;
       }
 
-      if (e.key === 'Escape' && activeTool !== 'none') {
+      if (e.key === 'Escape') {
         e.preventDefault();
-        setActiveTool('none');
+        setActiveTool('select');
         return;
       }
 
@@ -388,7 +387,13 @@ export function AdvancedChart() {
   }, [selectedDrawingId, activeTool, deleteSelectedDrawing]);
 
   return (
-    <div className="w-full h-full flex flex-col relative">
+    <div
+      className="w-full h-full flex flex-col relative"
+      onContextMenu={(e) => {
+        e.preventDefault();
+        setActiveTool('select');
+      }}
+    >
       <ChartToolbar
         activeTool={activeTool}
         onToolChange={setActiveTool}
@@ -459,15 +464,10 @@ export function AdvancedChart() {
             touchAction: 'none',
           }}
         />
-        {activeTool !== 'none' && (
-          <div className="absolute top-2 left-1/2 -translate-x-1/2 bg-blue-600 text-white rounded-full px-6 py-1.5 shadow-xl text-sm font-medium animate-in slide-in-from-top-4" style={{ zIndex: 200 }}>
-            Drawing: <span className="capitalize">{activeTool}</span>
-            <button
-              onClick={() => setActiveTool('none')}
-              className="ml-4 text-blue-200 hover:text-white transition-colors border-l border-blue-500 pl-4"
-            >
-              Cancel
-            </button>
+        {activeTool !== 'select' && activeTool !== 'none' && (
+          <div className="absolute top-2 left-1/2 -translate-x-1/2 bg-blue-600 text-white rounded-full px-6 py-1.5 shadow-xl text-sm font-medium animate-in slide-in-from-top-4 flex items-center gap-4" style={{ zIndex: 200 }}>
+            <span>Drawing: <span className="capitalize">{activeTool}</span></span>
+            <span className="text-[10px] bg-blue-500 px-2 py-0.5 rounded uppercase">Right-Click to Exit</span>
           </div>
         )}
       </div>
