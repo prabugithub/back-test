@@ -8,7 +8,8 @@ import {
   ChevronDown,
   Circle,
   MousePointer,
-  Pen
+  Pen,
+  Camera
 } from 'lucide-react';
 
 export type DrawingTool = 'none' | 'select' | 'trendline' | 'horizontal' | 'rectangle' | 'fibonacci' | 'riskReward' | 'freehand';
@@ -21,6 +22,7 @@ interface ChartToolbarProps {
   onIndicatorToggle: (indicator: Indicator) => void;
   onClearDrawings: () => void;
   onDeleteSelected: () => void;
+  onTakeScreenshot: () => void;
   hasSelection: boolean;
 }
 
@@ -31,6 +33,7 @@ export function ChartToolbar({
   onIndicatorToggle,
   onClearDrawings,
   onDeleteSelected,
+  onTakeScreenshot,
   hasSelection,
 }: ChartToolbarProps) {
   const [showIndicators, setShowIndicators] = useState(false);
@@ -89,6 +92,17 @@ export function ChartToolbar({
           className="px-3 py-1 text-xs bg-red-50 text-red-600 rounded hover:bg-red-100"
         >
           Clear All
+        </button>
+      </div>
+
+      {/* Screenshot Button */}
+      <div className="flex items-center gap-1 border-r pr-3">
+        <button
+          onClick={onTakeScreenshot}
+          className="p-2 rounded hover:bg-gray-100 transition-colors text-gray-700"
+          title="Take Chart Screenshot"
+        >
+          <Camera size={18} />
         </button>
       </div>
 

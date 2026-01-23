@@ -13,6 +13,7 @@ import type { DrawingTool } from './ChartToolbar';
 import type { Indicator } from './ChartToolbar';
 import { calculateSMA, calculateEMA, calculatePivotPoints } from '../utils/indicators';
 import { useChartDrawings } from '../hooks/useChartDrawings';
+import { format } from 'date-fns';
 
 export function AdvancedChart() {
   const chartContainerRef = useRef<HTMLDivElement>(null);
@@ -263,6 +264,46 @@ export function AdvancedChart() {
     setActiveTool('none');
   };
 
+  const handleTakeScreenshot = () => {
+    if (!chartRef.current || !canvasRef.current) return;
+
+    // 1. Get the chart's screenshot canvas
+    const chartCanvas = chartRef.current.takeScreenshot();
+    if (!chartCanvas) return;
+
+    // 2. Create a temporary canvas to combine chart and drawings
+    const combinedCanvas = document.createElement('canvas');
+    combinedCanvas.width = chartCanvas.width;
+    combinedCanvas.height = chartCanvas.height;
+    const ctx = combinedCanvas.getContext('2d');
+    if (!ctx) return;
+
+    // 3. Draw chart
+    ctx.drawImage(chartCanvas, 0, 0);
+
+    // 4. Draw drawings (the overlay canvas)
+    // We scale the overlay canvas to match the chart screenshot canvas dimensions
+    // as the chart screenshot might have a different resolution (DPI)
+    ctx.drawImage(canvasRef.current, 0, 0, combinedCanvas.width, combinedCanvas.height);
+
+    // 5. Generate filename from current candle's date (DD-MM-YYYY)
+    const currentCandle = useSessionStore.getState().getCurrentCandle();
+    let filename = 'chart-screenshot';
+    if (currentCandle) {
+      // Create date from timestamp (assuming seconds, adjust if milliseconds)
+      // Check if it's likely milliseconds (usually > 1e11)
+      const ts = currentCandle.timestamp as number;
+      const date = new Date(ts > 1e11 ? ts : ts * 1000);
+      filename = format(date, 'dd-MM-yyyy');
+    }
+
+    // 6. Trigger download
+    const link = document.createElement('a');
+    link.download = `${filename}.png`;
+    link.href = combinedCanvas.toDataURL('image/png');
+    link.click();
+  };
+
   // Set up canvas size when chart is ready
   useEffect(() => {
     if (!chartContainerRef.current || !canvasRef.current) {
@@ -353,6 +394,7 @@ export function AdvancedChart() {
         onIndicatorToggle={handleIndicatorToggle}
         onClearDrawings={handleClearDrawings}
         onDeleteSelected={deleteSelectedDrawing}
+        onTakeScreenshot={handleTakeScreenshot}
         hasSelection={!!selectedDrawingId}
       />
       <div
