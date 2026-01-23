@@ -259,7 +259,7 @@ export function AdvancedChart() {
           position: trade.type === 'BUY' ? 'belowBar' : 'aboveBar',
           color: trade.type === 'BUY' ? '#26a69a' : '#ef5350',
           shape: trade.type === 'BUY' ? 'arrowUp' : 'arrowDown',
-          text: `${trade.type === 'BUY' ? 'B' : 'S'}@${trade.price.toFixed(2)}`,
+          text: `${trade.type === 'BUY' ? 'B' : 'S'}@${trade.price.toFixed(2)} [${format(new Date(trade.timestamp * 1000), 'HH:mm')}]`,
           size: 2,
         });
       }
