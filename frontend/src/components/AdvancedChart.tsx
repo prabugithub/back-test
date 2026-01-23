@@ -65,7 +65,7 @@ export function AdvancedChart() {
   } = useChartDrawings({
     canvasRef,
     activeTool,
-    onToolComplete: () => setActiveTool('select'),
+    onToolComplete: () => { /* No-op: keep tool active until reset */ },
     chartApi: chart,
     seriesApi: series,
     onTextToolTrigger: handleTextToolTrigger,
@@ -254,12 +254,25 @@ export function AdvancedChart() {
     // 1. Add Trade Markers
     trades.forEach((trade) => {
       if (trade.timestamp <= visibleCandles[visibleCandles.length - 1].timestamp) {
+        const isMs = trade.timestamp > 1e11;
+        const date = new Date(isMs ? trade.timestamp : trade.timestamp * 1000);
+
+        // Use UTC methods to ensure the label matches the chart's time scale (which usually interprets unix as UTC)
+        const hours = date.getUTCHours();
+        const minutes = date.getUTCMinutes();
+        const seconds = date.getUTCSeconds();
+
+        // Format as HH:mm if it has time, or dd MMM if it's a daily candle (midnight)
+        const timeStr = hours === 0 && minutes === 0 && seconds === 0
+          ? `${date.getUTCDate()} ${date.toLocaleString('default', { month: 'short', timeZone: 'UTC' })}`
+          : `${hours.toString().padStart(2, '0')}:${minutes.toString().padStart(2, '0')}`;
+
         allMarkers.push({
           time: trade.timestamp as any,
           position: trade.type === 'BUY' ? 'belowBar' : 'aboveBar',
           color: trade.type === 'BUY' ? '#26a69a' : '#ef5350',
           shape: trade.type === 'BUY' ? 'arrowUp' : 'arrowDown',
-          text: `${trade.type === 'BUY' ? 'B' : 'S'}@${trade.price.toFixed(2)} [${format(new Date(trade.timestamp * 1000), 'HH:mm')}]`,
+          text: `${trade.type === 'BUY' ? 'B' : 'S'}@${trade.price.toFixed(2)} [${timeStr}]`,
           size: 2,
         });
       }
@@ -419,16 +432,11 @@ export function AdvancedChart() {
           if (activeTool === 'none') return;
           const rect = e.currentTarget.getBoundingClientRect();
           const x = e.clientX - rect.left;
-          if (x > rect.width - 80) return;
+          if (x > rect.width - 40) return; // Ignore clicks strictly on the price scale area
 
-          if (activeTool !== 'select') {
+          const handled = handleMouseDown(e.nativeEvent);
+          if (handled) {
             e.stopPropagation();
-            handleMouseDown(e.nativeEvent);
-          }
-        }}
-        onMouseDown={(e) => {
-          if (activeTool === 'select') {
-            handleMouseDown(e.nativeEvent);
           }
         }}
         onMouseMove={(e) => {

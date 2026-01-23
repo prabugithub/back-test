@@ -1,24 +1,27 @@
-import { format } from 'date-fns';
+// No imports needed
 
 /**
  * Format timestamp to readable date/time
  */
 export function formatTimestamp(timestamp: number): string {
-  return format(new Date(timestamp * 1000), 'yyyy-MM-dd HH:mm:ss');
+  const date = new Date(timestamp * 1000);
+  return date.toISOString().replace('T', ' ').substring(0, 19);
 }
 
 /**
- * Format time only
+ * Format time only (UTC)
  */
 export function formatTime(timestamp: number): string {
-  return format(new Date(timestamp * 1000), 'HH:mm:ss');
+  const date = new Date(timestamp * 1000);
+  return date.toISOString().substring(11, 19);
 }
 
 /**
- * Format date only
+ * Format date only (UTC)
  */
 export function formatDate(timestamp: number): string {
-  return format(new Date(timestamp * 1000), 'yyyy-MM-dd');
+  const date = new Date(timestamp * 1000);
+  return date.toISOString().substring(0, 10);
 }
 
 /**

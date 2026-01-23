@@ -185,26 +185,25 @@ export function useChartDrawings({
   };
 
   const isPointOnRiskReward = (point: Point, p1: Point, p2: Point, threshold = 8): boolean => {
-    const entry = p1.y;
-    const riskLevel = p2.y;
-    const riskDistance = Math.abs(riskLevel - entry);
-    const isUpward = riskLevel < entry;
+    const entryY = p1.y;
+    const riskY_base = p2.y;
+    const dy = riskY_base - entryY;
 
     const minX = Math.min(p1.x, p2.x);
     const maxX = Math.max(p1.x, p2.x);
 
-    if (point.x < minX || point.x > maxX) return false;
+    if (point.x < minX - threshold || point.x > maxX + threshold) return false;
 
-    if (Math.abs(point.y - entry) <= threshold) return true;
+    // Check entry line
+    if (Math.abs(point.y - entryY) <= threshold) return true;
+
+    // Check risk line (Stop Loss)
+    if (Math.abs(point.y - riskY_base) <= threshold) return true;
 
     const ratios = [1, 2, 3];
-
     for (const ratio of ratios) {
-      const rewardY = entry + (isUpward ? -riskDistance * ratio : riskDistance * ratio);
+      const rewardY = entryY - (dy * ratio);
       if (Math.abs(point.y - rewardY) <= threshold) return true;
-
-      const riskY = entry + (isUpward ? riskDistance * ratio : -riskDistance * ratio);
-      if (Math.abs(point.y - riskY) <= threshold) return true;
     }
 
     return false;
@@ -337,10 +336,10 @@ export function useChartDrawings({
   }, [getDrawingColor, onToolComplete]);
 
   const handleMouseDown = useCallback((event: MouseEvent) => {
-    if (!canvasRef.current) return;
+    if (!canvasRef.current || event.button !== 0) return false;
     const point = getChartCoordinates(event, canvasRef.current);
 
-    if (activeToolRef.current === 'none') return;
+    if (activeToolRef.current === 'none') return false;
 
     const foundDrawing = findDrawingAtPoint(point, drawings);
 
@@ -359,14 +358,14 @@ export function useChartDrawings({
         setSelectedDrawingId(foundDrawing.id);
         setIsDragging(false);
       }
-      if (activeToolRef.current === 'select') return;
-      return;
+      // If we clicked a drawing in ANY tool mode, we consider it handled (selected)
+      return true;
     }
 
     if (activeToolRef.current === 'select') {
       setSelectedDrawingId(null);
       setIsDragging(false);
-      return;
+      return false;
     }
 
     // Handle Text tool
@@ -380,7 +379,7 @@ export function useChartDrawings({
           addTextDrawing(point, text);
         }
       }
-      return;
+      return true;
     }
 
     setSelectedDrawingId(null);
@@ -388,6 +387,7 @@ export function useChartDrawings({
 
     setCurrentDrawing([point]);
     setIsDrawing(true);
+    return true;
   }, [drawings, getChartCoordinates, convertLogicalToPixel, onTextToolTrigger, addTextDrawing]);
 
   const handleMouseMove = useCallback((event: MouseEvent) => {
@@ -531,53 +531,57 @@ export function useChartDrawings({
   };
 
   const drawRiskReward = (ctx: CanvasRenderingContext2D, p1: Point, p2: Point, _color: string) => {
-    const entry = p1.y;
-    const riskLevel = p2.y;
-    const riskDistance = Math.abs(riskLevel - entry);
-    const isUpward = riskLevel < entry;
+    const entryY = p1.y;
+    const riskY_base = p2.y;
+    const dy = riskY_base - entryY;
+    const minX = Math.min(p1.x, p2.x);
+    const maxX = Math.max(p1.x, p2.x);
 
-    ctx.strokeStyle = '#FFC107';
+    // Draw Entry Line
+    ctx.strokeStyle = '#FFC107'; // Golden/Yellow for Entry
     ctx.lineWidth = 2;
+    ctx.setLineDash([]);
     ctx.beginPath();
-    ctx.moveTo(p1.x, entry);
-    ctx.lineTo(p2.x, entry);
+    ctx.moveTo(minX, entryY);
+    ctx.lineTo(maxX, entryY);
     ctx.stroke();
 
-    ctx.font = '12px sans-serif';
+    ctx.font = 'bold 12px Inter, sans-serif';
     ctx.fillStyle = '#FFC107';
-    ctx.fillText('Entry', p2.x + 5, entry + 4);
+    ctx.textAlign = 'left';
+    ctx.fillText('ENTRY', maxX + 5, entryY + 4);
+
+    // Draw Risk (Stop Loss) Line
+    ctx.strokeStyle = '#F44336'; // Red for Risk
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    ctx.moveTo(minX, riskY_base);
+    ctx.lineTo(maxX, riskY_base);
+    ctx.stroke();
+    ctx.fillStyle = '#F44336';
+    ctx.fillText('STOP', maxX + 5, riskY_base + 4);
 
     const ratios = [
       { ratio: 1, color: '#4CAF50', label: '1:1' },
-      { ratio: 2, color: '#2196F3', label: '1:2' },
-      { ratio: 3, color: '#9C27B0', label: '1:3' }
+      { ratio: 2, color: '#4CAF50', label: '1:2' },
+      { ratio: 3, color: '#2E7D32', label: '1:3' }
     ];
 
     ratios.forEach(({ ratio, color, label }) => {
-      const rewardY = entry + (isUpward ? -riskDistance * ratio : riskDistance * ratio);
+      const rewardY = entryY - (dy * ratio);
       ctx.strokeStyle = color;
       ctx.lineWidth = 1.5;
       ctx.setLineDash([5, 5]);
       ctx.beginPath();
-      ctx.moveTo(p1.x, rewardY);
-      ctx.lineTo(p2.x, rewardY);
+      ctx.moveTo(minX, rewardY);
+      ctx.lineTo(maxX, rewardY);
       ctx.stroke();
       ctx.setLineDash([]);
       ctx.fillStyle = color;
-      ctx.fillText(label, p2.x + 5, rewardY + 4);
-
-      const riskY = entry + (isUpward ? riskDistance * ratio : -riskDistance * ratio);
-      ctx.strokeStyle = color;
-      ctx.lineWidth = 1.5;
-      ctx.setLineDash([5, 5]);
-      ctx.beginPath();
-      ctx.moveTo(p1.x, riskY);
-      ctx.lineTo(p2.x, riskY);
-      ctx.stroke();
-      ctx.setLineDash([]);
-      ctx.fillStyle = color;
-      ctx.fillText(label, p2.x + 5, riskY + 4);
+      ctx.fillText(`TP ${label}`, maxX + 5, rewardY + 4);
     });
+
+    ctx.textAlign = 'start'; // Reset
   };
 
   const drawFreehand = (ctx: CanvasRenderingContext2D, points: Point[], color: string, width = 2) => {
