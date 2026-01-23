@@ -146,6 +146,12 @@ export function PlaybackControls({ onOpenHistory }: { onOpenHistory?: () => void
   // Keyboard shortcuts
   useEffect(() => {
     const handleKeyPress = (e: KeyboardEvent) => {
+      // Ignore if user is typing in an input field
+      const target = e.target as HTMLElement;
+      if (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA') {
+        return;
+      }
+
       if (e.code === 'Space') {
         e.preventDefault();
         if (isPlaying) {

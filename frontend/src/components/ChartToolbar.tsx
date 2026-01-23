@@ -9,10 +9,11 @@ import {
   Circle,
   MousePointer,
   Pen,
-  Camera
+  Camera,
+  Type
 } from 'lucide-react';
 
-export type DrawingTool = 'none' | 'select' | 'trendline' | 'horizontal' | 'rectangle' | 'fibonacci' | 'riskReward' | 'freehand';
+export type DrawingTool = 'none' | 'select' | 'trendline' | 'horizontal' | 'rectangle' | 'fibonacci' | 'riskReward' | 'freehand' | 'text';
 export type Indicator = 'none' | 'sma21' | 'sma60' | 'ema21' | 'ema60' | 'pivotPoints';
 
 interface ChartToolbarProps {
@@ -46,6 +47,7 @@ export function ChartToolbar({
     { id: 'rectangle', icon: Square, label: 'Rectangle', shortcut: '5' },
     { id: 'fibonacci', icon: Circle, label: 'Fibonacci', shortcut: '6' },
     { id: 'riskReward', icon: Target, label: 'Risk/Reward', shortcut: '7' },
+    { id: 'text', icon: Type, label: 'Text', shortcut: '8' },
   ];
 
   const indicators: Array<{ id: Indicator; label: string; color: string }> = [

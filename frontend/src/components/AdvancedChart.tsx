@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useRef, useState, useCallback } from 'react';
 import {
   createChart,
   ColorType,
@@ -13,18 +13,23 @@ import type { DrawingTool } from './ChartToolbar';
 import type { Indicator } from './ChartToolbar';
 import { calculateSMA, calculateEMA, calculatePivotPoints } from '../utils/indicators';
 import { useChartDrawings } from '../hooks/useChartDrawings';
+import type { Point } from '../hooks/useChartDrawings';
 import { format } from 'date-fns';
+import { TextInputDialog } from './TextInputDialog';
 
 export function AdvancedChart() {
   const chartContainerRef = useRef<HTMLDivElement>(null);
-  const chartRef = useRef<any>(null);
-  const candleSeriesRef = useRef<any>(null);
-  const volumeSeriesRef = useRef<any>(null);
+  const [chart, setChart] = useState<any>(null);
+  const [series, setSeries] = useState<any>(null);
+  const [volumeSeries, setVolumeSeries] = useState<any>(null);
   const markersPrimitiveRef = useRef<any>(null);
   const indicatorSeriesRef = useRef<Map<string, any>>(new Map());
 
   const [activeTool, setActiveTool] = useState<DrawingTool>('none');
   const [activeIndicators, setActiveIndicators] = useState<Indicator[]>(['ema21', 'pivotPoints']);
+
+  const [isTextDialogOpen, setIsTextDialogOpen] = useState(false);
+  const [pendingTextPoint, setPendingTextPoint] = useState<Point | null>(null);
 
   const candles = useSessionStore((s) => s.candles);
   const currentIndex = useSessionStore((s) => s.currentIndex);
@@ -32,11 +37,16 @@ export function AdvancedChart() {
   const visibleCandles = candles.slice(0, currentIndex + 1);
 
   const isFirstLoadRef = useRef(true);
-  const canvasRef = useRef<HTMLCanvasElement | null>(null); // Create canvas ref here, not in hook
+  const canvasRef = useRef<HTMLCanvasElement | null>(null);
 
-  // Initialize drawing functionality
+  const handleTextToolTrigger = useCallback((point: Point) => {
+    setPendingTextPoint(point);
+    setIsTextDialogOpen(true);
+  }, []);
+
   const {
     clearDrawings,
+    addTextDrawing,
     deleteSelectedDrawing,
     selectedDrawingId,
     isHoveringSelected,
@@ -44,10 +54,20 @@ export function AdvancedChart() {
     handleMouseMove,
     handleMouseUp,
   } = useChartDrawings({
-    canvasRef, // Pass the ref to the hook
+    canvasRef,
     activeTool,
     onToolComplete: () => setActiveTool('none'),
+    chartApi: chart,
+    seriesApi: series,
+    onTextToolTrigger: handleTextToolTrigger,
   });
+
+  const handleTextSubmit = (text: string) => {
+    if (pendingTextPoint) {
+      addTextDrawing(pendingTextPoint, text);
+      setPendingTextPoint(null);
+    }
+  };
 
   // Initialize chart
   useEffect(() => {
@@ -105,14 +125,14 @@ export function AdvancedChart() {
     const markersPrimitive = createSeriesMarkers(candleSeries, []);
     candleSeries.attachPrimitive(markersPrimitive as any);
 
-    chartRef.current = chart;
-    candleSeriesRef.current = candleSeries;
-    volumeSeriesRef.current = volumeSeries;
+    setChart(chart);
+    setSeries(candleSeries);
+    setVolumeSeries(volumeSeries);
     markersPrimitiveRef.current = markersPrimitive;
 
     const handleResize = () => {
-      if (chartContainerRef.current && chartRef.current) {
-        chartRef.current.applyOptions({
+      if (chartContainerRef.current && chart) {
+        chart.applyOptions({
           width: chartContainerRef.current.clientWidth,
           height: chartContainerRef.current.clientHeight,
         });
@@ -129,7 +149,7 @@ export function AdvancedChart() {
 
   // Update candle data
   useEffect(() => {
-    if (!candleSeriesRef.current || !volumeSeriesRef.current) return;
+    if (!series) return;
 
     const candleData = visibleCandles.map((c) => ({
       time: c.timestamp as any,
@@ -145,11 +165,13 @@ export function AdvancedChart() {
       color: c.close >= c.open ? '#26a69a40' : '#ef535040',
     }));
 
-    candleSeriesRef.current.setData(candleData);
-    volumeSeriesRef.current.setData(volumeData);
+    series.setData(candleData);
+    if (volumeSeries) {
+      volumeSeries.setData(volumeData);
+    }
 
-    if (chartRef.current && visibleCandles.length > 0) {
-      const timeScale = chartRef.current.timeScale();
+    if (chart && visibleCandles.length > 0) {
+      const timeScale = chart.timeScale();
 
       if (isFirstLoadRef.current) {
         timeScale.fitContent();
@@ -158,7 +180,7 @@ export function AdvancedChart() {
         timeScale.scrollToPosition(3, false);
       }
     }
-  }, [visibleCandles]);
+  }, [visibleCandles, series, volumeSeries, chart]);
 
   // Reset on new data
   useEffect(() => {
@@ -167,11 +189,11 @@ export function AdvancedChart() {
 
   // Update indicator line series
   useEffect(() => {
-    if (!chartRef.current || visibleCandles.length === 0) return;
+    if (!chart || visibleCandles.length === 0) return;
 
     // Clear old indicator series (LineSeries only)
-    indicatorSeriesRef.current.forEach((series) => {
-      chartRef.current.removeSeries(series);
+    indicatorSeriesRef.current.forEach((s) => {
+      chart.removeSeries(s);
     });
     indicatorSeriesRef.current.clear();
 
@@ -200,15 +222,15 @@ export function AdvancedChart() {
       }
 
       if (data.length > 0) {
-        const series = chartRef.current.addSeries(LineSeries, {
+        const lineSeries = chart.addSeries(LineSeries, {
           color,
           lineWidth: 2,
         });
-        series.setData(data);
-        indicatorSeriesRef.current.set(indicator, series);
+        lineSeries.setData(data);
+        indicatorSeriesRef.current.set(indicator, lineSeries);
       }
     });
-  }, [activeIndicators, visibleCandles]);
+  }, [activeIndicators, visibleCandles, chart]);
 
   // Update markers (Trades and Pivot Points)
   useEffect(() => {
@@ -218,7 +240,6 @@ export function AdvancedChart() {
 
     // 1. Add Trade Markers
     trades.forEach((trade) => {
-      // Only show markers for trades that are within the current visible range
       if (trade.timestamp <= visibleCandles[visibleCandles.length - 1].timestamp) {
         allMarkers.push({
           time: trade.timestamp as any,
@@ -245,9 +266,7 @@ export function AdvancedChart() {
       });
     }
 
-    // Sort markers by time
     allMarkers.sort((a, b) => (a.time as number) - (b.time as number));
-
     markersPrimitiveRef.current.setMarkers(allMarkers);
   }, [activeIndicators, visibleCandles, trades]);
 
@@ -265,39 +284,28 @@ export function AdvancedChart() {
   };
 
   const handleTakeScreenshot = () => {
-    if (!chartRef.current || !canvasRef.current) return;
+    if (!chart || !canvasRef.current) return;
 
-    // 1. Get the chart's screenshot canvas
-    const chartCanvas = chartRef.current.takeScreenshot();
+    const chartCanvas = chart.takeScreenshot();
     if (!chartCanvas) return;
 
-    // 2. Create a temporary canvas to combine chart and drawings
     const combinedCanvas = document.createElement('canvas');
     combinedCanvas.width = chartCanvas.width;
     combinedCanvas.height = chartCanvas.height;
     const ctx = combinedCanvas.getContext('2d');
     if (!ctx) return;
 
-    // 3. Draw chart
     ctx.drawImage(chartCanvas, 0, 0);
-
-    // 4. Draw drawings (the overlay canvas)
-    // We scale the overlay canvas to match the chart screenshot canvas dimensions
-    // as the chart screenshot might have a different resolution (DPI)
     ctx.drawImage(canvasRef.current, 0, 0, combinedCanvas.width, combinedCanvas.height);
 
-    // 5. Generate filename from current candle's date (DD-MM-YYYY)
     const currentCandle = useSessionStore.getState().getCurrentCandle();
     let filename = 'chart-screenshot';
     if (currentCandle) {
-      // Create date from timestamp (assuming seconds, adjust if milliseconds)
-      // Check if it's likely milliseconds (usually > 1e11)
       const ts = currentCandle.timestamp as number;
       const date = new Date(ts > 1e11 ? ts : ts * 1000);
       filename = format(date, 'dd-MM-yyyy');
     }
 
-    // 6. Trigger download
     const link = document.createElement('a');
     link.download = `${filename}.png`;
     link.href = combinedCanvas.toDataURL('image/png');
@@ -306,9 +314,7 @@ export function AdvancedChart() {
 
   // Set up canvas size when chart is ready
   useEffect(() => {
-    if (!chartContainerRef.current || !canvasRef.current) {
-      return;
-    }
+    if (!chartContainerRef.current || !canvasRef.current) return;
 
     const canvas = canvasRef.current;
     const container = chartContainerRef.current;
@@ -319,48 +325,29 @@ export function AdvancedChart() {
       canvas.height = rect.height;
     };
 
-    // Initial resize
     setTimeout(resizeCanvas, 100);
-
     window.addEventListener('resize', resizeCanvas);
-
-    return () => {
-      window.removeEventListener('resize', resizeCanvas);
-    };
-  }, []); // Empty dependency array - only run once!
-
-  // Log when activeTool changes
-  useEffect(() => {
-    // Only keeping this generic log if useful, but can remove
-    // console.log('🎨 Active tool changed to:', activeTool); 
-  }, [activeTool]);
-
-
+    return () => window.removeEventListener('resize', resizeCanvas);
+  }, []);
 
   // Keyboard shortcuts
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
-      // Ignore if user is typing in an input field
       const target = e.target as HTMLElement;
-      if (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA') {
-        return;
-      }
+      if (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA') return;
 
-      // Delete/Backspace to delete selected drawing
       if ((e.key === 'Delete' || e.key === 'Backspace') && selectedDrawingId) {
         e.preventDefault();
         deleteSelectedDrawing();
         return;
       }
 
-      // Escape to exit drawing/select mode
       if (e.key === 'Escape' && activeTool !== 'none') {
         e.preventDefault();
         setActiveTool('none');
         return;
       }
 
-      // Drawing tool shortcuts (1-7 for tools, V for select)
       const toolMap: { [key: string]: DrawingTool } = {
         'v': 'select',
         '1': 'select',
@@ -370,13 +357,13 @@ export function AdvancedChart() {
         '5': 'rectangle',
         '6': 'fibonacci',
         '7': 'riskReward',
+        '8': 'text',
       };
 
       const key = e.key.toLowerCase();
       if (toolMap[key]) {
         e.preventDefault();
         const newTool = toolMap[key];
-        // Toggle off if already active
         setActiveTool(activeTool === newTool ? 'none' : newTool);
       }
     };
@@ -386,7 +373,7 @@ export function AdvancedChart() {
   }, [selectedDrawingId, activeTool, deleteSelectedDrawing]);
 
   return (
-    <div className="w-full h-full flex flex-col">
+    <div className="w-full h-full flex flex-col relative">
       <ChartToolbar
         activeTool={activeTool}
         onToolChange={setActiveTool}
@@ -397,11 +384,40 @@ export function AdvancedChart() {
         onTakeScreenshot={handleTakeScreenshot}
         hasSelection={!!selectedDrawingId}
       />
+
+      <TextInputDialog
+        isOpen={isTextDialogOpen}
+        onClose={() => setIsTextDialogOpen(false)}
+        onSubmit={handleTextSubmit}
+        position={pendingTextPoint ? { x: pendingTextPoint.x, y: pendingTextPoint.y } : null}
+      />
+
       <div
         className="relative flex-1"
-        style={{
-          width: '100%',
-          minHeight: '0', // Important for flex container
+        style={{ width: '100%', minHeight: '0' }}
+        onMouseDownCapture={(e) => {
+          if (activeTool === 'none') return;
+          const rect = e.currentTarget.getBoundingClientRect();
+          const x = e.clientX - rect.left;
+          if (x > rect.width - 80) return;
+
+          if (activeTool !== 'select') {
+            e.stopPropagation();
+            handleMouseDown(e.nativeEvent);
+          }
+        }}
+        onMouseDown={(e) => {
+          if (activeTool === 'select') {
+            handleMouseDown(e.nativeEvent);
+          }
+        }}
+        onMouseMove={(e) => {
+          if (activeTool === 'none') return;
+          handleMouseMove(e.nativeEvent);
+        }}
+        onMouseUp={() => {
+          if (activeTool === 'none') return;
+          handleMouseUp();
         }}
       >
         <div
@@ -412,11 +428,10 @@ export function AdvancedChart() {
             left: 0,
             width: '100%',
             height: '100%',
-            pointerEvents: activeTool !== 'none' ? 'none' : 'auto', // Disable when drawing
-            zIndex: 1, // Below canvas (which is zIndex: 100)
+            pointerEvents: 'auto',
+            zIndex: 1,
           }}
         />
-        {/* Canvas overlay for drawings */}
         <canvas
           ref={canvasRef}
           className="absolute top-0 left-0 w-full h-full"
@@ -424,35 +439,17 @@ export function AdvancedChart() {
             cursor: activeTool === 'select' && isHoveringSelected ? 'move' :
               (activeTool === 'select' ? 'pointer' :
                 (activeTool !== 'none' ? 'crosshair' : 'default')),
-            pointerEvents: activeTool !== 'none' ? 'auto' : 'none',
+            pointerEvents: 'none',
             zIndex: 100,
-            touchAction: 'none', // Prevent touch scrolling
-          }}
-          onMouseDown={(e) => {
-            e.preventDefault();
-            e.stopPropagation();
-            handleMouseDown(e.nativeEvent);
-          }}
-          onMouseMove={(e) => {
-            e.stopPropagation();
-            handleMouseMove(e.nativeEvent);
-          }}
-          onMouseUp={(e) => {
-            e.preventDefault();
-            e.stopPropagation();
-            handleMouseUp();
-          }}
-          onClick={(e) => {
-            e.preventDefault();
-            e.stopPropagation();
+            touchAction: 'none',
           }}
         />
         {activeTool !== 'none' && (
-          <div className="absolute top-2 right-2 bg-blue-50 border border-blue-200 rounded px-3 py-2 text-sm" style={{ zIndex: 200 }}>
-            <strong>Drawing Mode:</strong> {activeTool}
+          <div className="absolute top-2 left-1/2 -translate-x-1/2 bg-blue-600 text-white rounded-full px-6 py-1.5 shadow-xl text-sm font-medium animate-in slide-in-from-top-4" style={{ zIndex: 200 }}>
+            Drawing: <span className="capitalize">{activeTool}</span>
             <button
               onClick={() => setActiveTool('none')}
-              className="ml-2 text-blue-600 hover:text-blue-800 underline"
+              className="ml-4 text-blue-200 hover:text-white transition-colors border-l border-blue-500 pl-4"
             >
               Cancel
             </button>
