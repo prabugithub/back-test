@@ -30,6 +30,7 @@ export function AdvancedChart() {
 
   const [isTextDialogOpen, setIsTextDialogOpen] = useState(false);
   const [pendingTextPoint, setPendingTextPoint] = useState<Point | null>(null);
+  const [pendingCalloutPoints, setPendingCalloutPoints] = useState<{ p1: Point, p2: Point } | null>(null);
 
   const candles = useSessionStore((s) => s.candles);
   const currentIndex = useSessionStore((s) => s.currentIndex);
@@ -41,12 +42,21 @@ export function AdvancedChart() {
 
   const handleTextToolTrigger = useCallback((point: Point) => {
     setPendingTextPoint(point);
+    setPendingCalloutPoints(null);
+    setIsTextDialogOpen(true);
+  }, []);
+
+  const handleCalloutTrigger = useCallback((p1: Point, p2: Point) => {
+    // For callout, point 2 is where the text box is, so show dialog there
+    setPendingTextPoint(p2);
+    setPendingCalloutPoints({ p1, p2 });
     setIsTextDialogOpen(true);
   }, []);
 
   const {
     clearDrawings,
     addTextDrawing,
+    addCalloutDrawing,
     deleteSelectedDrawing,
     selectedDrawingId,
     isHoveringSelected,
@@ -60,13 +70,17 @@ export function AdvancedChart() {
     chartApi: chart,
     seriesApi: series,
     onTextToolTrigger: handleTextToolTrigger,
+    onCalloutTrigger: handleCalloutTrigger,
   });
 
   const handleTextSubmit = (text: string) => {
-    if (pendingTextPoint) {
+    if (pendingCalloutPoints) {
+      addCalloutDrawing(pendingCalloutPoints.p1, pendingCalloutPoints.p2, text);
+    } else if (pendingTextPoint) {
       addTextDrawing(pendingTextPoint, text);
-      setPendingTextPoint(null);
     }
+    setPendingTextPoint(null);
+    setPendingCalloutPoints(null);
   };
 
   // Initialize chart
@@ -358,6 +372,7 @@ export function AdvancedChart() {
         '6': 'fibonacci',
         '7': 'riskReward',
         '8': 'text',
+        '9': 'callout',
       };
 
       const key = e.key.toLowerCase();
