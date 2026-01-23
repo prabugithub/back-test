@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, useCallback } from 'react';
+import { useEffect, useRef, useState, useCallback, useMemo } from 'react';
 import {
   createChart,
   ColorType,
@@ -35,7 +35,11 @@ export function AdvancedChart() {
   const candles = useSessionStore((s) => s.candles);
   const currentIndex = useSessionStore((s) => s.currentIndex);
   const trades = useSessionStore((s) => s.trades);
-  const visibleCandles = candles.slice(0, currentIndex + 1);
+
+  const visibleCandles = useMemo(() =>
+    candles.slice(0, currentIndex + 1),
+    [candles, currentIndex]
+  );
 
   const isFirstLoadRef = useRef(true);
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
@@ -164,7 +168,7 @@ export function AdvancedChart() {
   useEffect(() => {
     if (!series) return;
 
-    const candleData = visibleCandles.map((c) => ({
+    const candleData = visibleCandles.map((c: any) => ({
       time: c.timestamp as any,
       open: c.open,
       high: c.high,
@@ -172,7 +176,7 @@ export function AdvancedChart() {
       close: c.close,
     }));
 
-    const volumeData = visibleCandles.map((c) => ({
+    const volumeData = visibleCandles.map((c: any) => ({
       time: c.timestamp as any,
       value: c.volume,
       color: c.close >= c.open ? '#26a69a40' : '#ef535040',
@@ -185,12 +189,9 @@ export function AdvancedChart() {
 
     if (chart && visibleCandles.length > 0) {
       const timeScale = chart.timeScale();
-
       if (isFirstLoadRef.current) {
         timeScale.fitContent();
         isFirstLoadRef.current = false;
-      } else {
-        timeScale.scrollToPosition(3, false);
       }
     }
   }, [visibleCandles, series, volumeSeries, chart]);
