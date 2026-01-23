@@ -67,7 +67,7 @@ export function TradeReportDialog({ isOpen, onClose }: TradeReportDialogProps) {
     if (!isOpen) return null;
 
     return (
-        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-[2000]">
             <div className="bg-white rounded-lg shadow-2xl w-[95%] max-w-6xl h-[90vh] flex flex-col">
                 {/* Header */}
                 <div className="flex items-center justify-between p-4 border-b bg-gradient-to-r from-blue-600 to-blue-700 text-white rounded-t-lg">
@@ -118,8 +118,8 @@ export function TradeReportDialog({ isOpen, onClose }: TradeReportDialogProps) {
                                         <div
                                             key={session.id}
                                             className={`p-3 rounded-lg border-2 cursor-pointer transition-all ${selectedSessionId === session.id
-                                                    ? 'bg-blue-50 border-blue-300 shadow-md'
-                                                    : 'bg-white border-gray-200 hover:border-blue-200 hover:shadow'
+                                                ? 'bg-blue-50 border-blue-300 shadow-md'
+                                                : 'bg-white border-gray-200 hover:border-blue-200 hover:shadow'
                                                 }`}
                                             onClick={() => setSelectedSessionId(session.id)}
                                         >
@@ -277,8 +277,8 @@ export function TradeReportDialog({ isOpen, onClose }: TradeReportDialogProps) {
                                                         </td>
                                                         <td className="p-3">
                                                             <span className={`px-2 py-1 rounded text-xs font-semibold ${trade.type === 'BUY'
-                                                                    ? 'bg-green-100 text-green-700'
-                                                                    : 'bg-red-100 text-red-700'
+                                                                ? 'bg-green-100 text-green-700'
+                                                                : 'bg-red-100 text-red-700'
                                                                 }`}>
                                                                 {trade.type}
                                                             </span>
