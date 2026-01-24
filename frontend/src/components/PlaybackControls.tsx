@@ -3,6 +3,7 @@ import { Play, Pause, ChevronLeft, ChevronRight, FastForward, CalendarClock, Set
 import { useSessionStore } from '../stores/sessionStore';
 import { formatTimestamp } from '../utils/formatters';
 import { parseColumnarData, resampleCandles, type ColumnarData } from '../utils/resampler';
+import { calculatePivotPoints } from '../utils/indicators';
 
 // Dynamic import for local data
 const loadNiftyData = () => import('../assets/market-data/nifty50.json');
@@ -283,6 +284,32 @@ export function PlaybackControls({ onOpenHistory }: { onOpenHistory?: () => void
         <div className="flex items-center gap-2 flex-wrap justify-center">
           {/* Mini Trading Buttons */}
           <div className="flex items-center gap-2">
+            {/* Recent Pivot SL Info */}
+            {(() => {
+              const pivots = calculatePivotPoints(candles.slice(0, currentIndex + 1));
+              const recentPivot = pivots.length > 0 ? pivots[pivots.length - 1] : null;
+              if (!recentPivot) return null;
+
+              const pointsAtRisk = recentPivot.slDistance;
+              // Example risk: 10,000 INR
+              const riskAmount = 10000;
+              const calcQty = Math.floor(riskAmount / pointsAtRisk);
+
+              return (
+                <div className="flex items-center gap-2 px-2 py-1 bg-yellow-50 border border-yellow-200 rounded text-[10px] text-yellow-800">
+                  <span className="font-bold">{recentPivot.type === 'bullish' ? 'LONG' : 'SHORT'}</span>
+                  <span className="border-l border-yellow-300 pl-2">Gap: {pointsAtRisk}</span>
+                  <button
+                    onClick={() => setTradeQuantity(calcQty)}
+                    className="ml-1 px-1.5 py-0.5 bg-yellow-600 text-white rounded hover:bg-yellow-700 font-bold"
+                    title="Calculate Qty for 10k Risk"
+                  >
+                    Set Qty ({calcQty})
+                  </button>
+                </div>
+              );
+            })()}
+
             <input
               type="number"
               min="1"

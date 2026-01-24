@@ -97,6 +97,7 @@ export interface PivotPoint {
   time: number;
   type: 'bullish' | 'bearish';
   price: number;
+  slDistance: number;
 }
 
 /**
@@ -121,10 +122,10 @@ export function calculatePivotPoints(candles: Candle[]): PivotPoint[] {
       continue;
     }
 
-    const current = candles[i];      // index 0 in Pine Script
-    const prev = candles[i - 1];     // index 1 in Pine Script
-    const prev2 = candles[i - 2];    // index 2 in Pine Script
-    const prev3 = candles[i - 3];    // index 3 in Pine Script
+    const current = candles[i];      // index 0 in Pine Script logic
+    const prev = candles[i - 1];     // index 1 in Pine Script logic
+    const prev2 = candles[i - 2];    // index 2 in Pine Script logic
+    const prev3 = candles[i - 3];    // index 3 in Pine Script logic
 
     // ============================================
     // BULLISH REVERSAL PIVOT LOGIC
@@ -159,10 +160,15 @@ export function calculatePivotPoints(candles: Candle[]): PivotPoint[] {
     const bullishPivot = (condition1_bull_or || condition1_bull) && condition3_bull;
 
     if (bullishPivot) {
+      // Logic for Long SL Distance: abs(min(low[0], low[1]) - close[0]) + 2
+      const minLow = Math.min(current.low, prev.low);
+      const slDistance = Math.ceil(Math.abs(current.close - minLow) + 2);
+
       result.push({
         time: current.timestamp,
         type: 'bullish',
-        price: current.low, // Place marker at the low of the bullish pivot candle
+        price: current.low,
+        slDistance: slDistance,
       });
     }
 
@@ -196,16 +202,22 @@ export function calculatePivotPoints(candles: Candle[]): PivotPoint[] {
       (prev.high > prev2.high || prev2.close > prev3.high);
 
     // Combined bearish signal
-    const bearishPivot = condition1_bear_or || condition1_bear && condition3_bear;
+    const bearishPivot = condition1_bear_or || (condition1_bear && condition3_bear);
 
     if (bearishPivot) {
+      // Logic for Short SL Distance: abs(max(high[0], high[1]) - close[0]) + 2
+      const maxHigh = Math.max(current.high, prev.high);
+      const slDistance = Math.ceil(Math.abs(current.close - maxHigh) + 2);
+
       result.push({
         time: current.timestamp,
         type: 'bearish',
-        price: current.high, // Place marker at the high of the bearish pivot candle
+        price: current.high,
+        slDistance: slDistance,
       });
     }
   }
 
   return result;
 }
+
