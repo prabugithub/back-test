@@ -178,7 +178,7 @@ export function calculatePivotPoints(candles: Candle[]): PivotPoint[] {
         type: 'bullish',
         price: current.low,
         slDistance: slDistance,
-        trendLabel: label,
+        // trendLabel: label,
       });
     }
 
@@ -230,7 +230,7 @@ export function calculatePivotPoints(candles: Candle[]): PivotPoint[] {
         type: 'bearish',
         price: current.high,
         slDistance: slDistance,
-        trendLabel: label,
+        // trendLabel: label,
       });
     }
   }
