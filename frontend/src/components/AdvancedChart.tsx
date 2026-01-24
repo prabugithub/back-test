@@ -282,17 +282,20 @@ export function AdvancedChart() {
     // 2. Add Pivot Point Markers if active
     if (activeIndicators.includes('pivotPoints')) {
       const allPivots = calculatePivotPoints(visibleCandles);
-      if (allPivots.length > 0) {
-        const lastPivot = allPivots[allPivots.length - 1];
+      allPivots.forEach((p, index) => {
+        const isLast = index === allPivots.length - 1;
+        const trend = p.trendLabel ? `${p.trendLabel} ` : '';
+        const gap = isLast ? p.slDistance.toString() : '';
+
         allMarkers.push({
-          time: lastPivot.time as any,
-          position: lastPivot.type === 'bullish' ? 'belowBar' : 'aboveBar',
-          color: lastPivot.type === 'bullish' ? '#26a69a' : '#ef5350',
-          shape: lastPivot.type === 'bullish' ? 'arrowUp' : 'arrowDown',
-          text: lastPivot.slDistance.toString(),
+          time: p.time as any,
+          position: p.type === 'bullish' ? 'belowBar' : 'aboveBar',
+          color: p.type === 'bullish' ? '#26a69a' : '#ef5350',
+          shape: p.type === 'bullish' ? 'arrowUp' : 'arrowDown',
+          text: (trend + gap).trim(),
           size: 1,
         });
-      }
+      });
     }
 
     allMarkers.sort((a, b) => (a.time as number) - (b.time as number));

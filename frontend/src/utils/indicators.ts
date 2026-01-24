@@ -98,6 +98,7 @@ export interface PivotPoint {
   type: 'bullish' | 'bearish';
   price: number;
   slDistance: number;
+  trendLabel?: 'HH' | 'HL' | 'LH' | 'LL';
 }
 
 /**
@@ -107,6 +108,8 @@ export interface PivotPoint {
  */
 export function calculatePivotPoints(candles: Candle[]): PivotPoint[] {
   const result: PivotPoint[] = [];
+  let lastBullPrice = 0;
+  let lastBearPrice = 0;
 
   // Validate we have enough candles
   if (!candles || candles.length < 5) {
@@ -164,11 +167,18 @@ export function calculatePivotPoints(candles: Candle[]): PivotPoint[] {
       const minLow = Math.min(current.low, prev.low);
       const slDistance = Math.ceil(Math.abs(current.close - minLow) + 2);
 
+      let label: 'HL' | 'LL' | undefined = undefined;
+      if (lastBullPrice > 0) {
+        label = current.low > lastBullPrice ? 'HL' : 'LL';
+      }
+      lastBullPrice = current.low;
+
       result.push({
         time: current.timestamp,
         type: 'bullish',
         price: current.low,
         slDistance: slDistance,
+        trendLabel: label,
       });
     }
 
@@ -209,11 +219,18 @@ export function calculatePivotPoints(candles: Candle[]): PivotPoint[] {
       const maxHigh = Math.max(current.high, prev.high);
       const slDistance = Math.ceil(Math.abs(current.close - maxHigh) + 2);
 
+      let label: 'HH' | 'LH' | undefined = undefined;
+      if (lastBearPrice > 0) {
+        label = current.high > lastBearPrice ? 'HH' : 'LH';
+      }
+      lastBearPrice = current.high;
+
       result.push({
         time: current.timestamp,
         type: 'bearish',
         price: current.high,
         slDistance: slDistance,
+        trendLabel: label,
       });
     }
   }
