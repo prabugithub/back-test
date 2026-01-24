@@ -23,8 +23,8 @@ function App() {
         {/* Main Content Area */}
         <main className="flex-1 flex flex-col relative min-w-0">
           {!hasData ? (
-            <div className="flex-1 flex flex-col items-center justify-center p-8 bg-white">
-              <div className="max-w-2xl w-full">
+            <div className="flex-1 overflow-y-auto p-4 md:p-8 bg-white flex flex-col items-center">
+              <div className="max-w-2xl w-full my-auto">
                 <div className="mb-6 p-4 bg-blue-50 border border-blue-200 rounded-lg">
                   <h2 className="font-semibold text-blue-900 mb-2">
                     Welcome to Manual Backtesting
@@ -52,7 +52,7 @@ function App() {
                 />
               )}
               {/* Controls Bar */}
-              <div className="flex-none p-2 bg-white border-b z-10 flex gap-2 items-center">
+              <div className="flex-none p-2 bg-white border-b z-10 flex flex-wrap gap-2 items-start">
                 <div className="flex-1">
                   <PlaybackControls onOpenHistory={() => setIsTradeHistoryOpen(true)} />
                 </div>

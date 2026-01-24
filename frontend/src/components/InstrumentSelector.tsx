@@ -10,7 +10,7 @@ import { parseColumnarData, resampleCandles, type ColumnarData } from '../utils/
 const loadNiftyData = () => import('../assets/market-data/nifty50.json');
 
 export function InstrumentSelector() {
-  const [dataSource, setDataSource] = useState<'api' | 'local'>('api');
+  const [dataSource, setDataSource] = useState<'api' | 'local'>('local');
   const [securityId, setSecurityId] = useState('2885'); // RELIANCE on Angel One
   const [exchangeSegment, setExchangeSegment] = useState('NSE_EQ');
   const [instrument, setInstrument] = useState('EQUITY');
@@ -139,16 +139,6 @@ export function InstrumentSelector() {
         {/* Source Toggle */}
         <div className="flex bg-gray-100 p-1 rounded-lg">
           <button
-            onClick={() => setDataSource('api')}
-            className={`px-3 py-1.5 text-sm font-medium rounded-md flex items-center gap-2 transition-all ${dataSource === 'api'
-              ? 'bg-white text-blue-600 shadow-sm'
-              : 'text-gray-600 hover:text-gray-900'
-              }`}
-          >
-            <Database size={16} />
-            API
-          </button>
-          <button
             onClick={() => setDataSource('local')}
             className={`px-3 py-1.5 text-sm font-medium rounded-md flex items-center gap-2 transition-all ${dataSource === 'local'
               ? 'bg-white text-blue-600 shadow-sm'
@@ -157,6 +147,16 @@ export function InstrumentSelector() {
           >
             <HardDrive size={16} />
             Local Nifty
+          </button>
+          <button
+            onClick={() => setDataSource('api')}
+            className={`px-3 py-1.5 text-sm font-medium rounded-md flex items-center gap-2 transition-all ${dataSource === 'api'
+              ? 'bg-white text-blue-600 shadow-sm'
+              : 'text-gray-600 hover:text-gray-900'
+              }`}
+          >
+            <Database size={16} />
+            API
           </button>
         </div>
       </div>

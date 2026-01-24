@@ -176,9 +176,9 @@ export function PlaybackControls({ onOpenHistory }: { onOpenHistory?: () => void
 
   return (
     <div className="relative">
-      <div className="flex items-center justify-between w-full h-full px-2 gap-4">
+      <div className="flex flex-wrap items-center justify-between w-full h-full px-2 gap-y-2 gap-x-4 py-1">
         {/* Left: Playback Controls */}
-        <div className="flex items-center gap-1">
+        <div className="flex items-center gap-1 flex-wrap">
           <button
             onClick={() => step('backward')}
             disabled={currentIndex === 0}
@@ -268,7 +268,7 @@ export function PlaybackControls({ onOpenHistory }: { onOpenHistory?: () => void
           <div className="font-medium text-gray-900 text-sm">
             {currentCandle ? formatTimestamp(currentCandle.timestamp) : '--'}
           </div>
-          <div className="w-64 bg-gray-200 rounded-full h-1.5 mt-1 mb-0.5 overflow-hidden">
+          <div className="w-full max-w-[16rem] bg-gray-200 rounded-full h-1.5 mt-1 mb-0.5 overflow-hidden">
             <div
               className="bg-blue-500 h-full transition-all duration-200"
               style={{ width: `${progress}%` }}
@@ -280,7 +280,7 @@ export function PlaybackControls({ onOpenHistory }: { onOpenHistory?: () => void
         </div>
 
         {/* Right: Quick Actions (Buy/Sell & Reset) */}
-        <div className="flex items-center gap-4">
+        <div className="flex items-center gap-2 flex-wrap justify-center">
           {/* Mini Trading Buttons */}
           <div className="flex items-center gap-2">
             <input
