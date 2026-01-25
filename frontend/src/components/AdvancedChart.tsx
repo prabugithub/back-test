@@ -193,6 +193,10 @@ export function AdvancedChart() {
 
     if (chart && visibleCandles.length > 0) {
       const timeScale = chart.timeScale();
+
+      // Auto-scroll logic: 
+      // If we are strictly "first loading" the data, fit content.
+      // If we are appending data (playback), we generally want to stay on the latest bar (right edge).
       if (isFirstLoadRef.current) {
         timeScale.fitContent();
         isFirstLoadRef.current = false;
@@ -358,7 +362,12 @@ export function AdvancedChart() {
     });
 
     const tradeCount = tradesForDay.length;
-    const filename = dateStr ? `${dateStr}_Trade-${tradeCount + 1}` : defaultBase;
+    // User logic: "if i did three trade we need to add trade 3".
+    // "but next day start from count 1".
+    // This implies we want the *current* count of trades for the screenshot name.
+    // If 0 trades, we default to 1 (Planning Trade 1).
+    const countToUse = tradeCount > 0 ? tradeCount : 1;
+    const filename = dateStr ? `${dateStr}_Trade-${countToUse}` : defaultBase;
 
     setScreenshotDefaultName(filename);
     setPendingScreenshotData(base64Image);

@@ -6,6 +6,8 @@ import { formatTimestamp } from '../utils/formatters';
 import { parseColumnarData, resampleCandles, type ColumnarData } from '../utils/resampler';
 import { calculatePivotPoints } from '../utils/indicators';
 
+import { fetchCandles } from '../services/api';
+
 // Dynamic import for local data
 const loadNiftyData = () => import('../assets/market-data/nifty50.json');
 
@@ -29,49 +31,117 @@ export function PlaybackControls({ onOpenHistory }: { onOpenHistory?: () => void
   const [tradeQuantity, setTradeQuantity] = useState(65);
   const [showSettings, setShowSettings] = useState(false);
   const [showDatePicker, setShowDatePicker] = useState(false);
-  const [jumpToDate, setJumpToDate] = useState('');
+  const [jumpToDate, setJumpToDate] = useState('2021-02-01');
 
-  // Data loading settings
+  // Data loading settings (initially sync with session)
   const [timeframe, setTimeframe] = useState('5');
-  const [fromDate, setFromDate] = useState('2024-01-01');
-  const [toDate, setToDate] = useState('2024-01-31');
+  const [fromDate, setFromDate] = useState('');
+  const [toDate, setToDate] = useState('');
   const [isReloading, setIsReloading] = useState(false);
 
   const resetSession = useSessionStore((s) => s.resetSession);
+  const sessionConfig = useSessionStore((s) => s.sessionConfig);
+
+  // Sync settings with session config when it changes or when opening settings
+  useEffect(() => {
+    if (showSettings && sessionConfig) {
+      if (sessionConfig.interval) setTimeframe(sessionConfig.interval);
+      if (sessionConfig.fromDate) setFromDate(sessionConfig.fromDate);
+      if (sessionConfig.toDate) setToDate(sessionConfig.toDate);
+    }
+  }, [showSettings, sessionConfig]);
 
   // Handle data reload with new timeframe/dates
   const handleReloadData = async () => {
+    const config = useSessionStore.getState().sessionConfig;
+    if (!config) {
+      useNotificationStore.getState().notify('No active session config found.', 'error');
+      return;
+    }
+
     setIsReloading(true);
     try {
-      // For now, we'll use local data. You can add API support later
-      const module = await loadNiftyData();
-      const rawData: any = module.default || module;
+      // API Data Source
+      if (config.dataSource === 'api') {
+        const response = await fetchCandles({
+          securityId: config.securityId,
+          exchangeSegment: config.exchangeSegment,
+          instrument: config.instrumentType,
+          interval: timeframe,
+          fromDate: fromDate,
+          toDate: toDate,
+        });
 
-      if (!rawData || !rawData.t || !rawData.o || !rawData.h || !rawData.l || !rawData.c || !rawData.v) {
-        throw new Error('Invalid JSON data format');
+        if (response.success && response.data.length > 0) {
+          const newConfig = {
+            ...config,
+            interval: timeframe,
+            fromDate,
+            toDate
+          };
+          loadCandles(response.data, `${config.securityId}-${config.exchangeSegment}`, newConfig);
+          setShowSettings(false);
+          useNotificationStore.getState().notify('Data reloaded successfully (API)!', 'success');
+        } else {
+          throw new Error((response as any).message || 'No data received from API');
+        }
       }
+      // Local Data Source
+      else {
+        // Fallback: Currently only reliable for Nifty 50 or if we add logic for others
+        // Note: Ideally we should use the same loader as InstrumentSelector, but for now we default to Nifty 
+        // if it's a local test session to avoid breaking "Demo" usage.
 
-      let allCandles = parseColumnarData(rawData as ColumnarData);
+        const module = await loadNiftyData();
+        const rawData: any = module.default || module;
 
-      // Filter by date range
-      if (fromDate) {
-        const fromTs = new Date(fromDate).getTime() / 1000;
-        allCandles = allCandles.filter(c => c.timestamp >= fromTs);
+        if (!rawData || !rawData.t || !rawData.o || !rawData.h || !rawData.l || !rawData.c || !rawData.v) {
+          throw new Error('Invalid JSON data format');
+        }
+
+        let allCandles = parseColumnarData(rawData as ColumnarData);
+
+        // Filter by date range
+        if (fromDate) {
+          const fromTs = new Date(fromDate).getTime() / 1000;
+          allCandles = allCandles.filter(c => c.timestamp >= fromTs);
+        }
+        if (toDate) {
+          const toTs = (new Date(toDate).getTime() / 1000) + 86400;
+          allCandles = allCandles.filter(c => c.timestamp < toTs);
+        }
+
+        // Resample to selected timeframe
+        // Map string timeframe to minutes
+        let tfMinutes = 5;
+        if (timeframe === '1') tfMinutes = 1;
+        if (timeframe === '5') tfMinutes = 5;
+        if (timeframe === '15') tfMinutes = 15;
+        if (timeframe === '30') tfMinutes = 30;
+        if (timeframe === '60') tfMinutes = 60;
+        if (timeframe === '240') tfMinutes = 240;
+        if (timeframe === '1440' || timeframe === '1D') tfMinutes = 1440;
+
+        const resampledCandles = resampleCandles(allCandles, tfMinutes);
+
+        if (resampledCandles.length === 0) {
+          throw new Error('No candles found for the selected range/timeframe');
+        }
+
+        const newConfig = {
+          ...config,
+          interval: timeframe,
+          fromDate,
+          toDate
+        };
+
+        loadCandles(resampledCandles, `NIFTY50 (Local ${timeframe}m)`, newConfig);
+        setShowSettings(false);
+        useNotificationStore.getState().notify('Data reloaded successfully (Local)!', 'success');
       }
-      if (toDate) {
-        const toTs = (new Date(toDate).getTime() / 1000) + 86400;
-        allCandles = allCandles.filter(c => c.timestamp < toTs);
-      }
-
-      // Resample to selected timeframe
-      const resampledCandles = resampleCandles(allCandles, parseInt(timeframe));
-
-      loadCandles(resampledCandles, `NIFTY50-${timeframe}min`);
-      setShowSettings(false);
-      useNotificationStore.getState().notify('Data loaded successfully!', 'success');
-    } catch (error) {
+    } catch (error: any) {
       console.error('Failed to reload data:', error);
-      useNotificationStore.getState().notify('Failed to reload data. Please try again.', 'error');
+      useNotificationStore.getState().notify(`Failed to reload data: ${error.message}`, 'error');
     } finally {
       setIsReloading(false);
     }
@@ -105,26 +175,40 @@ export function PlaybackControls({ onOpenHistory }: { onOpenHistory?: () => void
   const handleJumpToDate = () => {
     if (!jumpToDate || candles.length === 0) return;
 
+    // Create date at 00:00:00 of that day (Local/Device time usually preferred for input[type=date])
+    // But since input[type=date] is YYYY-MM-DD, new Date(str) is UTC. 
+    // We want the start of that day.
     const targetDate = new Date(jumpToDate);
     const targetTimestamp = targetDate.getTime() / 1000;
 
-    // Find the closest candle to the target date
-    let closestIndex = 0;
-    let minDiff = Math.abs(candles[0].timestamp - targetTimestamp);
+    // Find the first candle that is ON or AFTER this timestamp
+    let targetIndex = -1;
 
-    for (let i = 1; i < candles.length; i++) {
-      const diff = Math.abs(candles[i].timestamp - targetTimestamp);
-      if (diff < minDiff) {
-        minDiff = diff;
-        closestIndex = i;
-      }
-      // If we've passed the target date, we can stop searching
-      if (candles[i].timestamp > targetTimestamp) {
+    // Binary search or simple loop - simple loop is fine for < 10k items usually, but let's optimize slightly
+    // logic: find first c where c.timestamp >= targetTimestamp
+
+    for (let i = 0; i < candles.length; i++) {
+      if (candles[i].timestamp >= targetTimestamp) {
+        targetIndex = i;
         break;
       }
     }
 
-    setCurrentIndex(closestIndex);
+    if (targetIndex !== -1) {
+      setCurrentIndex(targetIndex);
+      useNotificationStore.getState().notify(`Jumped to ${jumpToDate}`, 'info');
+    } else {
+      // If target is beyond the last candle, jump to end
+      if (targetTimestamp > candles[candles.length - 1].timestamp) {
+        setCurrentIndex(candles.length - 1);
+        useNotificationStore.getState().notify('Date is beyond available data. Jumped to end.', 'warning');
+      } else {
+        // Date is before start? Jump to start
+        setCurrentIndex(0);
+        useNotificationStore.getState().notify('Date is before available data. Jumped to start.', 'warning');
+      }
+    }
+
     setShowDatePicker(false);
   };
 

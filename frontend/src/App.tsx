@@ -55,7 +55,7 @@ function App() {
                 />
               )}
               {/* Controls Bar */}
-              <div className="flex-none p-1 bg-white border-b z-10 flex flex-nowrap gap-2 items-center overflow-x-auto scrollbar-hide">
+              <div className="flex-none p-1 bg-white border-b z-10 flex flex-nowrap gap-2 items-center">
                 <div className="flex-1 min-w-0">
                   <PlaybackControls onOpenHistory={() => setIsTradeHistoryOpen(true)} />
                 </div>
