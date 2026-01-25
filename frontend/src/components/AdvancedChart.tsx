@@ -16,6 +16,9 @@ import { useChartDrawings } from '../hooks/useChartDrawings';
 import type { Point } from '../hooks/useChartDrawings';
 import { format } from 'date-fns';
 import { TextInputDialog } from './TextInputDialog';
+import { uploadScreenshot } from '../services/api';
+import { useNotificationStore } from '../stores/notificationStore';
+import { ScreenshotSaveDialog } from './ScreenshotSaveDialog';
 
 export function AdvancedChart() {
   const chartContainerRef = useRef<HTMLDivElement>(null);
@@ -31,6 +34,7 @@ export function AdvancedChart() {
   const [isTextDialogOpen, setIsTextDialogOpen] = useState(false);
   const [pendingTextPoint, setPendingTextPoint] = useState<Point | null>(null);
   const [pendingCalloutPoints, setPendingCalloutPoints] = useState<{ p1: Point, p2: Point } | null>(null);
+  const [isUploadingScreenshot, setIsUploadingScreenshot] = useState(false);
 
   const candles = useSessionStore((s) => s.candles);
   const currentIndex = useSessionStore((s) => s.currentIndex);
@@ -315,6 +319,12 @@ export function AdvancedChart() {
     setActiveTool('none');
   };
 
+  const [isScreenshotDialogOpen, setIsScreenshotDialogOpen] = useState(false);
+  const [screenshotDefaultName, setScreenshotDefaultName] = useState('');
+  const [pendingScreenshotData, setPendingScreenshotData] = useState<string | null>(null);
+
+  const notify = useNotificationStore((s: any) => s.notify);
+
   const handleTakeScreenshot = () => {
     if (!chart || !canvasRef.current) return;
 
@@ -330,18 +340,60 @@ export function AdvancedChart() {
     ctx.drawImage(chartCanvas, 0, 0);
     ctx.drawImage(canvasRef.current, 0, 0, combinedCanvas.width, combinedCanvas.height);
 
+    const base64Image = combinedCanvas.toDataURL('image/png');
     const currentCandle = useSessionStore.getState().getCurrentCandle();
-    let filename = 'chart-screenshot';
+
+    let defaultBase = 'chart-screenshot';
+    let dateStr = '';
     if (currentCandle) {
       const ts = currentCandle.timestamp as number;
       const date = new Date(ts > 1e11 ? ts : ts * 1000);
-      filename = format(date, 'dd-MM-yyyy');
+      dateStr = format(date, 'dd-MM-yyyy');
     }
 
-    const link = document.createElement('a');
-    link.download = `${filename}.png`;
-    link.href = combinedCanvas.toDataURL('image/png');
-    link.click();
+    // Count trades for the same day to make it unique
+    const tradesForDay = trades.filter(t => {
+      const tDate = new Date(t.timestamp > 1e11 ? t.timestamp : t.timestamp * 1000);
+      return format(tDate, 'dd-MM-yyyy') === dateStr;
+    });
+
+    const tradeCount = tradesForDay.length;
+    const filename = dateStr ? `${dateStr}_Trade-${tradeCount + 1}` : defaultBase;
+
+    setScreenshotDefaultName(filename);
+    setPendingScreenshotData(base64Image);
+    setIsScreenshotDialogOpen(true);
+  };
+
+  const handleScreenshotSubmit = (name: string) => {
+    if (!pendingScreenshotData) return;
+
+    setIsUploadingScreenshot(true);
+    uploadScreenshot(pendingScreenshotData, `${name}.png`)
+      .then(res => {
+        if (res.link) {
+          navigator.clipboard.writeText(res.link);
+          notify('Screenshot uploaded and link copied!', 'success');
+          setIsScreenshotDialogOpen(false);
+          setPendingScreenshotData(null);
+        }
+      })
+      .catch(err => {
+        console.error('Failed to upload screenshot:', err);
+        notify('Upload failed. Downloading locally.', 'error');
+
+        // Fallback: download
+        const link = document.createElement('a');
+        link.download = `${name}.png`;
+        link.href = pendingScreenshotData!;
+        link.click();
+
+        setIsScreenshotDialogOpen(false);
+        setPendingScreenshotData(null);
+      })
+      .finally(() => {
+        setIsUploadingScreenshot(false);
+      });
   };
 
   // Set up canvas size when chart is ready
@@ -421,6 +473,7 @@ export function AdvancedChart() {
         onClearDrawings={handleClearDrawings}
         onDeleteSelected={deleteSelectedDrawing}
         onTakeScreenshot={handleTakeScreenshot}
+        isUploadingScreenshot={isUploadingScreenshot}
         hasSelection={!!selectedDrawingId}
       />
 
@@ -429,6 +482,14 @@ export function AdvancedChart() {
         onClose={() => setIsTextDialogOpen(false)}
         onSubmit={handleTextSubmit}
         position={pendingTextPoint ? { x: pendingTextPoint.x, y: pendingTextPoint.y } : null}
+      />
+
+      <ScreenshotSaveDialog
+        isOpen={isScreenshotDialogOpen}
+        onClose={() => setIsScreenshotDialogOpen(false)}
+        onSubmit={handleScreenshotSubmit}
+        defaultName={screenshotDefaultName}
+        isUploading={isUploadingScreenshot}
       />
 
       <div

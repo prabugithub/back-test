@@ -40,3 +40,14 @@ export async function healthCheck(): Promise<boolean> {
     return false;
   }
 }
+
+/**
+ * Upload screenshot to Google Drive
+ */
+export async function uploadScreenshot(image: string, fileName: string): Promise<{ link: string }> {
+  const response = await apiClient.post('/api/screenshot/upload', {
+    image,
+    fileName,
+  });
+  return response.data;
+}

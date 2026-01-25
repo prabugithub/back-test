@@ -25,6 +25,7 @@ interface ChartToolbarProps {
   onClearDrawings: () => void;
   onDeleteSelected: () => void;
   onTakeScreenshot: () => void;
+  isUploadingScreenshot: boolean;
   hasSelection: boolean;
 }
 
@@ -36,6 +37,7 @@ export function ChartToolbar({
   onClearDrawings,
   onDeleteSelected,
   onTakeScreenshot,
+  isUploadingScreenshot,
   hasSelection,
 }: ChartToolbarProps) {
   const [showIndicators, setShowIndicators] = useState(false);
@@ -103,8 +105,11 @@ export function ChartToolbar({
       <div className="flex items-center gap-1 border-r pr-3">
         <button
           onClick={onTakeScreenshot}
-          className="p-2 rounded hover:bg-gray-100 transition-colors text-gray-700"
-          title="Take Chart Screenshot"
+          disabled={isUploadingScreenshot}
+          data-screenshot-btn
+          className={`p-2 rounded hover:bg-gray-100 transition-colors text-gray-700 ${isUploadingScreenshot ? 'animate-pulse opacity-50 cursor-wait' : ''
+            }`}
+          title={isUploadingScreenshot ? 'Uploading...' : 'Take Chart Screenshot'}
         >
           <Camera size={18} />
         </button>

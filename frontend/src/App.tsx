@@ -8,18 +8,20 @@ import { TradeHistoryDialog } from './components/TradeHistoryDialog';
 import { PositionOverlay } from './components/PositionOverlay';
 import { useSessionStore } from './stores/sessionStore';
 import { useState } from 'react';
+import { NotificationToast } from './components/NotificationToast';
 
 const queryClient = new QueryClient();
 
 function App() {
-  const candles = useSessionStore((s) => s.candles);
+  const candles = useSessionStore((s: any) => s.candles);
   const [isTradeHistoryOpen, setIsTradeHistoryOpen] = useState(false);
 
   const hasData = candles.length > 0;
 
   return (
     <QueryClientProvider client={queryClient}>
-      <div className="h-screen w-screen bg-gray-100 flex overflow-hidden">
+      <div className="h-screen w-screen bg-gray-100 flex overflow-hidden font-sans">
+        <NotificationToast />
         {/* Main Content Area */}
         <main className="flex-1 flex flex-col relative min-w-0">
           {!hasData ? (

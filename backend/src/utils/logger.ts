@@ -24,6 +24,13 @@ const logger = winston.createLogger({
         )
       ),
     }),
+    new winston.transports.File({
+      filename: 'app.log',
+      format: winston.format.combine(
+        winston.format.timestamp(),
+        winston.format.json()
+      )
+    }),
   ],
 });
 

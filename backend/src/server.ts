@@ -1,20 +1,20 @@
+import dotenv from 'dotenv';
+dotenv.config();
+
 import express, { Express, Request, Response } from 'express';
 import cors from 'cors';
-import dotenv from 'dotenv';
 import { initDatabase } from './config/database';
 import { initAngelOneClient, loginAngelOne } from './services/angelone.service';
 import dataRoutes from './routes/data.routes';
+import screenshotRoutes from './routes/screenshot.routes';
 import logger from './utils/logger';
-
-// Load environment variables
-dotenv.config();
 
 const app: Express = express();
 const PORT = process.env.PORT || 3001;
 
 // Middleware
 app.use(cors());
-app.use(express.json());
+app.use(express.json({ limit: '10mb' })); // Increase limit for base64 images
 
 // Request logging middleware
 app.use((req: Request, res: Response, next) => {
@@ -27,6 +27,7 @@ app.use((req: Request, res: Response, next) => {
 
 // Routes
 app.use('/api/data', dataRoutes);
+app.use('/api/screenshot', screenshotRoutes);
 
 // Root endpoint
 app.get('/', (req: Request, res: Response) => {
@@ -64,21 +65,21 @@ async function startServer() {
     await initDatabase();
     logger.info('Database initialized successfully');
 
-    // Initialize Angel One client and login
+    // Start server immediately (so screenshots and other local features work)
+    app.listen(PORT, () => {
+      logger.info(`Server running on http://localhost:${PORT}`);
+      logger.info(`Environment: ${process.env.NODE_ENV || 'development'}`);
+    });
+
+    // Initialize Angel One client and login (Background)
     try {
       initAngelOneClient();
       await loginAngelOne();
       logger.info('Angel One API client initialized and logged in');
     } catch (error: any) {
       logger.warn('Angel One API client initialization failed:', error.message);
-      logger.warn('API features will be limited. Please check your .env file and credentials');
+      logger.warn('Live API features will be limited. Local features (Screenshots, Cache) will still work.');
     }
-
-    // Start server
-    app.listen(PORT, () => {
-      logger.info(`Server running on http://localhost:${PORT}`);
-      logger.info(`Environment: ${process.env.NODE_ENV || 'development'}`);
-    });
   } catch (error) {
     logger.error('Failed to start server:', error);
     process.exit(1);
@@ -86,4 +87,3 @@ async function startServer() {
 }
 
 startServer();
-

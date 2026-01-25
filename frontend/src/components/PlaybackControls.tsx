@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react';
 import { Play, Pause, ChevronLeft, ChevronRight, FastForward, CalendarClock, Settings, X, Calendar } from 'lucide-react';
 import { useSessionStore } from '../stores/sessionStore';
+import { useNotificationStore } from '../stores/notificationStore';
 import { formatTimestamp } from '../utils/formatters';
 import { parseColumnarData, resampleCandles, type ColumnarData } from '../utils/resampler';
 import { calculatePivotPoints } from '../utils/indicators';
@@ -67,9 +68,10 @@ export function PlaybackControls({ onOpenHistory }: { onOpenHistory?: () => void
 
       loadCandles(resampledCandles, `NIFTY50-${timeframe}min`);
       setShowSettings(false);
+      useNotificationStore.getState().notify('Data loaded successfully!', 'success');
     } catch (error) {
       console.error('Failed to reload data:', error);
-      alert('Failed to reload data. Please try again.');
+      useNotificationStore.getState().notify('Failed to reload data. Please try again.', 'error');
     } finally {
       setIsReloading(false);
     }
