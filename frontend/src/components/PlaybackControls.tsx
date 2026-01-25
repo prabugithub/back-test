@@ -179,9 +179,9 @@ export function PlaybackControls({ onOpenHistory }: { onOpenHistory?: () => void
 
   return (
     <div className="relative">
-      <div className="flex flex-wrap items-center justify-between w-full h-full px-2 gap-y-2 gap-x-4 py-1">
+      <div className="flex flex-nowrap items-center justify-between w-full h-full px-1 gap-x-2 py-1 overflow-x-auto scrollbar-hide">
         {/* Left: Playback Controls */}
-        <div className="flex items-center gap-1 flex-wrap">
+        <div className="flex items-center gap-0.5 flex-none">
           <button
             onClick={() => step('backward')}
             disabled={currentIndex === 0}
@@ -224,41 +224,41 @@ export function PlaybackControls({ onOpenHistory }: { onOpenHistory?: () => void
           </select>
 
           {/* Jump Controls (Mini) */}
-          <div className="flex items-center gap-1 ml-2 border-l pl-2">
+          <div className="flex items-center gap-0.5 ml-1 border-l pl-1">
             <button
               onClick={() => jump(100)}
-              className="px-1.5 py-1 text-xs bg-gray-100 hover:bg-gray-200 rounded flex gap-0.5 items-center"
+              className="px-1 py-1 text-xs bg-gray-100 hover:bg-gray-200 rounded flex items-center justify-center w-6"
               title="+100 Bars"
             >
-              <FastForward size={12} /> 100
+              <FastForward size={12} />
             </button>
             <button
               onClick={() => handleTimeJump(1)}
-              className="px-1.5 py-1 text-xs bg-gray-100 hover:bg-gray-200 rounded flex gap-0.5 items-center"
+              className="px-1 py-1 text-xs bg-gray-100 hover:bg-gray-200 rounded flex items-center justify-center w-6"
               title="+1 Day"
             >
-              <CalendarClock size={12} /> 1D
+              <CalendarClock size={12} />
             </button>
             <button
               onClick={() => setShowDatePicker(true)}
-              className="px-1.5 py-1 text-xs bg-blue-100 hover:bg-blue-200 text-blue-700 rounded flex gap-0.5 items-center"
+              className="px-1 py-1 text-xs bg-blue-100 hover:bg-blue-200 text-blue-700 rounded flex items-center justify-center w-6"
               title="Jump to Date"
             >
-              <Calendar size={12} /> Date
+              <Calendar size={12} />
             </button>
 
             {/* Custom Jump */}
-            <div className="flex items-center gap-1 ml-1 pl-1 border-l">
+            <div className="flex items-center gap-0.5 ml-0.5 border-l pl-0.5">
               <input
                 type="number"
                 value={customJump}
                 onChange={(e) => setCustomJump(e.target.value)}
-                className="w-10 px-1 py-1 border rounded text-center text-xs"
+                className="w-8 px-0.5 py-0.5 border rounded text-center text-[10px]"
                 placeholder="N"
               />
               <button
                 onClick={() => jump(Number(customJump))}
-                className="px-1.5 py-1 bg-blue-50 text-blue-700 border border-blue-200 rounded hover:bg-blue-100 text-xs font-semibold"
+                className="px-1 py-0.5 bg-blue-50 text-blue-700 border border-blue-200 rounded hover:bg-blue-100 text-[10px] font-bold"
               >
                 Go
               </button>
@@ -267,25 +267,22 @@ export function PlaybackControls({ onOpenHistory }: { onOpenHistory?: () => void
         </div>
 
         {/* Center: Progress / Date Info */}
-        <div className="flex flex-col items-center justify-center text-xs text-gray-600">
-          <div className="font-medium text-gray-900 text-sm">
+        <div className="flex flex-col items-center justify-center text-xs text-gray-600 flex-1 px-2 min-w-[120px]">
+          <div className="font-medium text-gray-900 text-sm whitespace-nowrap">
             {currentCandle ? formatTimestamp(currentCandle.timestamp) : '--'}
           </div>
-          <div className="w-full max-w-[16rem] bg-gray-200 rounded-full h-1.5 mt-1 mb-0.5 overflow-hidden">
+          <div className="w-full max-w-[12rem] bg-gray-200 rounded-full h-1.5 mt-1 mb-0.5 overflow-hidden">
             <div
               className="bg-blue-500 h-full transition-all duration-200"
               style={{ width: `${progress}%` }}
             />
           </div>
-          <div className="text-[10px] text-gray-400">
-            {currentIndex + 1} / {candles.length} Candles
-          </div>
         </div>
 
         {/* Right: Quick Actions (Buy/Sell & Reset) */}
-        <div className="flex items-center gap-2 flex-wrap justify-center">
+        <div className="flex items-center gap-1 flex-none">
           {/* Mini Trading Buttons */}
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-1">
             {/* Recent Pivot SL Info */}
             {(() => {
               const pivots = calculatePivotPoints(candles.slice(0, currentIndex + 1));
@@ -298,17 +295,15 @@ export function PlaybackControls({ onOpenHistory }: { onOpenHistory?: () => void
               const calcQty = Math.floor(riskAmount / pointsAtRisk);
 
               return (
-                <div className="flex items-center gap-2 px-2 py-1 bg-yellow-50 border border-yellow-200 rounded text-[10px] text-yellow-800">
-                  <span className="font-bold">{recentPivot.type === 'bullish' ? 'LONG' : 'SHORT'}</span>
-                  <span className="border-l border-yellow-300 pl-2">Gap: {pointsAtRisk}</span>
-                  <button
-                    onClick={() => setTradeQuantity(calcQty)}
-                    className="ml-1 px-1.5 py-0.5 bg-yellow-600 text-white rounded hover:bg-yellow-700 font-bold"
-                    title="Calculate Qty for 10k Risk"
-                  >
-                    Set Qty ({calcQty})
-                  </button>
-                </div>
+                <button
+                  onClick={() => setTradeQuantity(calcQty)}
+                  className="flex items-center gap-1 px-1.5 py-0.5 bg-yellow-50 border border-yellow-200 hover:bg-yellow-100 hover:border-yellow-300 rounded text-[10px] text-yellow-800 whitespace-nowrap transition-colors cursor-pointer group"
+                  title={`Click to set Quantity: ${calcQty} (Risk: 10k)`}
+                >
+                  <span className="font-bold">{recentPivot.type === 'bullish' ? 'L' : 'S'}</span>
+                  <span className="border-l border-yellow-300 pl-1 group-hover:border-yellow-400">{pointsAtRisk}</span>
+                  <span className="ml-0.5 font-bold text-yellow-700 bg-yellow-200 px-1 rounded-sm group-hover:bg-yellow-300">Q:{calcQty}</span>
+                </button>
               );
             })()}
 
@@ -317,48 +312,51 @@ export function PlaybackControls({ onOpenHistory }: { onOpenHistory?: () => void
               min="1"
               value={tradeQuantity}
               onChange={(e) => setTradeQuantity(Math.max(1, parseInt(e.target.value) || 1))}
-              className="w-12 px-1 py-1 border rounded text-center text-xs font-medium"
+              className="w-10 px-0.5 py-1 border rounded text-center text-xs font-medium"
               title="Trade Quantity"
             />
-            <div className="flex items-center gap-1">
+            <div className="flex items-center gap-0.5">
               <button
                 onClick={() => executeTrade('BUY', tradeQuantity)}
                 disabled={!currentCandle}
-                className="px-3 py-1 bg-green-600 text-white rounded text-xs font-bold hover:bg-green-700 disabled:opacity-50"
+                className="px-2 py-1 bg-green-600 text-white rounded text-xs font-bold hover:bg-green-700 disabled:opacity-50"
                 title={`Buy ${tradeQuantity}`}
               >
-                BUY
+                B
               </button>
               <button
                 onClick={() => executeTrade('SELL', tradeQuantity)}
                 disabled={!currentCandle}
-                className="px-3 py-1 bg-red-600 text-white rounded text-xs font-bold hover:bg-red-700 disabled:opacity-50"
+                className="px-2 py-1 bg-red-600 text-white rounded text-xs font-bold hover:bg-red-700 disabled:opacity-50"
                 title={`Sell ${tradeQuantity}`}
               >
-                SELL
+                S
               </button>
             </div>
           </div>
 
+          <div className="w-px bg-gray-300 mx-1 h-6"></div>
+
           <button
             onClick={onOpenHistory}
-            className="px-3 py-1.5 text-xs font-bold text-blue-700 bg-blue-50 hover:bg-blue-100 rounded border border-blue-200"
-            title="View Trade History & Performance"
+            className="p-1.5 text-blue-700 bg-blue-50 hover:bg-blue-100 rounded border border-blue-200"
+            title="Analysis / Trade History"
           >
-            Analysis
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><line x1="18" y1="20" x2="18" y2="10"></line><line x1="12" y1="20" x2="12" y2="4"></line><line x1="6" y1="20" x2="6" y2="14"></line></svg>
           </button>
           <button
             onClick={() => setShowSettings(!showSettings)}
-            className="px-3 py-1.5 text-xs font-medium text-gray-700 bg-gray-50 hover:bg-gray-100 rounded border border-gray-200"
+            className="p-1.5 text-gray-700 bg-gray-50 hover:bg-gray-100 rounded border border-gray-200"
             title="Data Settings"
           >
-            <Settings size={14} className="inline" />
+            <Settings size={16} />
           </button>
           <button
             onClick={resetSession}
-            className="px-3 py-1.5 text-xs font-medium text-red-600 bg-red-50 hover:bg-red-100 rounded border border-red-200"
+            className="p-1.5 text-red-600 bg-red-50 hover:bg-red-100 rounded border border-red-200"
+            title="Reset Session"
           >
-            Reset
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"></path><path d="M3 3v5h5"></path></svg>
           </button>
         </div>
       </div>

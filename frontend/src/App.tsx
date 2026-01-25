@@ -9,6 +9,7 @@ import { PositionOverlay } from './components/PositionOverlay';
 import { useSessionStore } from './stores/sessionStore';
 import { useState } from 'react';
 import { NotificationToast } from './components/NotificationToast';
+import { Save, FilePlus } from 'lucide-react';
 
 const queryClient = new QueryClient();
 
@@ -54,16 +55,24 @@ function App() {
                 />
               )}
               {/* Controls Bar */}
-              <div className="flex-none p-2 bg-white border-b z-10 flex flex-wrap gap-2 items-start">
-                <div className="flex-1">
+              <div className="flex-none p-1 bg-white border-b z-10 flex flex-nowrap gap-2 items-center overflow-x-auto scrollbar-hide">
+                <div className="flex-1 min-w-0">
                   <PlaybackControls onOpenHistory={() => setIsTradeHistoryOpen(true)} />
                 </div>
                 {/* Compact Stats or Buttons could go here */}
                 <button
-                  onClick={() => useSessionStore.getState().loadCandles([], '')}
-                  className="px-3 py-1 text-xs bg-gray-100 text-gray-600 hover:bg-gray-200 rounded"
+                  onClick={() => useSessionStore.getState().saveRemoteSession()}
+                  className="p-1.5 text-blue-700 bg-blue-50 border border-blue-200 hover:bg-blue-100 rounded"
+                  title="Save current session to Firebase"
                 >
-                  New Data
+                  <Save size={16} />
+                </button>
+                <button
+                  onClick={() => useSessionStore.getState().loadCandles([], '')}
+                  className="p-1.5 text-gray-700 bg-gray-100 hover:bg-gray-200 rounded border border-gray-300"
+                  title="Load New Data / Reset"
+                >
+                  <FilePlus size={16} />
                 </button>
               </div>
             </div>

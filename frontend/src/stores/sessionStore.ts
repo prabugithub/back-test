@@ -2,6 +2,18 @@ import { create } from 'zustand';
 import type { Candle, Trade, Position } from '../types';
 import { saveTradeSession } from '../utils/tradeStorage';
 import { groupTradesIntoPositions, calculatePerformanceStats } from '../utils/tradeAnalysis';
+import { saveSession, loadSession, type SessionState } from '../services/firebaseSessionService';
+import { useNotificationStore } from './notificationStore';
+
+export interface SessionConfig {
+  securityId: string;
+  exchangeSegment: string;
+  instrumentType: string;
+  interval: string;
+  fromDate: string;
+  toDate: string;
+  dataSource: 'api' | 'local';
+}
 
 interface SessionStore {
   // Data
@@ -10,13 +22,15 @@ interface SessionStore {
   trades: Trade[];
   position: Position | null;
   instrument: string;
+  sessionConfig: SessionConfig | null;
 
   // Playback state
   isPlaying: boolean;
   speed: number;
+  isLoading: boolean;
 
   // Actions
-  loadCandles: (candles: Candle[], instrument: string) => void;
+  loadCandles: (candles: Candle[], instrument: string, config?: SessionConfig) => void;
   play: () => void;
   pause: () => void;
   step: (direction: 'forward' | 'backward') => void;
@@ -24,6 +38,9 @@ interface SessionStore {
   setSpeed: (speed: number) => void;
   setCurrentIndex: (index: number) => void;
   executeTrade: (type: 'BUY' | 'SELL', quantity: number) => void;
+  saveRemoteSession: () => Promise<void>;
+  loadRemoteSession: () => Promise<{ config: SessionConfig, data: { trades: Trade[], position: Position | null, currentIndex: number } } | null>;
+  restoreSessionState: (trades: Trade[], position: Position | null, currentIndex: number) => void;
   resetSession: () => void;
   saveCurrentSession: () => void;
 
@@ -45,14 +62,17 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
   trades: [],
   position: null,
   instrument: '',
+  sessionConfig: null,
   isPlaying: false,
   speed: 1,
+  isLoading: false,
 
   // Actions
-  loadCandles: (candles, instrument) => {
+  loadCandles: (candles, instrument, config) => {
     set({
       candles,
       instrument,
+      sessionConfig: config || null,
       currentIndex: 0,
       trades: [],
       position: null,
@@ -207,6 +227,103 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
         winRate: stats.winRate
       }
     );
+  },
+
+  saveRemoteSession: async () => {
+    const { instrument, trades, position, currentIndex, sessionConfig } = get();
+
+    // We need sessionConfig to be able to restore the data context
+    if (!sessionConfig) {
+      console.warn("Cannot save session: Missing session configuration");
+      useNotificationStore.getState().notify(
+        'Cannot save: Missing session configuration. Please reload data.',
+        'error'
+      );
+      return;
+    }
+
+    // Sanitize trades to remove undefined fields which Firebase setDoc rejects
+    const sanitizedTrades = trades.map(t => {
+      // Create a shallow copy
+      const cleanT: any = { ...t };
+      // If pnl is undefined, set it to null (valid JSON/Firestore)
+      if (cleanT.pnl === undefined) {
+        cleanT.pnl = null;
+      }
+      return cleanT as Trade;
+    });
+
+    const state: SessionState = {
+      name: `Session - ${instrument}`,
+      lastUpdated: Date.now(),
+      instrument,
+      interval: sessionConfig.interval,
+      fromDate: sessionConfig.fromDate,
+      toDate: sessionConfig.toDate,
+
+      currentIndex,
+      trades: sanitizedTrades,
+      position,
+    };
+
+    // Extend with full config
+    const fullState = {
+      ...state,
+      securityId: sessionConfig.securityId,
+      exchangeSegment: sessionConfig.exchangeSegment,
+      dataSource: sessionConfig.dataSource,
+      instrumentType: sessionConfig.instrumentType || 'EQUITY'
+    };
+
+    set({ isLoading: true });
+    try {
+      await saveSession(fullState as any);
+      useNotificationStore.getState().notify('Session saved to cloud successfully!', 'success');
+    } catch (e: any) {
+      console.error(e);
+      useNotificationStore.getState().notify(`Failed to save session: ${e.message}`, 'error');
+    } finally {
+      set({ isLoading: false });
+    }
+  },
+
+  loadRemoteSession: async () => {
+    set({ isLoading: true });
+    try {
+      const state = await loadSession();
+      if (!state) return null;
+
+      const config: SessionConfig = {
+        securityId: (state as any).securityId,
+        exchangeSegment: (state as any).exchangeSegment || 'NSE_EQ',
+        instrumentType: (state as any).instrumentType || 'EQUITY',
+        interval: state.interval,
+        fromDate: state.fromDate,
+        toDate: state.toDate,
+        dataSource: (state as any).dataSource || 'local'
+      };
+
+      const data = {
+        trades: state.trades,
+        position: state.position,
+        currentIndex: state.currentIndex
+      };
+
+      return { config, data };
+    } catch (error) {
+      console.error(error);
+      return null;
+    } finally {
+      set({ isLoading: false });
+    }
+  },
+
+  restoreSessionState: (trades, position, currentIndex) => {
+    set({
+      trades,
+      position,
+      currentIndex
+    });
   },
 
   // Computed getters

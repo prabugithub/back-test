@@ -1,5 +1,5 @@
 import { useState, useRef, useEffect } from 'react';
-import { Search, X, Database, HardDrive } from 'lucide-react';
+import { Search, X, Database, HardDrive, CloudDownload } from 'lucide-react';
 import { fetchCandles } from '../services/api';
 import { useSessionStore } from '../stores/sessionStore';
 import { SYMBOLS, SYMBOL_CATEGORIES, searchSymbols, type Symbol } from '../data/symbols';
@@ -28,6 +28,8 @@ export function InstrumentSelector() {
   const dropdownRef = useRef<HTMLDivElement>(null);
 
   const loadCandles = useSessionStore((s) => s.loadCandles);
+  const loadRemoteSession = useSessionStore((s) => s.loadRemoteSession);
+  const restoreSessionState = useSessionStore((s) => s.restoreSessionState);
 
   // Close dropdown when clicking outside
   useEffect(() => {
@@ -57,23 +59,34 @@ export function InstrumentSelector() {
     setSearchQuery('');
   };
 
-  const handleFetch = async () => {
+  const handleFetch = async (overrideConfig?: any) => {
     setLoading(true);
     setError(null);
 
+    // Use overrides if provided, otherwise use current state
+    const cfg = overrideConfig || {
+      dataSource,
+      securityId,
+      exchangeSegment,
+      instrumentType: instrument, // Map local state 'instrument' to 'instrumentType'
+      interval,
+      fromDate,
+      toDate
+    };
+
     try {
-      if (dataSource === 'api') {
+      if (cfg.dataSource === 'api') {
         const response = await fetchCandles({
-          securityId,
-          exchangeSegment,
-          instrument,
-          interval,
-          fromDate,
-          toDate,
+          securityId: cfg.securityId,
+          exchangeSegment: cfg.exchangeSegment,
+          instrument: cfg.instrument,
+          interval: cfg.interval,
+          fromDate: cfg.fromDate,
+          toDate: cfg.toDate,
         });
 
         if (response.success && response.data.length > 0) {
-          loadCandles(response.data, `${securityId}-${exchangeSegment}`);
+          loadCandles(response.data, `${cfg.securityId}-${cfg.exchangeSegment}`, cfg);
         } else {
           setError('No data received from API');
         }
@@ -91,28 +104,29 @@ export function InstrumentSelector() {
           let allCandles = parseColumnarData(rawData as ColumnarData);
 
           // Filter by date range if provided
-          if (fromDate) {
-            const fromTs = new Date(fromDate).getTime() / 1000;
+          if (cfg.fromDate) {
+            const fromTs = new Date(cfg.fromDate).getTime() / 1000;
             allCandles = allCandles.filter(c => c.timestamp >= fromTs);
           }
-          if (toDate) {
+          if (cfg.toDate) {
             // Add one day to include the end date fully
-            const toTs = (new Date(toDate).getTime() / 1000) + 86400;
+            const toTs = (new Date(cfg.toDate).getTime() / 1000) + 86400;
             allCandles = allCandles.filter(c => c.timestamp < toTs);
           }
 
           // Determine timeframe in minutes
           let timeframeMinutes = 1;
-          if (interval === '5') timeframeMinutes = 5;
-          if (interval === '15') timeframeMinutes = 15;
-          if (interval === '60') timeframeMinutes = 60;
-          if (interval === '1D') timeframeMinutes = 1440; // 24 hours
+          const intv = cfg.interval;
+          if (intv === '5') timeframeMinutes = 5;
+          if (intv === '15') timeframeMinutes = 15;
+          if (intv === '60') timeframeMinutes = 60;
+          if (intv === '1D') timeframeMinutes = 1440; // 24 hours
 
           const resampledCandles = resampleCandles(allCandles, timeframeMinutes);
 
           if (resampledCandles.length > 0) {
-            console.log(`Loaded ${resampledCandles.length} candles (Resampled: ${interval})`);
-            loadCandles(resampledCandles, `NIFTY 50 (Local ${interval})`);
+            console.log(`Loaded ${resampledCandles.length} candles (Resampled: ${intv})`);
+            loadCandles(resampledCandles, `NIFTY 50 (Local ${intv})`, cfg);
           } else {
             setError('No candles generated from local data');
           }
@@ -128,6 +142,40 @@ export function InstrumentSelector() {
     }
   };
 
+  const handleResumeSession = async () => {
+    try {
+      const result = await loadRemoteSession();
+      if (result && result.config) {
+        // Update local state to match restored config
+        const { config, data } = result;
+        setDataSource(config.dataSource);
+        setSecurityId(config.securityId);
+        setExchangeSegment(config.exchangeSegment);
+        setInstrument(config.instrumentType);
+        setInterval(config.interval);
+        setFromDate(config.fromDate);
+        setToDate(config.toDate);
+
+        // Fetch using the restored config
+        await handleFetch(config);
+
+        // Restore session state (trades, position)
+        // We do this AFTER fetch because loadCandles resets the store
+        // We need to ensure handleFetch finished successfully. 
+        // Note: handleFetch is async but loadCandles inside it is synchronous in zustand usually, 
+        // but let's be safe.
+        setTimeout(() => {
+          restoreSessionState(data.trades, data.position, data.currentIndex);
+        }, 100);
+      } else {
+        setError("No saved session found.");
+      }
+    } catch (e) {
+      console.error(e);
+      setError("Failed to resume session.");
+    }
+  };
+
   return (
     <div className="bg-white border rounded-lg p-6 shadow-sm">
       <div className="flex items-center justify-between mb-6">
@@ -137,7 +185,16 @@ export function InstrumentSelector() {
         </h2>
 
         {/* Source Toggle */}
-        <div className="flex bg-gray-100 p-1 rounded-lg">
+        <div className="flex bg-gray-100 p-1 rounded-lg gap-1">
+          <button
+            onClick={handleResumeSession}
+            className="px-3 py-1.5 text-sm font-medium rounded-md flex items-center gap-2 text-blue-700 bg-blue-50 hover:bg-blue-100 transition-all border border-blue-200"
+            title="Resume last saved session"
+          >
+            <CloudDownload size={16} />
+            Resume
+          </button>
+          <div className="w-px bg-gray-300 mx-1 self-center h-6"></div>
           <button
             onClick={() => setDataSource('local')}
             className={`px-3 py-1.5 text-sm font-medium rounded-md flex items-center gap-2 transition-all ${dataSource === 'local'
@@ -146,7 +203,7 @@ export function InstrumentSelector() {
               }`}
           >
             <HardDrive size={16} />
-            Local Nifty
+            Local
           </button>
           <button
             onClick={() => setDataSource('api')}
@@ -244,7 +301,7 @@ export function InstrumentSelector() {
             </div>
           </div>
 
-          <div className="grid grid-cols-2 gap-4">
+          <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-4">
             <div>
               <label className="block text-sm font-medium text-gray-700 mb-1">
                 Symbol Token
@@ -406,7 +463,7 @@ export function InstrumentSelector() {
       )}
 
       <button
-        onClick={handleFetch}
+        onClick={() => handleFetch()}
         disabled={loading}
         className="mt-4 w-full px-6 py-3 bg-blue-600 text-white rounded-lg font-semibold hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
       >
