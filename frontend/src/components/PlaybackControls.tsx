@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react';
 import { Play, Pause, ChevronLeft, ChevronRight, FastForward, CalendarClock, Settings, X, Calendar } from 'lucide-react';
+import { addDays, format } from 'date-fns';
 import { useSessionStore } from '../stores/sessionStore';
 import { useNotificationStore } from '../stores/notificationStore';
 import { formatTimestamp } from '../utils/formatters';
@@ -33,6 +34,8 @@ export function PlaybackControls({ onOpenHistory }: { onOpenHistory?: () => void
   const [showDatePicker, setShowDatePicker] = useState(false);
   const [jumpToDate, setJumpToDate] = useState('2021-02-01');
 
+  const [settingsJumpDate, setSettingsJumpDate] = useState('');
+
   // Data loading settings (initially sync with session)
   const [timeframe, setTimeframe] = useState('5');
   const [fromDate, setFromDate] = useState('');
@@ -48,11 +51,12 @@ export function PlaybackControls({ onOpenHistory }: { onOpenHistory?: () => void
       if (sessionConfig.interval) setTimeframe(sessionConfig.interval);
       if (sessionConfig.fromDate) setFromDate(sessionConfig.fromDate);
       if (sessionConfig.toDate) setToDate(sessionConfig.toDate);
+      setSettingsJumpDate(''); // Reset jump date when opening settings
     }
   }, [showSettings, sessionConfig]);
 
-  // Handle data reload with new timeframe/dates
-  const handleReloadData = async () => {
+  // Helper: Perform the actual data loading (reusable)
+  const performDataReload = async (startStr: string, endStr: string, newTimeframe: string, targetDateStr?: string) => {
     const config = useSessionStore.getState().sessionConfig;
     if (!config) {
       useNotificationStore.getState().notify('No active session config found.', 'error');
@@ -67,20 +71,19 @@ export function PlaybackControls({ onOpenHistory }: { onOpenHistory?: () => void
           securityId: config.securityId,
           exchangeSegment: config.exchangeSegment,
           instrument: config.instrumentType,
-          interval: timeframe,
-          fromDate: fromDate,
-          toDate: toDate,
+          interval: newTimeframe,
+          fromDate: startStr,
+          toDate: endStr,
         });
 
         if (response.success && response.data.length > 0) {
           const newConfig = {
             ...config,
-            interval: timeframe,
-            fromDate,
-            toDate
+            interval: newTimeframe,
+            fromDate: startStr,
+            toDate: endStr
           };
           loadCandles(response.data, `${config.securityId}-${config.exchangeSegment}`, newConfig);
-          setShowSettings(false);
           useNotificationStore.getState().notify('Data reloaded successfully (API)!', 'success');
         } else {
           throw new Error((response as any).message || 'No data received from API');
@@ -88,10 +91,6 @@ export function PlaybackControls({ onOpenHistory }: { onOpenHistory?: () => void
       }
       // Local Data Source
       else {
-        // Fallback: Currently only reliable for Nifty 50 or if we add logic for others
-        // Note: Ideally we should use the same loader as InstrumentSelector, but for now we default to Nifty 
-        // if it's a local test session to avoid breaking "Demo" usage.
-
         const module = await loadNiftyData();
         const rawData: any = module.default || module;
 
@@ -102,25 +101,24 @@ export function PlaybackControls({ onOpenHistory }: { onOpenHistory?: () => void
         let allCandles = parseColumnarData(rawData as ColumnarData);
 
         // Filter by date range
-        if (fromDate) {
-          const fromTs = new Date(fromDate).getTime() / 1000;
+        if (startStr) {
+          const fromTs = new Date(startStr).getTime() / 1000;
           allCandles = allCandles.filter(c => c.timestamp >= fromTs);
         }
-        if (toDate) {
-          const toTs = (new Date(toDate).getTime() / 1000) + 86400;
+        if (endStr) {
+          const toTs = (new Date(endStr).getTime() / 1000) + 86400;
           allCandles = allCandles.filter(c => c.timestamp < toTs);
         }
 
-        // Resample to selected timeframe
-        // Map string timeframe to minutes
+        // Resample
         let tfMinutes = 5;
-        if (timeframe === '1') tfMinutes = 1;
-        if (timeframe === '5') tfMinutes = 5;
-        if (timeframe === '15') tfMinutes = 15;
-        if (timeframe === '30') tfMinutes = 30;
-        if (timeframe === '60') tfMinutes = 60;
-        if (timeframe === '240') tfMinutes = 240;
-        if (timeframe === '1440' || timeframe === '1D') tfMinutes = 1440;
+        if (newTimeframe === '1') tfMinutes = 1;
+        if (newTimeframe === '5') tfMinutes = 5;
+        if (newTimeframe === '15') tfMinutes = 15;
+        if (newTimeframe === '30') tfMinutes = 30;
+        if (newTimeframe === '60') tfMinutes = 60;
+        if (newTimeframe === '240') tfMinutes = 240;
+        if (newTimeframe === '1440' || newTimeframe === '1D') tfMinutes = 1440;
 
         const resampledCandles = resampleCandles(allCandles, tfMinutes);
 
@@ -130,15 +128,40 @@ export function PlaybackControls({ onOpenHistory }: { onOpenHistory?: () => void
 
         const newConfig = {
           ...config,
-          interval: timeframe,
-          fromDate,
-          toDate
+          interval: newTimeframe,
+          fromDate: startStr,
+          toDate: endStr
         };
 
-        loadCandles(resampledCandles, `NIFTY50 (Local ${timeframe}m)`, newConfig);
-        setShowSettings(false);
+        loadCandles(resampledCandles, `NIFTY50 (Local ${newTimeframe}m)`, newConfig);
         useNotificationStore.getState().notify('Data reloaded successfully (Local)!', 'success');
       }
+
+      // Update local state to match the executed reload
+      setFromDate(startStr);
+      setToDate(endStr);
+      setTimeframe(newTimeframe);
+      setShowSettings(false); // Close settings if open
+
+      // Attempt jump if target date provided
+      if (targetDateStr) {
+        const candles = useSessionStore.getState().candles;
+        const targetTs = new Date(targetDateStr).getTime() / 1000;
+
+        let foundIndex = -1;
+        for (let i = 0; i < candles.length; i++) {
+          if (candles[i].timestamp >= targetTs) {
+            foundIndex = i;
+            break;
+          }
+        }
+
+        if (foundIndex !== -1) {
+          setCurrentIndex(foundIndex);
+          useNotificationStore.getState().notify(`Jumped to ${targetDateStr}`, 'info');
+        }
+      }
+
     } catch (error: any) {
       console.error('Failed to reload data:', error);
       useNotificationStore.getState().notify(`Failed to reload data: ${error.message}`, 'error');
@@ -147,6 +170,8 @@ export function PlaybackControls({ onOpenHistory }: { onOpenHistory?: () => void
     }
   };
 
+  // Handle data reload with new timeframe/dates
+  const handleReloadData = () => performDataReload(fromDate, toDate, timeframe, settingsJumpDate);
 
   // Helper to jump by time
   const handleTimeJump = (days: number) => {
@@ -478,6 +503,26 @@ export function PlaybackControls({ onOpenHistory }: { onOpenHistory?: () => void
                 <option value="1440">1 Day</option>
               </select>
             </div>
+
+            {/* Quick Range / Jump To Date */}
+            <div className="pt-2 border-t mt-2">
+              <label className="block text-xs font-medium text-blue-700 mb-1 flex items-center gap-1">
+                <Calendar size={12} />
+                Jump To Date (Initial View)
+              </label>
+              <input
+                type="date"
+                value={settingsJumpDate}
+                onChange={(e) => setSettingsJumpDate(e.target.value)}
+                className="w-full px-2 py-1.5 text-sm border border-blue-300 rounded focus:outline-none focus:ring-2 focus:ring-blue-500 bg-blue-50"
+                placeholder="Select date to jump to..."
+              />
+              <p className="text-[10px] text-gray-500 mt-1">
+                Loads full data range, but starts playback at this date.
+              </p>
+            </div>
+
+            <div className="border-t my-2"></div>
 
             {/* Date Range */}
             <div>
