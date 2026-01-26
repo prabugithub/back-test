@@ -292,7 +292,6 @@ export function AdvancedChart() {
       const allPivots = calculatePivotPoints(visibleCandles);
       allPivots.forEach((p, index) => {
         const isLast = index === allPivots.length - 1;
-        const trend = p.trendLabel ? `${p.trendLabel} ` : '';
         const gap = isLast ? p.slDistance.toString() : '';
 
         allMarkers.push({
@@ -300,7 +299,7 @@ export function AdvancedChart() {
           position: p.type === 'bullish' ? 'belowBar' : 'aboveBar',
           color: p.type === 'bullish' ? '#26a69a' : '#ef5350',
           shape: p.type === 'bullish' ? 'arrowUp' : 'arrowDown',
-          text: (trend + gap).trim(),
+          text: gap,
           size: 1,
         });
       });
