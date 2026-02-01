@@ -1,7 +1,7 @@
 import { useRef, useEffect, useMemo, useState } from 'react';
-import { X, ChevronRight, ChevronDown } from 'lucide-react';
+import { X, ChevronRight, ChevronDown, FileJson, Printer, FileSpreadsheet } from 'lucide-react';
 import { useSessionStore } from '../stores/sessionStore';
-import { formatCurrency, formatTime } from '../utils/formatters';
+import { formatCurrency, formatTimestamp } from '../utils/formatters';
 import { groupTradesIntoPositions, calculatePerformanceStats } from '../utils/tradeAnalysis';
 
 interface TradeHistoryDialogProps {
@@ -11,6 +11,7 @@ interface TradeHistoryDialogProps {
 
 export function TradeHistoryDialog({ isOpen, onClose }: TradeHistoryDialogProps) {
     const trades = useSessionStore((s) => s.trades);
+    const instrument = useSessionStore((s) => s.instrument);
     const dialogRef = useRef<HTMLDivElement>(null);
     const [expandedPosId, setExpandedPosId] = useState<string | null>(null);
 
@@ -23,6 +24,70 @@ export function TradeHistoryDialog({ isOpen, onClose }: TradeHistoryDialogProps)
     // Group trades and calculate stats
     const positions = useMemo(() => groupTradesIntoPositions(trades), [trades]);
     const stats = useMemo(() => calculatePerformanceStats(positions), [positions]);
+
+    const handleExportCSV = () => {
+        if (trades.length === 0) return;
+
+        let csvContent = `TRADING SESSION ANALYSIS - ${instrument}\n`;
+        csvContent += `Generated,${new Date().toLocaleString()}\n`;
+        csvContent += `Start Date,${trades.length > 0 ? new Date(trades[0].timestamp * 1000).toLocaleString() : 'N/A'}\n\n`;
+
+        csvContent += "PERFORMANCE SUMMARY\n";
+        csvContent += `Total P&L,${stats.totalPnL.toFixed(2)}\n`;
+        csvContent += `Win Rate,${stats.winRate.toFixed(1)}%\n`;
+        csvContent += `Winning Trades,${stats.winningTrades}\n`;
+        csvContent += `Losing Trades,${stats.losingTrades}\n`;
+        csvContent += `Avg Win,${stats.avgWin.toFixed(2)}\n`;
+        csvContent += `Avg Loss,${stats.avgLoss.toFixed(2)}\n`;
+        csvContent += `Profit Factor,${stats.profitFactor.toFixed(2)}\n\n`;
+
+        csvContent += "POSITION SUMMARY\n";
+        csvContent += "ID,Direction,Entry Date/Time,Exit Date/Time,Entry Price,Exit Price,Qty,PnL,Duration (min)\n";
+        positions.forEach(p => {
+            csvContent += `${p.id},${p.direction},${formatTimestamp(p.entryTime)},${p.exitTime ? formatTimestamp(p.exitTime) : 'OPEN'},${p.avgEntryPrice},${p.avgExitPrice || ''},${p.totalQuantity},${p.realizedPnL.toFixed(2)},${p.durationMinutes ? p.durationMinutes.toFixed(1) : ''}\n`;
+        });
+
+        csvContent += "\nRAW TRADE EXECUTIONS\n";
+        csvContent += "Timestamp,Type,Price,Quantity,Instrument,P&L\n";
+        trades.forEach(trade => {
+            csvContent += `${new Date(trade.timestamp * 1000).toISOString()},${trade.type},${trade.price},${trade.quantity},${trade.instrument},${(trade.pnl || 0).toFixed(2)}\n`;
+        });
+
+        const blob = new Blob([csvContent], { type: 'text/csv' });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = `active-analysis-${instrument}-${new Date().toISOString().split('T')[0]}.csv`;
+        a.click();
+        URL.revokeObjectURL(url);
+    };
+
+    const handleExportJSON = () => {
+        if (trades.length === 0) return;
+
+        const reportData = {
+            metadata: {
+                instrument: instrument,
+                generatedAt: new Date().toISOString(),
+                isLiveSession: true
+            },
+            performance: stats,
+            positions: positions,
+            trades: trades
+        };
+
+        const blob = new Blob([JSON.stringify(reportData, null, 2)], { type: 'application/json' });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = `active-analysis-${instrument}-${new Date().toISOString().split('T')[0]}.json`;
+        a.click();
+        URL.revokeObjectURL(url);
+    };
+
+    const handlePrint = () => {
+        window.print();
+    };
 
     const handleMouseDown = (e: React.MouseEvent) => {
         // Only allow dragging from the header
@@ -111,9 +176,38 @@ export function TradeHistoryDialog({ isOpen, onClose }: TradeHistoryDialogProps)
             >
                 {/* Header */}
                 <div className="dialog-header flex items-center justify-between px-4 py-3 border-b-2 border-gray-200 cursor-move select-none bg-gradient-to-r from-blue-50 to-indigo-50">
-                    <div className="flex items-center gap-2">
-                        <div className="w-2 h-2 rounded-full bg-blue-500"></div>
-                        <h2 className="text-lg font-bold text-gray-800">Trade Analysis</h2>
+                    <div className="flex items-center gap-4">
+                        <div className="flex items-center gap-2">
+                            <div className="w-2 h-2 rounded-full bg-blue-500"></div>
+                            <h2 className="text-lg font-bold text-gray-800">Trade Analysis</h2>
+                        </div>
+                        <div className="h-6 w-px bg-gray-300 mx-2 hidden md:block"></div>
+                        <div className="flex gap-2" onMouseDown={(e) => e.stopPropagation()}>
+                            <button
+                                onClick={handleExportCSV}
+                                className="flex items-center gap-1.5 px-2.5 py-1 bg-green-50 text-green-700 border border-green-200 text-xs font-semibold rounded hover:bg-green-100 transition-colors"
+                                title="Export as CSV"
+                            >
+                                <FileSpreadsheet size={14} />
+                                CSV
+                            </button>
+                            <button
+                                onClick={handleExportJSON}
+                                className="flex items-center gap-1.5 px-2.5 py-1 bg-gray-50 text-gray-700 border border-gray-200 text-xs font-semibold rounded hover:bg-gray-100 transition-colors"
+                                title="Export as JSON"
+                            >
+                                <FileJson size={14} />
+                                JSON
+                            </button>
+                            <button
+                                onClick={handlePrint}
+                                className="flex items-center gap-1.5 px-2.5 py-1 bg-white text-gray-700 border border-gray-200 text-xs font-semibold rounded hover:bg-gray-50 transition-colors"
+                                title="Print Report"
+                            >
+                                <Printer size={14} />
+                                Print
+                            </button>
+                        </div>
                     </div>
                     <button
                         onClick={onClose}
@@ -184,7 +278,7 @@ export function TradeHistoryDialog({ isOpen, onClose }: TradeHistoryDialogProps)
                                 <tr>
                                     <th className="px-4 py-3 w-10"></th>
                                     <th className="px-4 py-3">Status</th>
-                                    <th className="px-4 py-3">Entry Time</th>
+                                    <th className="px-4 py-3">Entry Date/Time</th>
                                     <th className="px-4 py-3">Direction</th>
                                     <th className="px-4 py-3 text-right">Qty</th>
                                     <th className="px-4 py-3 text-right">Avg Entry</th>
@@ -219,8 +313,8 @@ export function TradeHistoryDialog({ isOpen, onClose }: TradeHistoryDialogProps)
                                                             {pos.status}
                                                         </span>
                                                     </td>
-                                                    <td className="px-4 py-3 text-gray-600">
-                                                        {formatTime(pos.entryTime)}
+                                                    <td className="px-4 py-3 text-gray-600 whitespace-nowrap">
+                                                        {formatTimestamp(pos.entryTime)}
                                                     </td>
                                                     <td className="px-4 py-3">
                                                         <span className={`font-semibold ${pos.direction === 'LONG' ? 'text-green-600' : 'text-red-600'}`}>
@@ -252,7 +346,7 @@ export function TradeHistoryDialog({ isOpen, onClose }: TradeHistoryDialogProps)
                                                                 <table className="w-full">
                                                                     <thead className="bg-gray-100 text-gray-500">
                                                                         <tr>
-                                                                            <th className="px-3 py-2 text-left">Exec Time</th>
+                                                                            <th className="px-3 py-2 text-left">Exec Date/Time</th>
                                                                             <th className="px-3 py-2 text-left">Type</th>
                                                                             <th className="px-3 py-2 text-right">Price</th>
                                                                             <th className="px-3 py-2 text-right">Qty</th>
@@ -262,7 +356,7 @@ export function TradeHistoryDialog({ isOpen, onClose }: TradeHistoryDialogProps)
                                                                     <tbody className="divide-y divide-gray-100">
                                                                         {pos.executions.map((exec, idx) => (
                                                                             <tr key={exec.id || idx}>
-                                                                                <td className="px-3 py-2 text-gray-600">{formatTime(exec.timestamp)}</td>
+                                                                                <td className="px-3 py-2 text-gray-600 whitespace-nowrap">{formatTimestamp(exec.timestamp)}</td>
                                                                                 <td className={`px-3 py-2 font-semibold ${exec.type === 'BUY' ? 'text-green-600' : 'text-red-600'}`}>
                                                                                     {exec.type}
                                                                                 </td>

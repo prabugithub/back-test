@@ -24,6 +24,7 @@ interface UseChartDrawingsProps {
   seriesApi: any;
   onTextToolTrigger?: (point: Point) => void;
   onCalloutTrigger?: (p1: Point, p2: Point) => void;
+  onCustomRender?: (ctx: CanvasRenderingContext2D) => void;
 }
 
 export function useChartDrawings({
@@ -34,6 +35,7 @@ export function useChartDrawings({
   seriesApi,
   onTextToolTrigger,
   onCalloutTrigger,
+  onCustomRender,
 }: UseChartDrawingsProps) {
   const [drawings, setDrawings] = useState<Drawing[]>([]);
   const [currentDrawing, setCurrentDrawing] = useState<Point[]>([]);
@@ -691,7 +693,11 @@ export function useChartDrawings({
     if (currentDrawing.length >= 2) {
       renderDrawing(ctx, { id: 'temp', type: activeTool, points: currentDrawing, color: getDrawingColor(activeTool) }, false);
     }
-  }, [chartApi, seriesApi, drawings, currentDrawing, selectedDrawingId, activeTool, getDrawingColor, renderDrawing, canvasRef]);
+    // Call custom render callback if provided
+    if (onCustomRender) {
+      onCustomRender(ctx);
+    }
+  }, [chartApi, seriesApi, drawings, currentDrawing, selectedDrawingId, activeTool, getDrawingColor, renderDrawing, canvasRef, onCustomRender]);
 
   useEffect(() => {
     renderCanvas();
@@ -701,8 +707,16 @@ export function useChartDrawings({
     if (!chartApi || !seriesApi) return;
     const timeScale = chartApi.timeScale();
     const handleSync = () => requestAnimationFrame(() => renderCanvas());
+
+    // Subscribe to time scale changes for smooth updates during zoom/pan
+    // Note: Price scale doesn't have event subscriptions in lightweight-charts API
     timeScale.subscribeVisibleLogicalRangeChange(handleSync);
-    return () => timeScale.unsubscribeVisibleLogicalRangeChange(handleSync);
+    timeScale.subscribeVisibleTimeRangeChange(handleSync);
+
+    return () => {
+      timeScale.unsubscribeVisibleLogicalRangeChange(handleSync);
+      timeScale.unsubscribeVisibleTimeRangeChange(handleSync);
+    };
   }, [chartApi, seriesApi, renderCanvas]);
 
   const clearDrawings = () => {

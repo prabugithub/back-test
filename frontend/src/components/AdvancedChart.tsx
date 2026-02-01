@@ -39,6 +39,8 @@ export function AdvancedChart() {
   const candles = useSessionStore((s) => s.candles);
   const currentIndex = useSessionStore((s) => s.currentIndex);
   const trades = useSessionStore((s) => s.trades);
+  const saveCurrentSession = useSessionStore((s) => s.saveCurrentSession);
+  const saveRemoteSession = useSessionStore((s) => s.saveRemoteSession);
 
   const visibleCandles = useMemo(() =>
     candles.slice(0, currentIndex + 1),
@@ -60,6 +62,103 @@ export function AdvancedChart() {
     setIsTextDialogOpen(true);
   }, []);
 
+  // Callback to render pivot risk-reward lines
+  const handleCustomRender = useCallback((ctx: CanvasRenderingContext2D) => {
+    if (!chart || !series || visibleCandles.length === 0) return;
+    if (!activeIndicators.includes('pivotPoints')) return;
+
+    // Calculate pivots
+    const allPivots = calculatePivotPoints(visibleCandles);
+    if (allPivots.length === 0) return;
+
+    // Get the most recent pivot
+    const recentPivot = allPivots[allPivots.length - 1];
+
+    // Find the candle corresponding to this pivot to get the entry price (close)
+    const pivotCandle = visibleCandles.find(c => c.timestamp === recentPivot.time);
+    if (!pivotCandle) return;
+
+    // Convert price and time to canvas coordinates
+    const timeScale = chart.timeScale();
+
+    const pivotX = timeScale.timeToCoordinate(recentPivot.time);
+    if (pivotX === null) return;
+
+    // Determine entry price (close of the signal candle) and SL distance
+    const entryPrice = pivotCandle.close;
+    const slDistance = recentPivot.slDistance;
+
+    let slPrice: number;
+    let direction: 'long' | 'short';
+
+    if (recentPivot.type === 'bullish') {
+      // For bullish pivot: entry at candle close, SL below
+      slPrice = entryPrice - slDistance;
+      direction = 'long';
+    } else {
+      // For bearish pivot: entry at candle close, SL above
+      slPrice = entryPrice + slDistance;
+      direction = 'short';
+    }
+
+    // Calculate target prices based on risk (slDistance)
+    const tp1Price = direction === 'long' ? entryPrice + slDistance : entryPrice - slDistance;
+    const tp2Price = direction === 'long' ? entryPrice + (slDistance * 2) : entryPrice - (slDistance * 2);
+    const tp3Price = direction === 'long' ? entryPrice + (slDistance * 3) : entryPrice - (slDistance * 3);
+
+    // Convert prices to Y coordinates using series API
+    const entryY = series.priceToCoordinate(entryPrice);
+    const slY = series.priceToCoordinate(slPrice);
+    const tp1Y = series.priceToCoordinate(tp1Price);
+    const tp2Y = series.priceToCoordinate(tp2Price);
+    const tp3Y = series.priceToCoordinate(tp3Price);
+
+    if (entryY === null || slY === null || tp1Y === null || tp2Y === null || tp3Y === null) return;
+
+    // Get canvas dimensions
+    const canvasWidth = ctx.canvas.width;
+    const startX = Math.max(0, pivotX);
+    const endX = canvasWidth - 60; // Leave space for labels
+
+    // Helper function to draw a horizontal line with label
+    const drawHorizontalLine = (
+      y: number,
+      color: string,
+      label: string,
+      lineWidth: number = 2,
+      dashed: boolean = false
+    ) => {
+      ctx.strokeStyle = color;
+      ctx.lineWidth = lineWidth;
+      ctx.setLineDash(dashed ? [5, 5] : []);
+      ctx.beginPath();
+      ctx.moveTo(startX, y);
+      ctx.lineTo(endX, y);
+      ctx.stroke();
+      ctx.setLineDash([]);
+
+      // Draw label
+      ctx.font = 'bold 11px Inter, sans-serif';
+      ctx.fillStyle = color;
+      ctx.textAlign = 'left';
+      ctx.fillText(label, endX + 5, y + 4);
+    };
+
+    // Draw Entry Line
+    drawHorizontalLine(entryY, '#FFC107', 'ENTRY', 2, false);
+
+    // Draw Stop Loss Line
+    drawHorizontalLine(slY, '#F44336', 'SL', 2, false);
+
+    // Draw Target Lines
+    drawHorizontalLine(tp1Y, '#4CAF50', '1:1', 1.5, true);
+    drawHorizontalLine(tp2Y, '#4CAF50', '1:2', 1.5, true);
+    drawHorizontalLine(tp3Y, '#2E7D32', '1:3', 1.5, true);
+
+    // Reset context
+    ctx.textAlign = 'start';
+  }, [chart, series, visibleCandles, activeIndicators]);
+
   const {
     clearDrawings,
     addTextDrawing,
@@ -78,6 +177,7 @@ export function AdvancedChart() {
     seriesApi: series,
     onTextToolTrigger: handleTextToolTrigger,
     onCalloutTrigger: handleCalloutTrigger,
+    onCustomRender: handleCustomRender,
   });
 
   const handleTextSubmit = (text: string) => {
@@ -382,6 +482,11 @@ export function AdvancedChart() {
         if (res.link) {
           navigator.clipboard.writeText(res.link);
           notify('Screenshot uploaded and link copied!', 'success');
+
+          // Auto-save session state
+          saveCurrentSession();
+          saveRemoteSession();
+
           setIsScreenshotDialogOpen(false);
           setPendingScreenshotData(null);
         }
@@ -395,6 +500,10 @@ export function AdvancedChart() {
         link.download = `${name}.png`;
         link.href = pendingScreenshotData!;
         link.click();
+
+        // Auto-save session state even on upload failure
+        saveCurrentSession();
+        saveRemoteSession();
 
         setIsScreenshotDialogOpen(false);
         setPendingScreenshotData(null);

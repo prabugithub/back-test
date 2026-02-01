@@ -5,7 +5,11 @@
  */
 export function formatTimestamp(timestamp: number): string {
   const date = new Date(timestamp * 1000);
-  return date.toISOString().replace('T', ' ').substring(0, 19);
+  const d = date.getDate().toString().padStart(2, '0');
+  const m = (date.getMonth() + 1).toString().padStart(2, '0');
+  const y = date.getFullYear();
+  const time = date.toTimeString().split(' ')[0];
+  return `${d}-${m}-${y} ${time}`;
 }
 
 /**

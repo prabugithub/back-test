@@ -1,7 +1,7 @@
 import { useState, useMemo } from 'react';
-import { X, Download, Trash2, TrendingUp, TrendingDown, DollarSign, Target, Calendar, BarChart3 } from 'lucide-react';
+import { X, Trash2, TrendingUp, TrendingDown, DollarSign, Target, Calendar, BarChart3, FileJson, Printer, FileSpreadsheet } from 'lucide-react';
 import { getStoredSessions, deleteTradeSession, clearAllSessions, type TradeSession } from '../utils/tradeStorage';
-import { formatCurrency, formatTime } from '../utils/formatters';
+import { formatCurrency, formatTimestamp } from '../utils/formatters';
 import { groupTradesIntoPositions, calculatePerformanceStats } from '../utils/tradeAnalysis';
 
 interface TradeReportDialogProps {
@@ -42,26 +42,70 @@ export function TradeReportDialog({ isOpen, onClose }: TradeReportDialogProps) {
     };
 
     const handleExportCSV = () => {
-        if (!selectedSession) return;
+        if (!selectedSession || !selectedSessionStats) return;
 
-        const headers = ['Timestamp', 'Type', 'Price', 'Quantity', 'Instrument', 'P&L'];
-        const rows = selectedSession.trades.map(trade => [
-            new Date(trade.timestamp).toISOString(),
-            trade.type,
-            trade.price.toString(),
-            trade.quantity.toString(),
-            trade.instrument,
-            (trade.pnl || 0).toString(),
-        ]);
+        const positions = groupTradesIntoPositions(selectedSession.trades);
 
-        const csv = [headers, ...rows].map(row => row.join(',')).join('\n');
-        const blob = new Blob([csv], { type: 'text/csv' });
+        let csvContent = `TRADING SESSION REPORT - ${selectedSession.instrument}\n`;
+        csvContent += `Generated,${new Date().toLocaleString()}\n`;
+        csvContent += `Start Date,${new Date(selectedSession.startDate).toLocaleString()}\n\n`;
+
+        csvContent += "PERFORMANCE SUMMARY\n";
+        csvContent += `Total P&L,${selectedSessionStats.totalPnL.toFixed(2)}\n`;
+        csvContent += `Win Rate,${selectedSessionStats.winRate.toFixed(1)}%\n`;
+        csvContent += `Winning Trades,${selectedSessionStats.winningTrades}\n`;
+        csvContent += `Losing Trades,${selectedSessionStats.losingTrades}\n`;
+        csvContent += `Avg Win,${selectedSessionStats.avgWin.toFixed(2)}\n`;
+        csvContent += `Avg Loss,${selectedSessionStats.avgLoss.toFixed(2)}\n`;
+        csvContent += `Profit Factor,${selectedSessionStats.profitFactor.toFixed(2)}\n\n`;
+
+        csvContent += "POSITION SUMMARY\n";
+        csvContent += "ID,Direction,Entry Time,Exit Time,Entry Price,Exit Price,Qty,PnL,Duration (min)\n";
+        positions.forEach(p => {
+            csvContent += `${p.id},${p.direction},${formatTimestamp(p.entryTime)},${p.exitTime ? formatTimestamp(p.exitTime) : 'OPEN'},${p.avgEntryPrice},${p.avgExitPrice || ''},${p.totalQuantity},${p.realizedPnL.toFixed(2)},${p.durationMinutes ? p.durationMinutes.toFixed(1) : ''}\n`;
+        });
+
+        csvContent += "\nRAW TRADE EXECUTIONS\n";
+        csvContent += "Timestamp,Type,Price,Quantity,Instrument,P&L\n";
+        selectedSession.trades.forEach(trade => {
+            csvContent += `${new Date(trade.timestamp).toISOString()},${trade.type},${trade.price},${trade.quantity},${trade.instrument},${(trade.pnl || 0).toFixed(2)}\n`;
+        });
+
+        const blob = new Blob([csvContent], { type: 'text/csv' });
         const url = URL.createObjectURL(blob);
         const a = document.createElement('a');
         a.href = url;
-        a.download = `trade-session-${selectedSession.instrument}-${new Date(selectedSession.startDate).toISOString().split('T')[0]}.csv`;
+        a.download = `trade-report-${selectedSession.instrument}-${new Date(selectedSession.startDate).toISOString().split('T')[0]}.csv`;
         a.click();
         URL.revokeObjectURL(url);
+    };
+
+    const handleExportJSON = () => {
+        if (!selectedSession || !selectedSessionStats) return;
+
+        const positions = groupTradesIntoPositions(selectedSession.trades);
+        const reportData = {
+            metadata: {
+                instrument: selectedSession.instrument,
+                startDate: selectedSession.startDate,
+                generatedAt: new Date().toISOString(),
+            },
+            performance: selectedSessionStats,
+            positions: positions,
+            trades: selectedSession.trades
+        };
+
+        const blob = new Blob([JSON.stringify(reportData, null, 2)], { type: 'application/json' });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = `trade-report-${selectedSession.instrument}-${new Date(selectedSession.startDate).toISOString().split('T')[0]}.json`;
+        a.click();
+        URL.revokeObjectURL(url);
+    };
+
+    const handlePrint = () => {
+        window.print();
     };
 
     if (!isOpen) return null;
@@ -193,13 +237,32 @@ export function TradeReportDialog({ isOpen, onClose }: TradeReportDialogProps) {
                                                 <span>{selectedSession.totalTrades} trades</span>
                                             </div>
                                         </div>
-                                        <button
-                                            onClick={handleExportCSV}
-                                            className="flex items-center gap-2 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors"
-                                        >
-                                            <Download size={16} />
-                                            Export CSV
-                                        </button>
+                                        <div className="flex gap-2">
+                                            <button
+                                                onClick={handleExportCSV}
+                                                className="flex items-center gap-2 px-3 py-1.5 bg-green-600 text-white text-sm rounded-lg hover:bg-green-700 transition-colors"
+                                                title="Export as CSV"
+                                            >
+                                                <FileSpreadsheet size={16} />
+                                                CSV
+                                            </button>
+                                            <button
+                                                onClick={handleExportJSON}
+                                                className="flex items-center gap-2 px-3 py-1.5 bg-gray-700 text-white text-sm rounded-lg hover:bg-gray-800 transition-colors"
+                                                title="Export as JSON"
+                                            >
+                                                <FileJson size={16} />
+                                                JSON
+                                            </button>
+                                            <button
+                                                onClick={handlePrint}
+                                                className="flex items-center gap-2 px-3 py-1.5 border-2 border-gray-300 text-gray-700 text-sm rounded-lg hover:bg-gray-100 transition-colors"
+                                                title="Print Report"
+                                            >
+                                                <Printer size={16} />
+                                                Print
+                                            </button>
+                                        </div>
                                     </div>
 
                                     {/* Performance Summary Cards */}
@@ -258,7 +321,7 @@ export function TradeReportDialog({ isOpen, onClose }: TradeReportDialogProps) {
                                         <table className="w-full text-sm">
                                             <thead className="bg-gray-100 sticky top-0">
                                                 <tr>
-                                                    <th className="text-left p-3 font-semibold text-gray-700">Time</th>
+                                                    <th className="text-left p-3 font-semibold text-gray-700">Date/Time</th>
                                                     <th className="text-left p-3 font-semibold text-gray-700">Type</th>
                                                     <th className="text-right p-3 font-semibold text-gray-700">Price</th>
                                                     <th className="text-right p-3 font-semibold text-gray-700">Quantity</th>
@@ -272,8 +335,8 @@ export function TradeReportDialog({ isOpen, onClose }: TradeReportDialogProps) {
                                                         className={`border-b hover:bg-gray-50 transition-colors ${index % 2 === 0 ? 'bg-white' : 'bg-gray-50/50'
                                                             }`}
                                                     >
-                                                        <td className="p-3 text-gray-600">
-                                                            {formatTime(trade.timestamp)}
+                                                        <td className="p-3 text-gray-600 whitespace-nowrap">
+                                                            {formatTimestamp(trade.timestamp)}
                                                         </td>
                                                         <td className="p-3">
                                                             <span className={`px-2 py-1 rounded text-xs font-semibold ${trade.type === 'BUY'
