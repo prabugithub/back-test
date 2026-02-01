@@ -37,7 +37,7 @@ interface SessionStore {
   jump: (count: number) => void;
   setSpeed: (speed: number) => void;
   setCurrentIndex: (index: number) => void;
-  executeTrade: (type: 'BUY' | 'SELL', quantity: number, stopLoss?: number, target?: number) => void;
+  executeTrade: (type: 'BUY' | 'SELL', quantity: number, stopLoss?: number, target?: number, priceOverride?: number, exitReason?: 'SL' | 'TP' | 'MANUAL') => void;
   saveRemoteSession: () => Promise<void>;
   loadRemoteSession: () => Promise<{ config: SessionConfig, data: { trades: Trade[], position: Position | null, currentIndex: number } } | null>;
   restoreSessionState: (trades: Trade[], position: Position | null, currentIndex: number) => void;
@@ -89,9 +89,64 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
   step: (direction) => {
     const { currentIndex, candles } = get();
     if (direction === 'forward' && currentIndex < candles.length - 1) {
-      set({ currentIndex: currentIndex + 1 });
+      const nextIndex = currentIndex + 1;
+      set({ currentIndex: nextIndex });
+      (get() as any).checkSLTPHits(nextIndex);
     } else if (direction === 'backward' && currentIndex > 0) {
       set({ currentIndex: currentIndex - 1 });
+    }
+  },
+
+  checkSLTPHits: (index: number) => {
+    const { candles, position } = get();
+    if (!position || (!position.stopLoss && !position.target)) return;
+
+    const candle = candles[index];
+    if (!candle) return;
+
+    const { stopLoss, target, quantity } = position;
+    const isLong = quantity > 0;
+
+    let hitType: 'SL' | 'TP' | null = null;
+    let hitPrice: number = 0;
+
+    // Check Long SL/TP - ONLY trigger for wicks (high/low hit but close didn't)
+    if (isLong) {
+      if (stopLoss && candle.low <= stopLoss && candle.close > stopLoss) {
+        hitType = 'SL';
+        hitPrice = stopLoss;
+      } else if (target && candle.high >= target && candle.close < target) {
+        hitType = 'TP';
+        hitPrice = target;
+      }
+    }
+    // Check Short SL/TP - ONLY trigger for wicks
+    else {
+      if (stopLoss && candle.high >= stopLoss && candle.close < stopLoss) {
+        hitType = 'SL';
+        hitPrice = stopLoss;
+      } else if (target && candle.low <= target && candle.close > target) {
+        hitType = 'TP';
+        hitPrice = target;
+      }
+    }
+
+    if (hitType) {
+      if ((hitType === 'SL' && position.slHit) || (hitType === 'TP' && position.tpHit)) return;
+
+      useNotificationStore.getState().notify(
+        `${hitType} Hit at ${hitPrice.toFixed(2)} (High/Low movement)!`,
+        hitType === 'TP' ? 'success' : 'warning'
+      );
+
+      // Update position with hit flags
+      set({
+        position: {
+          ...position,
+          slHit: hitType === 'SL' ? true : position.slHit,
+          tpHit: hitType === 'TP' ? true : position.tpHit,
+        }
+      });
     }
   },
 
@@ -101,10 +156,12 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
     const { candles } = get();
     if (index >= 0 && index < candles.length) {
       set({ currentIndex: index });
+      // Only check hits if moving forward? Actually jump might hit too.
+      (get() as any).checkSLTPHits(index);
     }
   },
 
-  executeTrade: (type, quantity, stopLoss, target) => {
+  executeTrade: (type, quantity, stopLoss, target, priceOverride, exitReason = 'MANUAL') => {
     const { candles, currentIndex, trades, position, instrument } = get();
     const currentCandle = candles[currentIndex];
 
@@ -113,8 +170,10 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
       return;
     }
 
-    const currentPrice = currentCandle.close;
+    const currentPrice = priceOverride || currentCandle.close;
     const timestamp = currentCandle.timestamp;
+
+    const finalExitReason = exitReason;
 
     // Create trade
     const trade: Trade = {
@@ -124,8 +183,11 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
       price: currentPrice,
       quantity,
       instrument,
-      stopLoss,
-      target,
+      stopLoss: stopLoss || position?.stopLoss,
+      target: target || position?.target,
+      exitReason: finalExitReason,
+      slHit: position?.slHit,
+      tpHit: position?.tpHit,
     };
 
     // Simplified Position Management allowing Long and Short
@@ -198,6 +260,10 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
       averagePrice: newAvgPrice,
       realizedPnL: newRealizedPnL,
       unrealizedPnL: 0, // Recalculated by getter
+      stopLoss: stopLoss || position?.stopLoss,
+      target: target || position?.target,
+      slHit: position?.slHit,
+      tpHit: position?.tpHit,
     };
 
     set({

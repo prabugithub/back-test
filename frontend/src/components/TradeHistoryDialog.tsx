@@ -172,15 +172,15 @@ export function TradeHistoryDialog({ isOpen, onClose }: TradeHistoryDialogProps)
         top: `${offset.y}px`,
         position: 'fixed' as const,
         margin: 0,
-        width: '1200px',
-        maxWidth: '90vw',
-        height: '85vh',
-        maxHeight: '85vh'
+        width: '95%',
+        maxWidth: '1200px',
+        height: '90vh',
+        maxHeight: '90vh'
     } : {
-        width: '1200px',
-        maxWidth: '90vw',
-        height: '85vh',
-        maxHeight: '85vh'
+        width: '95%',
+        maxWidth: '1200px',
+        height: '90vh',
+        maxHeight: '90vh'
     };
 
     return (
@@ -289,8 +289,8 @@ export function TradeHistoryDialog({ isOpen, onClose }: TradeHistoryDialogProps)
                     </div>
 
                     {/* Positions Table */}
-                    <div className="bg-white rounded-lg shadow-sm border overflow-hidden">
-                        <table className="w-full text-sm text-left">
+                    <div className="bg-white rounded-lg shadow-sm border overflow-x-auto">
+                        <table className="w-full text-sm text-left border-collapse" style={{ minWidth: '1100px' }}>
                             <thead className="bg-gray-50 text-gray-600 font-semibold border-b">
                                 <tr>
                                     <th className="px-4 py-3 w-10"></th>
@@ -302,6 +302,8 @@ export function TradeHistoryDialog({ isOpen, onClose }: TradeHistoryDialogProps)
                                     <th className="px-4 py-3 text-right">Avg Exit</th>
                                     <th className="px-4 py-3 text-right">SL</th>
                                     <th className="px-4 py-3 text-right">Target</th>
+                                    <th className="px-4 py-3 text-center">Min SL Hit</th>
+                                    <th className="px-4 py-3 text-center">Min Target Hit</th>
                                     <th className="px-4 py-3 text-right">P&L</th>
                                     <th className="px-4 py-3 text-right">Duration</th>
                                     <th className="px-4 py-3 text-center w-10"></th>
@@ -310,7 +312,7 @@ export function TradeHistoryDialog({ isOpen, onClose }: TradeHistoryDialogProps)
                             <tbody className="divide-y divide-gray-100">
                                 {positions.length === 0 ? (
                                     <tr>
-                                        <td colSpan={11} className="px-4 py-8 text-center text-gray-500">
+                                        <td colSpan={13} className="px-4 py-8 text-center text-gray-500">
                                             No positions recorded yet.
                                         </td>
                                     </tr>
@@ -340,6 +342,11 @@ export function TradeHistoryDialog({ isOpen, onClose }: TradeHistoryDialogProps)
                                                         <span className={`font-semibold ${pos.direction === 'LONG' ? 'text-green-600' : 'text-red-600'}`}>
                                                             {pos.direction}
                                                         </span>
+                                                        {pos.exitReason && pos.exitReason !== 'MANUAL' && (
+                                                            <span className={`ml-1 px-1 py-0.5 rounded text-[8px] font-bold ${pos.exitReason === 'TP' ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-700'}`}>
+                                                                {pos.exitReason} HIT
+                                                            </span>
+                                                        )}
                                                     </td>
                                                     <td className="px-4 py-3 text-right font-mono">
                                                         {pos.totalQuantity}
@@ -355,6 +362,20 @@ export function TradeHistoryDialog({ isOpen, onClose }: TradeHistoryDialogProps)
                                                     </td>
                                                     <td className="px-4 py-3 text-right font-mono text-gray-400">
                                                         {pos.target ? formatCurrency(pos.target) : '-'}
+                                                    </td>
+                                                    <td className="px-4 py-3 text-center">
+                                                        {pos.slHit ? (
+                                                            <span className="px-1.5 py-0.5 rounded text-[10px] bg-red-100 text-red-700 font-bold">YES</span>
+                                                        ) : (
+                                                            <span className="text-gray-300">-</span>
+                                                        )}
+                                                    </td>
+                                                    <td className="px-4 py-3 text-center">
+                                                        {pos.tpHit ? (
+                                                            <span className="px-1.5 py-0.5 rounded text-[10px] bg-green-100 text-green-700 font-bold">YES</span>
+                                                        ) : (
+                                                            <span className="text-gray-300">-</span>
+                                                        )}
                                                     </td>
                                                     <td className={`px-4 py-3 text-right font-bold font-mono ${pos.realizedPnL > 0 ? 'text-green-600' : pos.realizedPnL < 0 ? 'text-red-600' : 'text-gray-400'
                                                         }`}>
@@ -375,8 +396,8 @@ export function TradeHistoryDialog({ isOpen, onClose }: TradeHistoryDialogProps)
                                                 </tr>
                                                 {/* Expanded Executions Row */}
                                                 {isExpanded && (
-                                                    <tr className="bg-gray-50">
-                                                        <td colSpan={12} className="px-4 py-3 pl-12"> {/* colSpan updated to 12 */}
+                                                    <tr className="bg-gray-50 border-b">
+                                                        <td colSpan={13} className="px-4 py-3 pl-12">
                                                             <div className="border rounded bg-white overflow-hidden text-xs">
                                                                 <table className="w-full">
                                                                     <thead className="bg-gray-100 text-gray-500">
@@ -385,6 +406,7 @@ export function TradeHistoryDialog({ isOpen, onClose }: TradeHistoryDialogProps)
                                                                             <th className="px-3 py-2 text-left">Type</th>
                                                                             <th className="px-3 py-2 text-right">Price</th>
                                                                             <th className="px-3 py-2 text-right">Qty</th>
+                                                                            <th className="px-3 py-2 text-right">Info</th>
                                                                             <th className="px-3 py-2 text-right">Realized P&L</th>
                                                                             <th className="px-3 py-2 text-center w-10"></th>
                                                                         </tr>
@@ -398,6 +420,14 @@ export function TradeHistoryDialog({ isOpen, onClose }: TradeHistoryDialogProps)
                                                                                 </td>
                                                                                 <td className="px-3 py-2 text-right font-mono">{formatCurrency(exec.price)}</td>
                                                                                 <td className="px-3 py-2 text-right font-mono">{exec.quantity}</td>
+                                                                                <td className="px-3 py-2 text-right">
+                                                                                    {exec.exitReason && exec.exitReason !== 'MANUAL' && (
+                                                                                        <span className={`px-1.5 py-0.5 rounded text-[9px] font-bold ${exec.exitReason === 'TP' ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-700'
+                                                                                            }`}>
+                                                                                            {exec.exitReason}
+                                                                                        </span>
+                                                                                    )}
+                                                                                </td>
                                                                                 <td className="px-3 py-2 text-right font-mono text-gray-500">
                                                                                     {exec.pnl ? formatCurrency(exec.pnl) : '-'}
                                                                                 </td>

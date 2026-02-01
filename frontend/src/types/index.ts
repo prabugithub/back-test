@@ -19,6 +19,9 @@ export interface Trade {
   pnl?: number;
   stopLoss?: number;
   target?: number;
+  exitReason?: 'SL' | 'TP' | 'MANUAL';
+  slHit?: boolean;
+  tpHit?: boolean;
 }
 
 // Position tracking
@@ -28,6 +31,10 @@ export interface Position {
   averagePrice: number;
   realizedPnL: number;
   unrealizedPnL: number;
+  stopLoss?: number;
+  target?: number;
+  slHit?: boolean;
+  tpHit?: boolean;
 }
 
 // API request/response types

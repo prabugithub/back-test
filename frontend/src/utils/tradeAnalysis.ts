@@ -17,6 +17,9 @@ export interface GroupedPosition {
     durationMinutes?: number;
     stopLoss?: number;
     target?: number;
+    exitReason?: 'SL' | 'TP' | 'MANUAL';
+    slHit?: boolean;
+    tpHit?: boolean;
 }
 
 export interface TradePerformanceSummary {
@@ -60,8 +63,10 @@ export function groupTradesIntoPositions(trades: Trade[]): GroupedPosition[] {
                 totalQuantity: trade.quantity,
                 remainingQuantity: trade.quantity, // Absolute
                 realizedPnL: 0,
-                stopLoss: trade.stopLoss,
                 target: trade.target,
+                stopLoss: trade.stopLoss,
+                slHit: trade.slHit,
+                tpHit: trade.tpHit,
                 executions: [trade],
             };
             // Note: We don't push to 'positions' yet, we keep it in 'currentPos' until closed or loop ends?
@@ -85,6 +90,10 @@ export function groupTradesIntoPositions(trades: Trade[]): GroupedPosition[] {
                 currentPos.totalQuantity += trade.quantity;
                 currentPos.remainingQuantity = newRemQty;
                 currentPos.executions.push(trade);
+
+                // Aggregrate hits
+                if (trade.slHit) currentPos.slHit = true;
+                if (trade.tpHit) currentPos.tpHit = true;
 
                 runningQty += tradeQtySigned;
             }
@@ -134,8 +143,10 @@ export function groupTradesIntoPositions(trades: Trade[]): GroupedPosition[] {
                     currentPos.executions.push(closingTrade);
                     currentPos.status = 'CLOSED';
                     currentPos.exitTime = trade.timestamp;
-                    // approx avg exit
-                    currentPos.avgExitPrice = trade.price; // Simplified if single exit, otherwise needs weighting
+                    currentPos.avgExitPrice = trade.price;
+                    currentPos.exitReason = trade.exitReason;
+                    if (trade.slHit) currentPos.slHit = true;
+                    if (trade.tpHit) currentPos.tpHit = true;
 
                     positions.push(currentPos);
 
@@ -165,6 +176,9 @@ export function groupTradesIntoPositions(trades: Trade[]): GroupedPosition[] {
                         currentPos.status = 'CLOSED';
                         currentPos.exitTime = trade.timestamp;
                         currentPos.avgExitPrice = trade.price; // Simplified
+                        currentPos.exitReason = trade.exitReason;
+                        if (trade.slHit) currentPos.slHit = true;
+                        if (trade.tpHit) currentPos.tpHit = true;
                         positions.push(currentPos);
                         currentPos = null;
                     }

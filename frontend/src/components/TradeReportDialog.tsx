@@ -369,7 +369,7 @@ export function TradeReportDialog({ isOpen, onClose }: TradeReportDialogProps) {
                                     <div>
                                         <h4 className="font-semibold text-gray-700 mb-3">Positions Summary</h4>
                                         <div className="overflow-x-auto bg-white rounded-lg border shadow-sm">
-                                            <table className="w-full text-sm text-left">
+                                            <table className="w-full text-sm text-left border-collapse" style={{ minWidth: '1000px' }}>
                                                 <thead className="bg-gray-50 text-gray-600 font-semibold border-b">
                                                     <tr>
                                                         <th className="px-4 py-3">Status</th>
@@ -379,6 +379,8 @@ export function TradeReportDialog({ isOpen, onClose }: TradeReportDialogProps) {
                                                         <th className="px-4 py-3 text-right">Avg Price</th>
                                                         <th className="px-4 py-3 text-right">SL</th>
                                                         <th className="px-4 py-3 text-right">Target</th>
+                                                        <th className="px-4 py-3 text-center">Min SL Hit</th>
+                                                        <th className="px-4 py-3 text-center">Min Target Hit</th>
                                                         <th className="px-4 py-3 text-right">P&L</th>
                                                         <th className="px-4 py-3 text-center w-10"></th>
                                                     </tr>
@@ -395,6 +397,11 @@ export function TradeReportDialog({ isOpen, onClose }: TradeReportDialogProps) {
                                                                 <span className={`font-semibold ${pos.direction === 'LONG' ? 'text-green-600' : 'text-red-600'}`}>
                                                                     {pos.direction}
                                                                 </span>
+                                                                {pos.exitReason && pos.exitReason !== 'MANUAL' && (
+                                                                    <span className={`ml-1 px-1.5 py-0.5 rounded text-[8px] font-bold ${pos.exitReason === 'TP' ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-700'}`}>
+                                                                        {pos.exitReason} HIT
+                                                                    </span>
+                                                                )}
                                                             </td>
                                                             <td className="px-4 py-3 text-gray-500">
                                                                 {formatTimestamp(pos.entryTime)}
@@ -410,6 +417,20 @@ export function TradeReportDialog({ isOpen, onClose }: TradeReportDialogProps) {
                                                             </td>
                                                             <td className="px-4 py-3 text-right font-mono text-gray-500">
                                                                 {pos.target ? formatCurrency(pos.target) : '-'}
+                                                            </td>
+                                                            <td className="px-4 py-3 text-center">
+                                                                {pos.slHit ? (
+                                                                    <span className="px-1.5 py-0.5 rounded text-[10px] bg-red-100 text-red-700 font-bold">YES</span>
+                                                                ) : (
+                                                                    <span className="text-gray-300">-</span>
+                                                                )}
+                                                            </td>
+                                                            <td className="px-4 py-3 text-center">
+                                                                {pos.tpHit ? (
+                                                                    <span className="px-1.5 py-0.5 rounded text-[10px] bg-green-100 text-green-700 font-bold">YES</span>
+                                                                ) : (
+                                                                    <span className="text-gray-300">-</span>
+                                                                )}
                                                             </td>
                                                             <td className={`px-4 py-3 text-right font-bold ${pos.realizedPnL >= 0 ? 'text-green-600' : 'text-red-600'}`}>
                                                                 {pos.realizedPnL >= 0 ? '+' : ''}{formatCurrency(pos.realizedPnL)}
@@ -433,14 +454,17 @@ export function TradeReportDialog({ isOpen, onClose }: TradeReportDialogProps) {
                                     {/* Trades Table */}
                                     <div>
                                         <h4 className="font-semibold text-gray-700 mb-3">Raw Executions</h4>
-                                        <div className="overflow-x-auto">
-                                            <table className="w-full text-sm">
+                                        <div className="overflow-x-auto border rounded-lg shadow-sm bg-white">
+                                            <table className="w-full text-sm border-collapse" style={{ minWidth: '900px' }}>
                                                 <thead className="bg-gray-100 sticky top-0">
                                                     <tr>
                                                         <th className="text-left p-3 font-semibold text-gray-700">Date/Time</th>
                                                         <th className="text-left p-3 font-semibold text-gray-700">Type</th>
                                                         <th className="text-right p-3 font-semibold text-gray-700">Price</th>
                                                         <th className="text-right p-3 font-semibold text-gray-700">Quantity</th>
+                                                        <th className="text-right p-3 font-semibold text-gray-700">Info</th>
+                                                        <th className="text-center p-3 font-semibold text-gray-700">Min SL Hit</th>
+                                                        <th className="text-center p-3 font-semibold text-gray-700">Min Target Hit</th>
                                                         <th className="text-right p-3 font-semibold text-gray-700">P&L</th>
                                                         <th className="text-center p-3 font-semibold text-gray-700 w-10"></th>
                                                     </tr>
@@ -468,6 +492,28 @@ export function TradeReportDialog({ isOpen, onClose }: TradeReportDialogProps) {
                                                             </td>
                                                             <td className="p-3 text-right text-gray-700">
                                                                 {trade.quantity}
+                                                            </td>
+                                                            <td className="p-3 text-right">
+                                                                {trade.exitReason && trade.exitReason !== 'MANUAL' && (
+                                                                    <span className={`px-1.5 py-0.5 rounded text-[10px] font-bold ${trade.exitReason === 'TP' ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-700'
+                                                                        }`}>
+                                                                        {trade.exitReason}
+                                                                    </span>
+                                                                )}
+                                                            </td>
+                                                            <td className="p-3 text-center">
+                                                                {trade.slHit ? (
+                                                                    <span className="px-1.5 py-0.5 rounded text-[10px] bg-red-50 text-red-600 font-bold">YES</span>
+                                                                ) : (
+                                                                    <span className="text-gray-300">-</span>
+                                                                )}
+                                                            </td>
+                                                            <td className="p-3 text-center">
+                                                                {trade.tpHit ? (
+                                                                    <span className="px-1.5 py-0.5 rounded text-[10px] bg-green-50 text-green-600 font-bold">YES</span>
+                                                                ) : (
+                                                                    <span className="text-gray-300">-</span>
+                                                                )}
                                                             </td>
                                                             <td className="p-3 text-right font-semibold">
                                                                 {trade.pnl !== undefined ? (
