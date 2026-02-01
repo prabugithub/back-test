@@ -377,6 +377,8 @@ export function TradeReportDialog({ isOpen, onClose }: TradeReportDialogProps) {
                                                         <th className="px-4 py-3">Entry Time</th>
                                                         <th className="px-4 py-3 text-right">Qty</th>
                                                         <th className="px-4 py-3 text-right">Avg Price</th>
+                                                        <th className="px-4 py-3 text-right">SL</th>
+                                                        <th className="px-4 py-3 text-right">Target</th>
                                                         <th className="px-4 py-3 text-right">P&L</th>
                                                         <th className="px-4 py-3 text-center w-10"></th>
                                                     </tr>
@@ -402,6 +404,12 @@ export function TradeReportDialog({ isOpen, onClose }: TradeReportDialogProps) {
                                                             </td>
                                                             <td className="px-4 py-3 text-right font-mono">
                                                                 {formatCurrency(pos.avgEntryPrice)}
+                                                            </td>
+                                                            <td className="px-4 py-3 text-right font-mono text-gray-500">
+                                                                {pos.stopLoss ? formatCurrency(pos.stopLoss) : '-'}
+                                                            </td>
+                                                            <td className="px-4 py-3 text-right font-mono text-gray-500">
+                                                                {pos.target ? formatCurrency(pos.target) : '-'}
                                                             </td>
                                                             <td className={`px-4 py-3 text-right font-bold ${pos.realizedPnL >= 0 ? 'text-green-600' : 'text-red-600'}`}>
                                                                 {pos.realizedPnL >= 0 ? '+' : ''}{formatCurrency(pos.realizedPnL)}

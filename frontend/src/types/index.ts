@@ -17,6 +17,8 @@ export interface Trade {
   quantity: number;
   instrument: string;
   pnl?: number;
+  stopLoss?: number;
+  target?: number;
 }
 
 // Position tracking

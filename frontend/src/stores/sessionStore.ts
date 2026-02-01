@@ -37,7 +37,7 @@ interface SessionStore {
   jump: (count: number) => void;
   setSpeed: (speed: number) => void;
   setCurrentIndex: (index: number) => void;
-  executeTrade: (type: 'BUY' | 'SELL', quantity: number) => void;
+  executeTrade: (type: 'BUY' | 'SELL', quantity: number, stopLoss?: number, target?: number) => void;
   saveRemoteSession: () => Promise<void>;
   loadRemoteSession: () => Promise<{ config: SessionConfig, data: { trades: Trade[], position: Position | null, currentIndex: number } } | null>;
   restoreSessionState: (trades: Trade[], position: Position | null, currentIndex: number) => void;
@@ -104,7 +104,7 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
     }
   },
 
-  executeTrade: (type, quantity) => {
+  executeTrade: (type, quantity, stopLoss, target) => {
     const { candles, currentIndex, trades, position, instrument } = get();
     const currentCandle = candles[currentIndex];
 
@@ -124,6 +124,8 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
       price: currentPrice,
       quantity,
       instrument,
+      stopLoss,
+      target,
     };
 
     // Simplified Position Management allowing Long and Short

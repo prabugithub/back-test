@@ -15,6 +15,8 @@ export interface GroupedPosition {
     unrealizedPnL?: number; // Calculated only for OPEN positions
     executions: Trade[];
     durationMinutes?: number;
+    stopLoss?: number;
+    target?: number;
 }
 
 export interface TradePerformanceSummary {
@@ -58,6 +60,8 @@ export function groupTradesIntoPositions(trades: Trade[]): GroupedPosition[] {
                 totalQuantity: trade.quantity,
                 remainingQuantity: trade.quantity, // Absolute
                 realizedPnL: 0,
+                stopLoss: trade.stopLoss,
+                target: trade.target,
                 executions: [trade],
             };
             // Note: We don't push to 'positions' yet, we keep it in 'currentPos' until closed or loop ends?

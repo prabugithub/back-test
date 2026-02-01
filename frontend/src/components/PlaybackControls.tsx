@@ -283,6 +283,32 @@ export function PlaybackControls({ onOpenHistory }: { onOpenHistory?: () => void
     return () => window.removeEventListener('keydown', handleKeyPress);
   }, [isPlaying, play, pause, step]);
 
+  const handleExecuteTrade = (type: 'BUY' | 'SELL') => {
+    if (!currentCandle) return;
+
+    // Get recent pivot for SL/Target calculation
+    const pivots = calculatePivotPoints(candles.slice(0, currentIndex + 1));
+    const recentPivot = pivots.length > 0 ? pivots[pivots.length - 1] : null;
+
+    let sl = undefined;
+    let target = undefined;
+
+    if (recentPivot) {
+      const entryPrice = currentCandle.close;
+      const slDist = recentPivot.slDistance;
+
+      if (type === 'BUY') {
+        sl = entryPrice - slDist;
+        target = entryPrice + (slDist * 2); // Default to 1:2 RR as the "Target"
+      } else {
+        sl = entryPrice + slDist;
+        target = entryPrice - (slDist * 2); // Default to 1:2 RR
+      }
+    }
+
+    executeTrade(type, tradeQuantity, sl, target);
+  };
+
   const progress = candles.length > 0 ? (currentIndex / (candles.length - 1)) * 100 : 0;
 
   return (
@@ -395,52 +421,58 @@ export function PlaybackControls({ onOpenHistory }: { onOpenHistory?: () => void
             {(() => {
               const pivots = calculatePivotPoints(candles.slice(0, currentIndex + 1));
               const recentPivot = pivots.length > 0 ? pivots[pivots.length - 1] : null;
-              if (!recentPivot) return null;
 
-              const pointsAtRisk = recentPivot.slDistance;
-              // Example risk: 10,000 INR
-              const riskAmount = 10000;
-              const calcQty = Math.floor(riskAmount / pointsAtRisk);
+              const pointsAtRisk = recentPivot ? recentPivot.slDistance : 0;
+              const calcQty = pointsAtRisk > 0 ? Math.floor(10000 / pointsAtRisk) : tradeQuantity;
+
+              const buySL = recentPivot && currentCandle ? (currentCandle.close - pointsAtRisk) : 0;
+              const buyTgt = recentPivot && currentCandle ? (currentCandle.close + pointsAtRisk * 2) : 0;
+              const sellSL = recentPivot && currentCandle ? (currentCandle.close + pointsAtRisk) : 0;
+              const sellTgt = recentPivot && currentCandle ? (currentCandle.close - pointsAtRisk * 2) : 0;
 
               return (
-                <button
-                  onClick={() => setTradeQuantity(calcQty)}
-                  className="flex items-center gap-1 px-1.5 py-0.5 bg-yellow-50 border border-yellow-200 hover:bg-yellow-100 hover:border-yellow-300 rounded text-[10px] text-yellow-800 whitespace-nowrap transition-colors cursor-pointer group"
-                  title={`Click to set Quantity: ${calcQty} (Risk: 10k)`}
-                >
-                  <span className="font-bold">{recentPivot.type === 'bullish' ? 'L' : 'S'}</span>
-                  <span className="border-l border-yellow-300 pl-1 group-hover:border-yellow-400">{pointsAtRisk}</span>
-                  <span className="ml-0.5 font-bold text-yellow-700 bg-yellow-200 px-1 rounded-sm group-hover:bg-yellow-300">Q:{calcQty}</span>
-                </button>
+                <>
+                  {recentPivot && (
+                    <button
+                      onClick={() => setTradeQuantity(calcQty)}
+                      className="flex items-center gap-1 px-1.5 py-0.5 bg-yellow-50 border border-yellow-200 hover:bg-yellow-100 hover:border-yellow-300 rounded text-[10px] text-yellow-800 whitespace-nowrap transition-colors cursor-pointer group"
+                      title={`Click to set Quantity: ${calcQty} (Risk: 10k)`}
+                    >
+                      <span className="font-bold">{recentPivot.type === 'bullish' ? 'L' : 'S'}</span>
+                      <span className="border-l border-yellow-300 pl-1 group-hover:border-yellow-400">{pointsAtRisk}</span>
+                      <span className="ml-0.5 font-bold text-yellow-700 bg-yellow-200 px-1 rounded-sm group-hover:bg-yellow-300">Q:{calcQty}</span>
+                    </button>
+                  )}
+
+                  <input
+                    type="number"
+                    min="1"
+                    value={tradeQuantity}
+                    onChange={(e) => setTradeQuantity(Math.max(1, parseInt(e.target.value) || 1))}
+                    className="w-10 px-0.5 py-1 border rounded text-center text-xs font-medium"
+                    title="Trade Quantity"
+                  />
+                  <div className="flex items-center gap-0.5">
+                    <button
+                      onClick={() => handleExecuteTrade('BUY')}
+                      disabled={!currentCandle}
+                      className="px-2 py-1 bg-green-600 text-white rounded text-xs font-bold hover:bg-green-700 disabled:opacity-50"
+                      title={`Buy ${tradeQuantity}${buySL ? ` (SL: ${buySL.toFixed(1)}, Tgt: ${buyTgt.toFixed(1)})` : ''}`}
+                    >
+                      B
+                    </button>
+                    <button
+                      onClick={() => handleExecuteTrade('SELL')}
+                      disabled={!currentCandle}
+                      className="px-2 py-1 bg-red-600 text-white rounded text-xs font-bold hover:bg-red-700 disabled:opacity-50"
+                      title={`Sell ${tradeQuantity}${sellSL ? ` (SL: ${sellSL.toFixed(1)}, Tgt: ${sellTgt.toFixed(1)})` : ''}`}
+                    >
+                      S
+                    </button>
+                  </div>
+                </>
               );
             })()}
-
-            <input
-              type="number"
-              min="1"
-              value={tradeQuantity}
-              onChange={(e) => setTradeQuantity(Math.max(1, parseInt(e.target.value) || 1))}
-              className="w-10 px-0.5 py-1 border rounded text-center text-xs font-medium"
-              title="Trade Quantity"
-            />
-            <div className="flex items-center gap-0.5">
-              <button
-                onClick={() => executeTrade('BUY', tradeQuantity)}
-                disabled={!currentCandle}
-                className="px-2 py-1 bg-green-600 text-white rounded text-xs font-bold hover:bg-green-700 disabled:opacity-50"
-                title={`Buy ${tradeQuantity}`}
-              >
-                B
-              </button>
-              <button
-                onClick={() => executeTrade('SELL', tradeQuantity)}
-                disabled={!currentCandle}
-                className="px-2 py-1 bg-red-600 text-white rounded text-xs font-bold hover:bg-red-700 disabled:opacity-50"
-                title={`Sell ${tradeQuantity}`}
-              >
-                S
-              </button>
-            </div>
           </div>
 
           <div className="w-px bg-gray-300 mx-1 h-6"></div>
