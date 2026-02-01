@@ -9,6 +9,7 @@ import { PositionOverlay } from './components/PositionOverlay';
 import { useSessionStore } from './stores/sessionStore';
 import { useState } from 'react';
 import { NotificationToast } from './components/NotificationToast';
+import { TradeExitDialog } from './components/TradeExitDialog';
 import { Save, FilePlus } from 'lucide-react';
 
 const queryClient = new QueryClient();
@@ -23,6 +24,7 @@ function App() {
     <QueryClientProvider client={queryClient}>
       <div className="h-screen w-screen bg-gray-100 flex overflow-hidden font-sans">
         <NotificationToast />
+        <TradeExitDialog />
         {/* Main Content Area */}
         <main className="flex-1 flex flex-col relative min-w-0">
           {!hasData ? (

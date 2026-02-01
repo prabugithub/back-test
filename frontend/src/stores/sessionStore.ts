@@ -28,6 +28,7 @@ interface SessionStore {
   isPlaying: boolean;
   speed: number;
   isLoading: boolean;
+  pendingExitRequest: { type: 'SL' | 'TP', price: number, spotPrice: number } | null;
 
   // Actions
   loadCandles: (candles: Candle[], instrument: string, config?: SessionConfig) => void;
@@ -45,6 +46,8 @@ interface SessionStore {
   saveCurrentSession: () => void;
   deleteTrade: (tradeId: string) => void;
   deleteTrades: (tradeIds: string[]) => void;
+  resolveExitRequest: (confirm: boolean) => void;
+  checkSLTPHits: (index: number) => void;
 
   // Computed getters
   getCurrentCandle: () => Candle | null;
@@ -68,6 +71,7 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
   isPlaying: false,
   speed: 1,
   isLoading: false,
+  pendingExitRequest: null,
 
   // Actions
   loadCandles: (candles, instrument, config) => {
@@ -91,7 +95,7 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
     if (direction === 'forward' && currentIndex < candles.length - 1) {
       const nextIndex = currentIndex + 1;
       set({ currentIndex: nextIndex });
-      (get() as any).checkSLTPHits(nextIndex);
+      get().checkSLTPHits(nextIndex);
     } else if (direction === 'backward' && currentIndex > 0) {
       set({ currentIndex: currentIndex - 1 });
     }
@@ -110,7 +114,33 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
     let hitType: 'SL' | 'TP' | null = null;
     let hitPrice: number = 0;
 
-    // Check Long SL/TP - ONLY trigger for wicks (high/low hit but close didn't)
+    // 1. Check Close Hit (Dialog Trigger)
+    if (isLong) {
+      if (stopLoss && candle.close <= stopLoss) {
+        hitType = 'SL';
+        hitPrice = stopLoss;
+      } else if (target && candle.close >= target) {
+        hitType = 'TP';
+        hitPrice = target;
+      }
+    } else {
+      if (stopLoss && candle.close >= stopLoss) {
+        hitType = 'SL';
+        hitPrice = stopLoss;
+      } else if (target && candle.close <= target) {
+        hitType = 'TP';
+        hitPrice = target;
+      }
+    }
+
+    if (hitType) {
+      // Pause playback and show dialog
+      set({ isPlaying: false, pendingExitRequest: { type: hitType, price: hitPrice, spotPrice: candle.close } });
+      return;
+    }
+
+    // 2. Check Wick Hit (Advanced Tracking)
+    hitType = null;
     if (isLong) {
       if (stopLoss && candle.low <= stopLoss && candle.close > stopLoss) {
         hitType = 'SL';
@@ -119,9 +149,7 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
         hitType = 'TP';
         hitPrice = target;
       }
-    }
-    // Check Short SL/TP - ONLY trigger for wicks
-    else {
+    } else {
       if (stopLoss && candle.high >= stopLoss && candle.close < stopLoss) {
         hitType = 'SL';
         hitPrice = stopLoss;
@@ -143,8 +171,8 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
       set({
         position: {
           ...position,
-          slHit: hitType === 'SL' ? true : position.slHit,
-          tpHit: hitType === 'TP' ? true : position.tpHit,
+          slHit: hitType === 'SL' ? true : (position.slHit || false),
+          tpHit: hitType === 'TP' ? true : (position.tpHit || false),
         }
       });
     }
@@ -156,9 +184,21 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
     const { candles } = get();
     if (index >= 0 && index < candles.length) {
       set({ currentIndex: index });
-      // Only check hits if moving forward? Actually jump might hit too.
-      (get() as any).checkSLTPHits(index);
+      get().checkSLTPHits(index);
     }
+  },
+
+  resolveExitRequest: (confirm) => {
+    const { pendingExitRequest, position, executeTrade } = get();
+    if (!pendingExitRequest || !position) return;
+
+    if (confirm) {
+      // Execute exit trade
+      const exitType = position.quantity > 0 ? 'SELL' : 'BUY';
+      executeTrade(exitType, Math.abs(position.quantity), undefined, undefined, undefined, pendingExitRequest.type);
+    }
+
+    set({ pendingExitRequest: null });
   },
 
   executeTrade: (type, quantity, stopLoss, target, priceOverride, exitReason = 'MANUAL') => {
@@ -190,11 +230,9 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
       tpHit: position?.tpHit,
     };
 
-    // Simplified Position Management allowing Long and Short
     const currentQty = position ? position.quantity : 0;
     const currentAvgPrice = position ? position.averagePrice : 0;
 
-    // Determine trade direction sign: Buy = +1, Sell = -1
     const tradeSign = type === 'BUY' ? 1 : -1;
     const tradeQtySigned = quantity * tradeSign;
 
@@ -203,55 +241,28 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
     let newRealizedPnL = position ? position.realizedPnL : 0;
     let tradePnL = undefined;
 
-    // Logic:
-    // 1. Increasing position (Long->More Long OR Short->More Short OR Flat->Open)
-    // 2. Decreasing position (Long->Less Long OR Short->Less Short) -> Realize P&L
-    // 3. Flipping position (Long->Short OR Short->Long) -> Realize P&L on closed portion, Open new remaining
-
     const isSameDirection = (currentQty >= 0 && tradeSign > 0) || (currentQty <= 0 && tradeSign < 0);
 
-    // Case 0: Opening from flat
     if (currentQty === 0) {
       newAvgPrice = currentPrice;
-    }
-    // Case 1: Increasing Position (Adding to winner/loser)
-    else if (isSameDirection) {
+    } else if (isSameDirection) {
       const totalValue = (Math.abs(currentQty) * currentAvgPrice) + (quantity * currentPrice);
       const totalShares = Math.abs(currentQty) + quantity;
       newAvgPrice = totalValue / totalShares;
-    }
-    // Case 2 & 3: Reducing or Flipping
-    else {
-      // We are reducing the current position. 
-      // How much are we closing? 
-      // If current is +10 and we Sell 5 (qty=5, sign=-1), we close 5.
-      // If current is +10 and we Sell 20, we close 10, and open -10.
-
+    } else {
       const qtyClosing = Math.min(Math.abs(currentQty), quantity);
-
-      // Calculate P&L on the closed portion
-      // Long Close: (Exit - Entry) * Qty
-      // Short Close: (Entry - Exit) * Qty
       const pnlPerShare = currentQty > 0 ? (currentPrice - currentAvgPrice) : (currentAvgPrice - currentPrice);
       const realizedParams = pnlPerShare * qtyClosing;
 
-      tradePnL = realizedParams; // P&L for this specific trade (or the closing portion of it)
+      tradePnL = realizedParams;
       newRealizedPnL += realizedParams;
 
-      // Check if we flipped
-      // remaining trade quantity after closing
       const qtyRemaining = quantity - qtyClosing;
-
       if (qtyRemaining > 0) {
-        // We flipped direction. New position is formed by the remainder.
-        // New Entry Price is current price.
         newAvgPrice = currentPrice;
       }
-      // If we didn't flip, we just reduced size. Avg Price stays same.
-      // (unless we closed fully, but then qty is 0, handled by generic check)
     }
 
-    // Assign P&L to the trade record for display
     trade.pnl = tradePnL;
 
     const newPositionState: Position = {
@@ -259,7 +270,7 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
       quantity: newQty,
       averagePrice: newAvgPrice,
       realizedPnL: newRealizedPnL,
-      unrealizedPnL: 0, // Recalculated by getter
+      unrealizedPnL: 0,
       stopLoss: stopLoss || position?.stopLoss,
       target: target || position?.target,
       slHit: position?.slHit,
@@ -268,7 +279,7 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
 
     set({
       trades: [...trades, trade],
-      position: newQty !== 0 ? newPositionState : null, // If qty is 0, position is null/closed
+      position: newQty !== 0 ? newPositionState : null,
     });
   },
 
@@ -290,7 +301,6 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
       return;
     }
 
-    // Re-calculate the position state by re-playing the trades from the beginning
     const { processedTrades, finalQty, finalAvgPrice, totalRealizedPnL } = recalculateTradesPnL(newTrades);
 
     set({
@@ -301,18 +311,12 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
         averagePrice: finalAvgPrice,
         realizedPnL: totalRealizedPnL,
         unrealizedPnL: 0,
-      } : {
-        instrument,
-        quantity: 0,
-        averagePrice: 0,
-        realizedPnL: totalRealizedPnL,
-        unrealizedPnL: 0,
-      }
+        stopLoss: undefined,
+        target: undefined,
+        slHit: false,
+        tpHit: false
+      } : null
     });
-
-    if (finalQty === 0) {
-      set({ position: null });
-    }
   },
 
   deleteTrades: (tradeIds: string[]) => {
@@ -334,25 +338,18 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
         averagePrice: finalAvgPrice,
         realizedPnL: totalRealizedPnL,
         unrealizedPnL: 0,
-      } : {
-        instrument,
-        quantity: 0,
-        averagePrice: 0,
-        realizedPnL: totalRealizedPnL,
-        unrealizedPnL: 0,
-      }
+        stopLoss: undefined,
+        target: undefined,
+        slHit: false,
+        tpHit: false
+      } : null
     });
-
-    if (finalQty === 0) {
-      set({ position: null });
-    }
   },
 
   saveCurrentSession: () => {
     const { instrument, trades } = get();
     if (trades.length === 0) return;
 
-    // Calculate stats ensuring we have at least defaults
     const positions = groupTradesIntoPositions(trades);
     const stats = calculatePerformanceStats(positions);
 
@@ -369,7 +366,6 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
   saveRemoteSession: async () => {
     const { instrument, trades, position, currentIndex, sessionConfig } = get();
 
-    // We need sessionConfig to be able to restore the data context
     if (!sessionConfig) {
       console.warn("Cannot save session: Missing session configuration");
       useNotificationStore.getState().notify(
@@ -379,11 +375,8 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
       return;
     }
 
-    // Sanitize trades to remove undefined fields which Firebase setDoc rejects
     const sanitizedTrades = trades.map(t => {
-      // Create a shallow copy
       const cleanT: any = { ...t };
-      // If pnl is undefined, set it to null (valid JSON/Firestore)
       if (cleanT.pnl === undefined) {
         cleanT.pnl = null;
       }
@@ -397,13 +390,11 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
       interval: sessionConfig.interval,
       fromDate: sessionConfig.fromDate,
       toDate: sessionConfig.toDate,
-
       currentIndex,
       trades: sanitizedTrades,
       position,
     };
 
-    // Extend with full config
     const fullState = {
       ...state,
       securityId: sessionConfig.securityId,
@@ -463,7 +454,6 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
     });
   },
 
-  // Computed getters
   getCurrentCandle: () => {
     const { candles, currentIndex } = get();
     return candles[currentIndex] || null;
@@ -493,6 +483,7 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
     const newIndex = currentIndex + count;
     if (newIndex >= 0 && newIndex < candles.length) {
       set({ currentIndex: newIndex });
+      get().checkSLTPHits(newIndex);
     } else if (newIndex < 0) {
       set({ currentIndex: 0 });
     } else {
