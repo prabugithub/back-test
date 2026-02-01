@@ -10,7 +10,7 @@ import { useSessionStore } from './stores/sessionStore';
 import { useState } from 'react';
 import { NotificationToast } from './components/NotificationToast';
 import { TradeExitDialog } from './components/TradeExitDialog';
-import { Save, FilePlus } from 'lucide-react';
+import { Save, FilePlus, RotateCcw } from 'lucide-react';
 
 const queryClient = new QueryClient();
 
@@ -68,6 +68,17 @@ function App() {
                   title="Save current session to Firebase"
                 >
                   <Save size={16} />
+                </button>
+                <button
+                  onClick={() => {
+                    if (window.confirm("Restore to last saved backup? current progress will be lost.")) {
+                      useSessionStore.getState().restoreRemoteBackup();
+                    }
+                  }}
+                  className="p-1.5 text-amber-700 bg-amber-50 border border-amber-200 hover:bg-amber-100 rounded"
+                  title="Restore from last Backup"
+                >
+                  <RotateCcw size={16} />
                 </button>
                 <button
                   onClick={() => useSessionStore.getState().loadCandles([], '')}

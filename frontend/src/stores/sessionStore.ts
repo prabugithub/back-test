@@ -2,7 +2,7 @@ import { create } from 'zustand';
 import type { Candle, Trade, Position } from '../types';
 import { saveTradeSession } from '../utils/tradeStorage';
 import { groupTradesIntoPositions, calculatePerformanceStats, recalculateTradesPnL } from '../utils/tradeAnalysis';
-import { saveSession, loadSession, type SessionState } from '../services/firebaseSessionService';
+import { saveSession, loadSession, restoreBackup, type SessionState } from '../services/firebaseSessionService';
 import { useNotificationStore } from './notificationStore';
 
 export interface SessionConfig {
@@ -48,6 +48,7 @@ interface SessionStore {
   deleteTrades: (tradeIds: string[]) => void;
   resolveExitRequest: (confirm: boolean) => void;
   checkSLTPHits: (index: number) => void;
+  restoreRemoteBackup: () => Promise<void>;
 
   // Computed getters
   getCurrentCandle: () => Candle | null;
@@ -452,6 +453,26 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
       position,
       currentIndex
     });
+  },
+
+  restoreRemoteBackup: async () => {
+    set({ isLoading: true });
+    try {
+      const state = await restoreBackup();
+      if (state) {
+        set({
+          trades: state.trades,
+          position: state.position,
+          currentIndex: state.currentIndex
+        });
+        useNotificationStore.getState().notify('Backup session restored successfully!', 'success');
+      }
+    } catch (e: any) {
+      console.error(e);
+      useNotificationStore.getState().notify(`Failed to restore backup: ${e.message}`, 'error');
+    } finally {
+      set({ isLoading: false });
+    }
   },
 
   getCurrentCandle: () => {
