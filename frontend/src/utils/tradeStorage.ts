@@ -87,6 +87,22 @@ export function clearAllSessions(): void {
 }
 
 /**
+ * Update an existing trade session
+ */
+export function updateTradeSession(updatedSession: TradeSession): void {
+    const sessions = getStoredSessions();
+    const index = sessions.findIndex(s => s.id === updatedSession.id);
+    if (index !== -1) {
+        sessions[index] = updatedSession;
+        try {
+            localStorage.setItem(STORAGE_KEY, JSON.stringify(sessions));
+        } catch (error) {
+            console.error('Error updating trade session:', error);
+        }
+    }
+}
+
+/**
  * Get a specific session by ID
  */
 export function getSessionById(sessionId: string): TradeSession | null {

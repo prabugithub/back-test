@@ -1,8 +1,8 @@
 import { useState, useMemo } from 'react';
 import { X, Trash2, TrendingUp, TrendingDown, DollarSign, Target, Calendar, BarChart3, FileJson, Printer, FileSpreadsheet } from 'lucide-react';
-import { getStoredSessions, deleteTradeSession, clearAllSessions, type TradeSession } from '../utils/tradeStorage';
+import { getStoredSessions, deleteTradeSession, updateTradeSession, type TradeSession } from '../utils/tradeStorage';
 import { formatCurrency, formatTimestamp } from '../utils/formatters';
-import { groupTradesIntoPositions, calculatePerformanceStats } from '../utils/tradeAnalysis';
+import { groupTradesIntoPositions, calculatePerformanceStats, recalculateTradesPnL } from '../utils/tradeAnalysis';
 
 interface TradeReportDialogProps {
     isOpen: boolean;
@@ -33,11 +33,70 @@ export function TradeReportDialog({ isOpen, onClose }: TradeReportDialogProps) {
         }
     };
 
-    const handleClearAll = () => {
-        if (confirm('Are you sure you want to delete ALL sessions? This cannot be undone.')) {
-            clearAllSessions();
-            setSessions([]);
-            setSelectedSessionId(null);
+    const handleDeleteTrade = (tradeId: string) => {
+        if (!selectedSession || !selectedSessionStats) return;
+
+        if (confirm('Delete this trade from history? Metrics will be recalculated.')) {
+            const newTradesList = selectedSession.trades.filter(t => t.id !== tradeId);
+
+            if (newTradesList.length === 0) {
+                handleDeleteSession(selectedSession.id);
+                return;
+            }
+
+            // Recalculate P&L and stats
+            const { processedTrades, totalRealizedPnL } = recalculateTradesPnL(newTradesList);
+            const newPositions = groupTradesIntoPositions(processedTrades);
+            const newStats = calculatePerformanceStats(newPositions);
+
+            const updatedSession: TradeSession = {
+                ...selectedSession,
+                trades: processedTrades,
+                totalPnL: totalRealizedPnL,
+                winRate: newStats.winRate,
+                totalTrades: processedTrades.length,
+                startDate: processedTrades[0].timestamp,
+                endDate: processedTrades[processedTrades.length - 1].timestamp
+            };
+
+            updateTradeSession(updatedSession);
+            setSessions(getStoredSessions());
+        }
+    };
+
+    const handleDeletePosition = (positionId: string) => {
+        if (!selectedSession || !selectedSessionStats) return;
+
+        const positions = groupTradesIntoPositions(selectedSession.trades);
+        const positionToDelete = positions.find(p => p.id === positionId);
+
+        if (!positionToDelete) return;
+
+        if (confirm(`Delete entire ${positionToDelete.status} ${positionToDelete.direction} position and its ${positionToDelete.executions.length} trades?`)) {
+            const executionIds = positionToDelete.executions.map(ex => ex.id);
+            const newTradesList = selectedSession.trades.filter(t => !executionIds.includes(t.id));
+
+            if (newTradesList.length === 0) {
+                handleDeleteSession(selectedSession.id);
+                return;
+            }
+
+            const { processedTrades, totalRealizedPnL } = recalculateTradesPnL(newTradesList);
+            const newPositions = groupTradesIntoPositions(processedTrades);
+            const newStats = calculatePerformanceStats(newPositions);
+
+            const updatedSession: TradeSession = {
+                ...selectedSession,
+                trades: processedTrades,
+                totalPnL: totalRealizedPnL,
+                winRate: newStats.winRate,
+                totalTrades: processedTrades.length,
+                startDate: processedTrades[0].timestamp,
+                endDate: processedTrades[processedTrades.length - 1].timestamp
+            };
+
+            updateTradeSession(updatedSession);
+            setSessions(getStoredSessions());
         }
     };
 
@@ -138,15 +197,6 @@ export function TradeReportDialog({ isOpen, onClose }: TradeReportDialogProps) {
                                     {sessions.length}
                                 </span>
                             </div>
-                            {sessions.length > 0 && (
-                                <button
-                                    onClick={handleClearAll}
-                                    className="w-full text-xs bg-red-50 text-red-600 px-3 py-1.5 rounded hover:bg-red-100 transition-colors flex items-center justify-center gap-1"
-                                >
-                                    <Trash2 size={12} />
-                                    Clear All Sessions
-                                </button>
-                            )}
                         </div>
 
                         <div className="flex-1 overflow-y-auto p-2">
@@ -314,57 +364,126 @@ export function TradeReportDialog({ isOpen, onClose }: TradeReportDialogProps) {
                                     )}
                                 </div>
 
-                                {/* Trades Table */}
-                                <div className="flex-1 overflow-auto p-6">
-                                    <h4 className="font-semibold text-gray-700 mb-3">Trade Executions</h4>
-                                    <div className="overflow-x-auto">
-                                        <table className="w-full text-sm">
-                                            <thead className="bg-gray-100 sticky top-0">
-                                                <tr>
-                                                    <th className="text-left p-3 font-semibold text-gray-700">Date/Time</th>
-                                                    <th className="text-left p-3 font-semibold text-gray-700">Type</th>
-                                                    <th className="text-right p-3 font-semibold text-gray-700">Price</th>
-                                                    <th className="text-right p-3 font-semibold text-gray-700">Quantity</th>
-                                                    <th className="text-right p-3 font-semibold text-gray-700">P&L</th>
-                                                </tr>
-                                            </thead>
-                                            <tbody>
-                                                {selectedSession.trades.map((trade, index) => (
-                                                    <tr
-                                                        key={trade.id}
-                                                        className={`border-b hover:bg-gray-50 transition-colors ${index % 2 === 0 ? 'bg-white' : 'bg-gray-50/50'
-                                                            }`}
-                                                    >
-                                                        <td className="p-3 text-gray-600 whitespace-nowrap">
-                                                            {formatTimestamp(trade.timestamp)}
-                                                        </td>
-                                                        <td className="p-3">
-                                                            <span className={`px-2 py-1 rounded text-xs font-semibold ${trade.type === 'BUY'
-                                                                ? 'bg-green-100 text-green-700'
-                                                                : 'bg-red-100 text-red-700'
-                                                                }`}>
-                                                                {trade.type}
-                                                            </span>
-                                                        </td>
-                                                        <td className="p-3 text-right font-mono text-gray-700">
-                                                            {formatCurrency(trade.price)}
-                                                        </td>
-                                                        <td className="p-3 text-right text-gray-700">
-                                                            {trade.quantity}
-                                                        </td>
-                                                        <td className="p-3 text-right font-semibold">
-                                                            {trade.pnl !== undefined ? (
-                                                                <span className={trade.pnl >= 0 ? 'text-green-600' : 'text-red-600'}>
-                                                                    {trade.pnl >= 0 ? '+' : ''}{formatCurrency(trade.pnl)}
-                                                                </span>
-                                                            ) : (
-                                                                <span className="text-gray-400">-</span>
-                                                            )}
-                                                        </td>
+                                <div className="flex-1 overflow-auto p-6 space-y-8">
+                                    {/* Positions Table */}
+                                    <div>
+                                        <h4 className="font-semibold text-gray-700 mb-3">Positions Summary</h4>
+                                        <div className="overflow-x-auto bg-white rounded-lg border shadow-sm">
+                                            <table className="w-full text-sm text-left">
+                                                <thead className="bg-gray-50 text-gray-600 font-semibold border-b">
+                                                    <tr>
+                                                        <th className="px-4 py-3">Status</th>
+                                                        <th className="px-4 py-3">Direction</th>
+                                                        <th className="px-4 py-3">Entry Time</th>
+                                                        <th className="px-4 py-3 text-right">Qty</th>
+                                                        <th className="px-4 py-3 text-right">Avg Price</th>
+                                                        <th className="px-4 py-3 text-right">P&L</th>
+                                                        <th className="px-4 py-3 text-center w-10"></th>
                                                     </tr>
-                                                ))}
-                                            </tbody>
-                                        </table>
+                                                </thead>
+                                                <tbody className="divide-y divide-gray-100">
+                                                    {groupTradesIntoPositions(selectedSession.trades).map((pos) => (
+                                                        <tr key={pos.id} className="hover:bg-gray-50 transition-colors">
+                                                            <td className="px-4 py-3">
+                                                                <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold ${pos.status === 'OPEN' ? 'bg-blue-100 text-blue-700' : 'bg-gray-100 text-gray-600'}`}>
+                                                                    {pos.status}
+                                                                </span>
+                                                            </td>
+                                                            <td className="px-4 py-3">
+                                                                <span className={`font-semibold ${pos.direction === 'LONG' ? 'text-green-600' : 'text-red-600'}`}>
+                                                                    {pos.direction}
+                                                                </span>
+                                                            </td>
+                                                            <td className="px-4 py-3 text-gray-500">
+                                                                {formatTimestamp(pos.entryTime)}
+                                                            </td>
+                                                            <td className="px-4 py-3 text-right font-mono">
+                                                                {pos.totalQuantity}
+                                                            </td>
+                                                            <td className="px-4 py-3 text-right font-mono">
+                                                                {formatCurrency(pos.avgEntryPrice)}
+                                                            </td>
+                                                            <td className={`px-4 py-3 text-right font-bold ${pos.realizedPnL >= 0 ? 'text-green-600' : 'text-red-600'}`}>
+                                                                {pos.realizedPnL >= 0 ? '+' : ''}{formatCurrency(pos.realizedPnL)}
+                                                            </td>
+                                                            <td className="px-4 py-3 text-center">
+                                                                <button
+                                                                    onClick={() => handleDeletePosition(pos.id)}
+                                                                    className="p-1.5 text-red-400 hover:text-red-600 hover:bg-red-50 rounded transition-colors"
+                                                                    title="Delete entire position"
+                                                                >
+                                                                    <Trash2 size={16} />
+                                                                </button>
+                                                            </td>
+                                                        </tr>
+                                                    ))}
+                                                </tbody>
+                                            </table>
+                                        </div>
+                                    </div>
+
+                                    {/* Trades Table */}
+                                    <div>
+                                        <h4 className="font-semibold text-gray-700 mb-3">Raw Executions</h4>
+                                        <div className="overflow-x-auto">
+                                            <table className="w-full text-sm">
+                                                <thead className="bg-gray-100 sticky top-0">
+                                                    <tr>
+                                                        <th className="text-left p-3 font-semibold text-gray-700">Date/Time</th>
+                                                        <th className="text-left p-3 font-semibold text-gray-700">Type</th>
+                                                        <th className="text-right p-3 font-semibold text-gray-700">Price</th>
+                                                        <th className="text-right p-3 font-semibold text-gray-700">Quantity</th>
+                                                        <th className="text-right p-3 font-semibold text-gray-700">P&L</th>
+                                                        <th className="text-center p-3 font-semibold text-gray-700 w-10"></th>
+                                                    </tr>
+                                                </thead>
+                                                <tbody className="divide-y divide-gray-100">
+                                                    {selectedSession.trades.map((trade, index) => (
+                                                        <tr
+                                                            key={trade.id || index}
+                                                            className={`border-b hover:bg-gray-50 transition-colors group ${index % 2 === 0 ? 'bg-white' : 'bg-gray-50/50'
+                                                                }`}
+                                                        >
+                                                            <td className="p-3 text-gray-600 whitespace-nowrap">
+                                                                {formatTimestamp(trade.timestamp)}
+                                                            </td>
+                                                            <td className="p-3">
+                                                                <span className={`px-2 py-1 rounded text-xs font-semibold ${trade.type === 'BUY'
+                                                                    ? 'bg-green-100 text-green-700'
+                                                                    : 'bg-red-100 text-red-700'
+                                                                    }`}>
+                                                                    {trade.type}
+                                                                </span>
+                                                            </td>
+                                                            <td className="p-3 text-right font-mono text-gray-700">
+                                                                {formatCurrency(trade.price)}
+                                                            </td>
+                                                            <td className="p-3 text-right text-gray-700">
+                                                                {trade.quantity}
+                                                            </td>
+                                                            <td className="p-3 text-right font-semibold">
+                                                                {trade.pnl !== undefined ? (
+                                                                    <span className={trade.pnl >= 0 ? 'text-green-600' : 'text-red-600'}>
+                                                                        {trade.pnl >= 0 ? '+' : ''}{formatCurrency(trade.pnl)}
+                                                                    </span>
+                                                                ) : (
+                                                                    <span className="text-gray-400">-</span>
+                                                                )}
+                                                            </td>
+                                                            <td className="p-3 text-center">
+                                                                <button
+                                                                    onClick={() => handleDeleteTrade(trade.id)}
+                                                                    className="p-1.5 text-red-400 hover:text-red-600 hover:bg-red-50 rounded transition-all transition-colors"
+                                                                    title="Delete trade"
+                                                                >
+                                                                    <Trash2 size={16} />
+                                                                </button>
+                                                            </td>
+                                                        </tr>
+                                                    ))}
+                                                </tbody>
+                                            </table>
+                                        </div>
                                     </div>
                                 </div>
                             </>

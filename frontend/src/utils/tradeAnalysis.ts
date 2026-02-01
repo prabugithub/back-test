@@ -229,3 +229,54 @@ export function calculatePerformanceStats(positions: GroupedPosition[]): TradePe
         shorts: { count: shortCount, pnl: shortPnL }
     };
 }
+
+/**
+ * Re-plays a list of trades to calculate correct P&L for each trade and the final position state
+ */
+export function recalculateTradesPnL(trades: Trade[]): { processedTrades: Trade[], finalQty: number, finalAvgPrice: number, totalRealizedPnL: number } {
+    let currentQty = 0;
+    let currentAvgPrice = 0;
+    let realizedPnL = 0;
+
+    const processedTrades = trades.map(t => {
+        const tradeQty = t.quantity;
+        const tradePrice = t.price;
+        const tradeSign = t.type === 'BUY' ? 1 : -1;
+        const tradeQtySigned = tradeQty * tradeSign;
+
+        const isSameDirection = (currentQty >= 0 && tradeSign > 0) || (currentQty <= 0 && tradeSign < 0);
+        let tradePnL = undefined;
+
+        if (currentQty === 0) {
+            currentAvgPrice = tradePrice;
+            currentQty = tradeQtySigned;
+        } else if (isSameDirection) {
+            const totalValue = (Math.abs(currentQty) * currentAvgPrice) + (tradeQty * tradePrice);
+            const totalShares = Math.abs(currentQty) + tradeQty;
+            currentAvgPrice = totalValue / totalShares;
+            currentQty += tradeQtySigned;
+        } else {
+            const qtyClosing = Math.min(Math.abs(currentQty), tradeQty);
+            const pnlPerShare = currentQty > 0 ? (tradePrice - currentAvgPrice) : (currentAvgPrice - tradePrice);
+            const realizedParams = pnlPerShare * qtyClosing;
+            tradePnL = realizedParams;
+            realizedPnL += realizedParams;
+
+            const qtyRemaining = tradeQty - qtyClosing;
+            currentQty += tradeQtySigned;
+
+            if (qtyRemaining > 0) {
+                currentAvgPrice = tradePrice;
+            }
+        }
+
+        return { ...t, pnl: tradePnL };
+    });
+
+    return {
+        processedTrades,
+        finalQty: currentQty,
+        finalAvgPrice: currentAvgPrice,
+        totalRealizedPnL: realizedPnL
+    };
+}

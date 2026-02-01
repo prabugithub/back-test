@@ -1,7 +1,7 @@
 import { create } from 'zustand';
 import type { Candle, Trade, Position } from '../types';
 import { saveTradeSession } from '../utils/tradeStorage';
-import { groupTradesIntoPositions, calculatePerformanceStats } from '../utils/tradeAnalysis';
+import { groupTradesIntoPositions, calculatePerformanceStats, recalculateTradesPnL } from '../utils/tradeAnalysis';
 import { saveSession, loadSession, type SessionState } from '../services/firebaseSessionService';
 import { useNotificationStore } from './notificationStore';
 
@@ -43,6 +43,8 @@ interface SessionStore {
   restoreSessionState: (trades: Trade[], position: Position | null, currentIndex: number) => void;
   resetSession: () => void;
   saveCurrentSession: () => void;
+  deleteTrade: (tradeId: string) => void;
+  deleteTrades: (tradeIds: string[]) => void;
 
   // Computed getters
   getCurrentCandle: () => Candle | null;
@@ -209,6 +211,73 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
       position: null,
       isPlaying: false,
     });
+  },
+
+  deleteTrade: (tradeId: string) => {
+    const { trades, instrument } = get();
+    const newTrades = trades.filter(t => t.id !== tradeId);
+
+    if (newTrades.length === 0) {
+      set({ trades: [], position: null });
+      return;
+    }
+
+    // Re-calculate the position state by re-playing the trades from the beginning
+    const { processedTrades, finalQty, finalAvgPrice, totalRealizedPnL } = recalculateTradesPnL(newTrades);
+
+    set({
+      trades: processedTrades,
+      position: finalQty !== 0 ? {
+        instrument,
+        quantity: finalQty,
+        averagePrice: finalAvgPrice,
+        realizedPnL: totalRealizedPnL,
+        unrealizedPnL: 0,
+      } : {
+        instrument,
+        quantity: 0,
+        averagePrice: 0,
+        realizedPnL: totalRealizedPnL,
+        unrealizedPnL: 0,
+      }
+    });
+
+    if (finalQty === 0) {
+      set({ position: null });
+    }
+  },
+
+  deleteTrades: (tradeIds: string[]) => {
+    const { trades, instrument } = get();
+    const newTrades = trades.filter(t => !tradeIds.includes(t.id));
+
+    if (newTrades.length === 0) {
+      set({ trades: [], position: null });
+      return;
+    }
+
+    const { processedTrades, finalQty, finalAvgPrice, totalRealizedPnL } = recalculateTradesPnL(newTrades);
+
+    set({
+      trades: processedTrades,
+      position: finalQty !== 0 ? {
+        instrument,
+        quantity: finalQty,
+        averagePrice: finalAvgPrice,
+        realizedPnL: totalRealizedPnL,
+        unrealizedPnL: 0,
+      } : {
+        instrument,
+        quantity: 0,
+        averagePrice: 0,
+        realizedPnL: totalRealizedPnL,
+        unrealizedPnL: 0,
+      }
+    });
+
+    if (finalQty === 0) {
+      set({ position: null });
+    }
   },
 
   saveCurrentSession: () => {

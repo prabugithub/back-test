@@ -1,5 +1,5 @@
 import { useRef, useEffect, useMemo, useState } from 'react';
-import { X, ChevronRight, ChevronDown, FileJson, Printer, FileSpreadsheet } from 'lucide-react';
+import { X, ChevronRight, ChevronDown, FileJson, Printer, FileSpreadsheet, Trash2 } from 'lucide-react';
 import { useSessionStore } from '../stores/sessionStore';
 import { formatCurrency, formatTimestamp } from '../utils/formatters';
 import { groupTradesIntoPositions, calculatePerformanceStats } from '../utils/tradeAnalysis';
@@ -12,6 +12,8 @@ interface TradeHistoryDialogProps {
 export function TradeHistoryDialog({ isOpen, onClose }: TradeHistoryDialogProps) {
     const trades = useSessionStore((s) => s.trades);
     const instrument = useSessionStore((s) => s.instrument);
+    const deleteTrade = useSessionStore((s) => s.deleteTrade);
+    const deleteTrades = useSessionStore((s) => s.deleteTrades);
     const dialogRef = useRef<HTMLDivElement>(null);
     const [expandedPosId, setExpandedPosId] = useState<string | null>(null);
 
@@ -87,6 +89,21 @@ export function TradeHistoryDialog({ isOpen, onClose }: TradeHistoryDialogProps)
 
     const handlePrint = () => {
         window.print();
+    };
+
+    const handleDeleteTrade = (e: React.MouseEvent, tradeId: string) => {
+        e.stopPropagation();
+        if (confirm('Delete this trade? Position metrics will be recalculated.')) {
+            deleteTrade(tradeId);
+        }
+    };
+
+    const handleDeletePosition = (e: React.MouseEvent, pos: any) => {
+        e.stopPropagation();
+        if (confirm(`Delete entire ${pos.status} ${pos.direction} position and all its ${pos.executions.length} trades?`)) {
+            const ids = pos.executions.map((ex: any) => ex.id);
+            deleteTrades(ids);
+        }
     };
 
     const handleMouseDown = (e: React.MouseEvent) => {
@@ -285,6 +302,7 @@ export function TradeHistoryDialog({ isOpen, onClose }: TradeHistoryDialogProps)
                                     <th className="px-4 py-3 text-right">Avg Exit</th>
                                     <th className="px-4 py-3 text-right">P&L</th>
                                     <th className="px-4 py-3 text-right">Duration</th>
+                                    <th className="px-4 py-3 text-center w-10"></th>
                                 </tr>
                             </thead>
                             <tbody className="divide-y divide-gray-100">
@@ -335,13 +353,22 @@ export function TradeHistoryDialog({ isOpen, onClose }: TradeHistoryDialogProps)
                                                         {formatCurrency(pos.realizedPnL)}
                                                     </td>
                                                     <td className="px-4 py-3 text-right text-gray-500">
-                                                        {pos.durationMinutes ? `${pos.durationMinutes.toFixed(1)}m` : '-'}
+                                                        {pos.status === 'CLOSED' ? `${pos.durationMinutes?.toFixed(1)}m` : '-'}
+                                                    </td>
+                                                    <td className="px-4 py-3 text-center">
+                                                        <button
+                                                            onClick={(e) => handleDeletePosition(e, pos)}
+                                                            className="p-1.5 text-red-400 hover:text-red-600 hover:bg-red-50 rounded transition-colors"
+                                                            title="Delete entire position"
+                                                        >
+                                                            <Trash2 size={16} />
+                                                        </button>
                                                     </td>
                                                 </tr>
                                                 {/* Expanded Executions Row */}
                                                 {isExpanded && (
                                                     <tr className="bg-gray-50">
-                                                        <td colSpan={9} className="px-4 py-3 pl-12">
+                                                        <td colSpan={10} className="px-4 py-3 pl-12"> {/* colSpan updated to 10 */}
                                                             <div className="border rounded bg-white overflow-hidden text-xs">
                                                                 <table className="w-full">
                                                                     <thead className="bg-gray-100 text-gray-500">
@@ -351,11 +378,12 @@ export function TradeHistoryDialog({ isOpen, onClose }: TradeHistoryDialogProps)
                                                                             <th className="px-3 py-2 text-right">Price</th>
                                                                             <th className="px-3 py-2 text-right">Qty</th>
                                                                             <th className="px-3 py-2 text-right">Realized P&L</th>
+                                                                            <th className="px-3 py-2 text-center w-10"></th>
                                                                         </tr>
                                                                     </thead>
                                                                     <tbody className="divide-y divide-gray-100">
                                                                         {pos.executions.map((exec, idx) => (
-                                                                            <tr key={exec.id || idx}>
+                                                                            <tr key={exec.id || idx} className="hover:bg-gray-50/80 group">
                                                                                 <td className="px-3 py-2 text-gray-600 whitespace-nowrap">{formatTimestamp(exec.timestamp)}</td>
                                                                                 <td className={`px-3 py-2 font-semibold ${exec.type === 'BUY' ? 'text-green-600' : 'text-red-600'}`}>
                                                                                     {exec.type}
@@ -364,6 +392,15 @@ export function TradeHistoryDialog({ isOpen, onClose }: TradeHistoryDialogProps)
                                                                                 <td className="px-3 py-2 text-right font-mono">{exec.quantity}</td>
                                                                                 <td className="px-3 py-2 text-right font-mono text-gray-500">
                                                                                     {exec.pnl ? formatCurrency(exec.pnl) : '-'}
+                                                                                </td>
+                                                                                <td className="px-3 py-2 text-center">
+                                                                                    <button
+                                                                                        onClick={(e) => handleDeleteTrade(e, exec.id)}
+                                                                                        className="p-1 text-red-400 hover:text-red-600 transition-colors"
+                                                                                        title="Delete trade"
+                                                                                    >
+                                                                                        <Trash2 size={16} />
+                                                                                    </button>
                                                                                 </td>
                                                                             </tr>
                                                                         ))}
