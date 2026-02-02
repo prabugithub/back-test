@@ -1,88 +1,138 @@
 import { db } from '../config/firebase';
-import { doc, setDoc, getDoc } from 'firebase/firestore';
+import { doc, setDoc, getDoc, writeBatch } from 'firebase/firestore';
 import type { Trade, Position } from '../types';
 
 export interface SessionState {
-    id?: string; // Optional if creating new
-    name: string; // "My Analysis 1"
+    id?: string;
+    name: string;
     lastUpdated: number;
-
-    // Configuration to re-fetch data if needed
+    archivedAt?: number; // Added for history tracking
     instrument: string;
-    interval: string; // e.g., '1D', '15min'
+    interval: string;
     fromDate: string;
     toDate: string;
-
-    // Playback state
     currentIndex: number;
     trades: Trade[];
     position: Position | null;
-
-    // Optional: Store candles if dataset is small, otherwise re-fetch
-    // Storing candles in Firestore can be expensive and hit limits (1MB document limit).
-    // Better to store parameters and re-fetch from backend/local cache.
 }
 
 const CONSTANT_SESSION_ID = "current_session";
-const BACKUP_SESSION_ID = "current_session_backup";
+const HISTORY_PREFIX = "history_session_";
 
 export const saveSession = async (state: SessionState) => {
     try {
         const sessionRef = doc(db, 'sessions', CONSTANT_SESSION_ID);
-        const backupRef = doc(db, 'sessions', BACKUP_SESSION_ID);
 
-        // 1. Get current data to create backup if it exists
+        // 1. Get current data to archive it if it exists
         const currentDoc = await getDoc(sessionRef);
         if (currentDoc.exists()) {
-            // Copy current to backup
-            await setDoc(backupRef, currentDoc.data());
+            const currentData = currentDoc.data();
+
+            // Shift history: 3->4, 2->3, 1->2
+            const batch = writeBatch(db);
+
+            for (let i = 3; i >= 1; i--) {
+                const oldRef = doc(db, 'sessions', `${HISTORY_PREFIX}${i}`);
+                const oldDoc = await getDoc(oldRef);
+                if (oldDoc.exists()) {
+                    const nextRef = doc(db, 'sessions', `${HISTORY_PREFIX}${i + 1}`);
+                    batch.set(nextRef, oldDoc.data());
+                }
+            }
+
+            // Move current to Slot 1
+            const h1Ref = doc(db, 'sessions', `${HISTORY_PREFIX}1`);
+            batch.set(h1Ref, {
+                ...currentData,
+                archivedAt: Date.now()
+            });
+
+            await batch.commit();
         }
 
-        // 2. Save new state
+        // 2. Save new state to primary slot
         await setDoc(sessionRef, {
             ...state,
             lastUpdated: Date.now()
         });
-        console.log('Session saved successfully (with backup)');
+        console.log('Session saved successfully (Flat history rotation)');
     } catch (error) {
         console.error('Error saving session:', error);
         throw error;
     }
 };
 
-export const loadSession = async (type: 'current' | 'backup' = 'current'): Promise<SessionState | null> => {
+export const loadSession = async (): Promise<SessionState | null> => {
     try {
-        const id = type === 'current' ? CONSTANT_SESSION_ID : BACKUP_SESSION_ID;
-        const sessionRef = doc(db, 'sessions', id);
+        const sessionRef = doc(db, 'sessions', CONSTANT_SESSION_ID);
         const docSnap = await getDoc(sessionRef);
 
         if (docSnap.exists()) {
             return docSnap.data() as SessionState;
-        } else {
-            console.log(`No ${type} session found!`);
-            return null;
         }
+        return null;
     } catch (error) {
-        console.error(`Error loading ${type} session:`, error);
+        console.error(`Error loading session:`, error);
         throw error;
     }
 };
 
-export const restoreBackup = async (): Promise<SessionState | null> => {
+/**
+ * Lists available backups from flat history slots
+ */
+export const listHistory = async (): Promise<SessionState[]> => {
+    try {
+        const history: SessionState[] = [];
+        for (let i = 1; i <= 4; i++) {
+            const hRef = doc(db, 'sessions', `${HISTORY_PREFIX}${i}`);
+            const hSnap = await getDoc(hRef);
+            if (hSnap.exists()) {
+                history.push({
+                    ...hSnap.data(),
+                    id: `${HISTORY_PREFIX}${i}`
+                } as SessionState);
+            }
+        }
+        // Sort by archivedAt descending
+        return history.sort((a, b) => (b.archivedAt || 0) - (a.archivedAt || 0));
+    } catch (error) {
+        console.error('Error listing history:', error);
+        return [];
+    }
+};
+
+/**
+ * Restores a specific backup slot
+ */
+export const restoreBackup = async (historyId?: string): Promise<SessionState | null> => {
     try {
         const sessionRef = doc(db, 'sessions', CONSTANT_SESSION_ID);
-        const backupRef = doc(db, 'sessions', BACKUP_SESSION_ID);
+        let backupData: SessionState | null = null;
 
-        const backupDoc = await getDoc(backupRef);
-        if (!backupDoc.exists()) {
+        if (historyId) {
+            const historyDocRef = doc(db, 'sessions', historyId);
+            const historySnap = await getDoc(historyDocRef);
+            if (historySnap.exists()) {
+                backupData = historySnap.data() as SessionState;
+            }
+        } else {
+            const history = await listHistory();
+            if (history.length > 0) {
+                backupData = history[0];
+            }
+        }
+
+        if (!backupData) {
             throw new Error('No backup version found to restore.');
         }
 
-        const backupData = backupDoc.data();
-        // Overwrite current with backup
-        await setDoc(sessionRef, backupData);
+        const { id, archivedAt, ...cleanData } = backupData as any;
+        await setDoc(sessionRef, {
+            ...cleanData,
+            lastUpdated: Date.now()
+        });
 
-        return backupData as SessionState;
+        return backupData;
     } catch (error) {
         console.error('Error restoring backup:', error);
         throw error;

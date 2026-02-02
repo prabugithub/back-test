@@ -51,7 +51,8 @@ interface SessionStore {
   deleteTrades: (tradeIds: string[]) => void;
   resolveExitRequest: (confirm: boolean, journal?: TradeJournal) => void;
   checkSLTPHits: (index: number) => void;
-  restoreRemoteBackup: () => Promise<void>;
+  restoreRemoteBackup: (historyId?: string) => Promise<void>;
+  getRemoteHistory: () => Promise<SessionState[]>;
 
   // Computed getters
   getCurrentCandle: () => Candle | null;
@@ -494,23 +495,33 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
     });
   },
 
-  restoreRemoteBackup: async () => {
+  restoreRemoteBackup: async (historyId?: string) => {
     set({ isLoading: true });
     try {
-      const state = await restoreBackup();
+      const state = await restoreBackup(historyId);
       if (state) {
         set({
           trades: state.trades,
           position: state.position,
           currentIndex: state.currentIndex
         });
-        useNotificationStore.getState().notify('Backup session restored successfully!', 'success');
+        useNotificationStore.getState().notify('Session version restored successfully!', 'success');
       }
     } catch (e: any) {
       console.error(e);
       useNotificationStore.getState().notify(`Failed to restore backup: ${e.message}`, 'error');
     } finally {
       set({ isLoading: false });
+    }
+  },
+
+  getRemoteHistory: async () => {
+    const { listHistory } = await import('../services/firebaseSessionService');
+    try {
+      return await listHistory();
+    } catch (error) {
+      console.error(error);
+      return [];
     }
   },
 

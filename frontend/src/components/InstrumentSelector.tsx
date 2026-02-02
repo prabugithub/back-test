@@ -7,7 +7,7 @@ import { parseColumnarData, resampleCandles, type ColumnarData } from '../utils/
 
 // Dynamic import for the large JSON file
 // We use a function to lazy load it only when needed
-const loadNiftyData = () => import('../assets/market-data/nifty50.json');
+const loadNiftyData = () => import('../assets/market-data/nifty5min_data.json');
 
 export function InstrumentSelector() {
   const [dataSource, setDataSource] = useState<'api' | 'local'>('local');
@@ -16,7 +16,7 @@ export function InstrumentSelector() {
   const [instrument, setInstrument] = useState('EQUITY');
   const [interval, setInterval] = useState('5');
   const [fromDate, setFromDate] = useState('2021-01-01');
-  const [toDate, setToDate] = useState('2025-07-25');
+  const [toDate, setToDate] = useState('2026-01-20');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -114,15 +114,19 @@ export function InstrumentSelector() {
             allCandles = allCandles.filter(c => c.timestamp < toTs);
           }
 
-          // Determine timeframe in minutes
-          let timeframeMinutes = 1;
+          // Determine timeframe in minutes (Base is now 5 minutes)
+          let timeframeMinutes = 5;
           const intv = cfg.interval;
+          if (intv === '1') {
+            timeframeMinutes = 5;
+            // No need to notify here as it's the initial load, we'll just force 5m
+          }
           if (intv === '5') timeframeMinutes = 5;
           if (intv === '15') timeframeMinutes = 15;
           if (intv === '60') timeframeMinutes = 60;
-          if (intv === '1D') timeframeMinutes = 1440; // 24 hours
+          if (intv === '1D') timeframeMinutes = 1440;
 
-          const resampledCandles = resampleCandles(allCandles, timeframeMinutes);
+          const resampledCandles = timeframeMinutes === 5 ? allCandles : resampleCandles(allCandles, timeframeMinutes);
 
           if (resampledCandles.length > 0) {
             console.log(`Loaded ${resampledCandles.length} candles (Resampled: ${intv})`);
@@ -394,8 +398,8 @@ export function InstrumentSelector() {
           <div className="p-4 bg-blue-50 border border-blue-200 rounded-lg">
             <h3 className="font-semibold text-blue-900 mb-2">Local Data Source</h3>
             <p className="text-blue-800 text-sm">
-              Loading 1-minute data for <strong>Nifty 50</strong> from local assets.
-              You can select a different timeframe below to resample the data.
+              Loading <strong>5-minute data</strong> for <strong>Nifty 50</strong> from local assets.
+              This file is optimized for faster loading.
             </p>
           </div>
 
@@ -404,7 +408,7 @@ export function InstrumentSelector() {
               Data File
             </label>
             <div className="w-full px-3 py-2 border rounded bg-gray-100 text-gray-600 cursor-not-allowed">
-              nifty50.json (Nifty 50 Index)
+              nifty5min_data.json (Nifty 50 Index - 5m)
             </div>
           </div>
 
@@ -413,18 +417,17 @@ export function InstrumentSelector() {
               View Timeframe (Resampled)
             </label>
             <select
-              value={interval}
+              value={interval === '1' ? '5' : interval}
               onChange={(e) => setInterval(e.target.value)}
               className="w-full px-3 py-2 border rounded focus:outline-none focus:ring-2 focus:ring-blue-500"
             >
-              <option value="1">1 Minute (Original)</option>
-              <option value="5">5 Minutes</option>
+              <option value="5">5 Minutes (Original)</option>
               <option value="15">15 Minutes</option>
               <option value="60">1 Hour</option>
               <option value="1D">1 Day</option>
             </select>
             <p className="mt-1 text-xs text-gray-500">
-              The system will automatically aggregate the 1-minute data into your selected timeframe.
+              The system will automatically aggregate the 5-minute data into your selected timeframe.
             </p>
           </div>
 

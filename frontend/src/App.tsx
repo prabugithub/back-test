@@ -11,6 +11,7 @@ import { useState } from 'react';
 import { NotificationToast } from './components/NotificationToast';
 import { TradeExitDialog } from './components/TradeExitDialog';
 import { TradeJournalDialog } from './components/TradeJournalDialog';
+import { BackupHistoryDialog } from './components/BackupHistoryDialog';
 import { Save, FilePlus, RotateCcw } from 'lucide-react';
 
 const queryClient = new QueryClient();
@@ -18,6 +19,7 @@ const queryClient = new QueryClient();
 function App() {
   const candles = useSessionStore((s: any) => s.candles);
   const [isTradeHistoryOpen, setIsTradeHistoryOpen] = useState(false);
+  const [isBackupHistoryOpen, setIsBackupHistoryOpen] = useState(false);
 
   const hasData = candles.length > 0;
 
@@ -27,6 +29,10 @@ function App() {
         <NotificationToast />
         <TradeExitDialog />
         <TradeJournalDialog />
+        <BackupHistoryDialog
+          isOpen={isBackupHistoryOpen}
+          onClose={() => setIsBackupHistoryOpen(false)}
+        />
         {/* Main Content Area */}
         <main className="flex-1 flex flex-col relative min-w-0">
           {!hasData ? (
@@ -72,13 +78,9 @@ function App() {
                   <Save size={16} />
                 </button>
                 <button
-                  onClick={() => {
-                    if (window.confirm("Restore to last saved backup? current progress will be lost.")) {
-                      useSessionStore.getState().restoreRemoteBackup();
-                    }
-                  }}
+                  onClick={() => setIsBackupHistoryOpen(true)}
                   className="p-1.5 text-amber-700 bg-amber-50 border border-amber-200 hover:bg-amber-100 rounded"
-                  title="Restore from last Backup"
+                  title="Restore from last Backups (History)"
                 >
                   <RotateCcw size={16} />
                 </button>

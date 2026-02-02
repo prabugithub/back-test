@@ -9,7 +9,7 @@ import { calculatePivotPoints } from '../utils/indicators';
 import { fetchCandles } from '../services/api';
 
 // Dynamic import for local data
-const loadNiftyData = () => import('../assets/market-data/nifty50.json');
+const loadNiftyData = () => import('../assets/market-data/nifty5min_data.json');
 
 export function PlaybackControls({ onOpenHistory }: { onOpenHistory?: () => void }) {
   const {
@@ -109,9 +109,12 @@ export function PlaybackControls({ onOpenHistory }: { onOpenHistory?: () => void
           allCandles = allCandles.filter(c => c.timestamp < toTs);
         }
 
-        // Resample
+        // Resample (Base is now 5 minutes)
         let tfMinutes = 5;
-        if (newTimeframe === '1') tfMinutes = 1;
+        if (newTimeframe === '1') {
+          tfMinutes = 5; // Fallback for local data since we only have 5m
+          useNotificationStore.getState().notify('1m timeframe not available for local data. Using 5m instead.', 'warning');
+        }
         if (newTimeframe === '5') tfMinutes = 5;
         if (newTimeframe === '15') tfMinutes = 15;
         if (newTimeframe === '30') tfMinutes = 30;
@@ -119,7 +122,7 @@ export function PlaybackControls({ onOpenHistory }: { onOpenHistory?: () => void
         if (newTimeframe === '240') tfMinutes = 240;
         if (newTimeframe === '1440' || newTimeframe === '1D') tfMinutes = 1440;
 
-        const resampledCandles = resampleCandles(allCandles, tfMinutes);
+        const resampledCandles = tfMinutes === 5 ? allCandles : resampleCandles(allCandles, tfMinutes);
 
         if (resampledCandles.length === 0) {
           throw new Error('No candles found for the selected range/timeframe');
