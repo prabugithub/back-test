@@ -276,12 +276,34 @@ export function PlaybackControls({ onOpenHistory }: { onOpenHistory?: () => void
       } else if (e.code === 'ArrowLeft') {
         e.preventDefault();
         step('backward');
+      } else if (e.code === 'KeyB') {
+        e.preventDefault();
+        handleExecuteTrade('BUY');
+      } else if (e.code === 'KeyS') {
+        e.preventDefault();
+        handleExecuteTrade('SELL');
+      } else if (e.code === 'KeyQ') {
+        e.preventDefault();
+
+        // Calculate recommended quantity based on risk
+        const pivots = calculatePivotPoints(candles.slice(0, currentIndex + 1));
+        const recentPivot = pivots.length > 0 ? pivots[pivots.length - 1] : null;
+        if (recentPivot && recentPivot.slDistance > 0) {
+          const suggestedQty = Math.floor(10000 / recentPivot.slDistance);
+          setTradeQuantity(suggestedQty);
+        }
+
+        const qtyInput = document.getElementById('trade-quantity-input');
+        if (qtyInput) {
+          qtyInput.focus();
+          (qtyInput as HTMLInputElement).select();
+        }
       }
     };
 
     window.addEventListener('keydown', handleKeyPress);
     return () => window.removeEventListener('keydown', handleKeyPress);
-  }, [isPlaying, play, pause, step]);
+  }, [isPlaying, play, pause, step, currentIndex, candles, tradeQuantity]); // Added dependencies for trade execution
 
   const handleExecuteTrade = (type: 'BUY' | 'SELL') => {
     if (!currentCandle) return;
@@ -445,19 +467,20 @@ export function PlaybackControls({ onOpenHistory }: { onOpenHistory?: () => void
                   )}
 
                   <input
+                    id="trade-quantity-input"
                     type="number"
                     min="1"
                     value={tradeQuantity}
                     onChange={(e) => setTradeQuantity(Math.max(1, parseInt(e.target.value) || 1))}
                     className="w-10 px-0.5 py-1 border rounded text-center text-xs font-medium"
-                    title="Trade Quantity"
+                    title="Trade Quantity (Q)"
                   />
                   <div className="flex items-center gap-0.5">
                     <button
                       onClick={() => handleExecuteTrade('BUY')}
                       disabled={!currentCandle}
                       className="px-2 py-1 bg-green-600 text-white rounded text-xs font-bold hover:bg-green-700 disabled:opacity-50"
-                      title={`Buy ${tradeQuantity}${buySL ? ` (SL: ${buySL.toFixed(1)}, Tgt: ${buyTgt.toFixed(1)})` : ''}`}
+                      title={`Buy ${tradeQuantity}${buySL ? ` (SL: ${buySL.toFixed(1)}, Tgt: ${buyTgt.toFixed(1)})` : ''} (B)`}
                     >
                       B
                     </button>
@@ -465,7 +488,7 @@ export function PlaybackControls({ onOpenHistory }: { onOpenHistory?: () => void
                       onClick={() => handleExecuteTrade('SELL')}
                       disabled={!currentCandle}
                       className="px-2 py-1 bg-red-600 text-white rounded text-xs font-bold hover:bg-red-700 disabled:opacity-50"
-                      title={`Sell ${tradeQuantity}${sellSL ? ` (SL: ${sellSL.toFixed(1)}, Tgt: ${sellTgt.toFixed(1)})` : ''}`}
+                      title={`Sell ${tradeQuantity}${sellSL ? ` (SL: ${sellSL.toFixed(1)}, Tgt: ${sellTgt.toFixed(1)})` : ''} (S)`}
                     >
                       S
                     </button>
