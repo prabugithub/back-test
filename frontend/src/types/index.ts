@@ -20,6 +20,7 @@ export interface TradeJournal {
   systemMoveAlign: 'Yes' | 'No';
   myViewMoveAlign: 'Yes' | 'No';
   tradeCategory: 'System' | 'Discretionary';
+  screenshotUrl?: string;
 }
 
 // Trade record

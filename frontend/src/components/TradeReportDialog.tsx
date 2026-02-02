@@ -1,5 +1,5 @@
 import { useState, useMemo } from 'react';
-import { X, Trash2, TrendingUp, TrendingDown, DollarSign, Target, Calendar, BarChart3, FileJson, Printer, FileSpreadsheet } from 'lucide-react';
+import { X, Trash2, TrendingUp, TrendingDown, DollarSign, Target, Calendar, BarChart3, FileJson, Printer, FileSpreadsheet, Link as LinkIcon } from 'lucide-react';
 import { getStoredSessions, deleteTradeSession, updateTradeSession, type TradeSession } from '../utils/tradeStorage';
 import { formatCurrency, formatTimestamp } from '../utils/formatters';
 import { groupTradesIntoPositions, calculatePerformanceStats, recalculateTradesPnL } from '../utils/tradeAnalysis';
@@ -119,11 +119,14 @@ export function TradeReportDialog({ isOpen, onClose }: TradeReportDialogProps) {
         csvContent += `Profit Factor,${selectedSessionStats.profitFactor.toFixed(2)}\n\n`;
 
         csvContent += "POSITION SUMMARY\n";
-        csvContent += "ID,Direction,Entry Time,Exit Time,Entry Price,Exit Price,Qty,PnL,Duration (min),SL,Target,SL Hit,TP Hit,Category,LT Market,HT Market,Pivot Pos,LLHH Pivot,Entry Sign,Align E(S),Align E(V),Align M(S),Align M(V),Notes\n";
+        csvContent += "ID,Direction,Entry Time,Exit Time,Entry Price,Exit Price,Qty,PnL,Duration (min),SL,Target,SL Hit,TP Hit,Category,LT Market,HT Market,Pivot Pos,LLHH Pivot,Entry Sign,Align E(S),Align E(V),Align M(S),Align M(V),Notes,Screenshot (E),Screenshot (M)\n";
         positions.forEach(pos => {
-            const entryJournal = pos.executions.find(e => e.journal?.ltMarket)?.journal;
-            const exitJournal = pos.executions.find(e => e.journal?.systemMoveAlign && e.exitReason !== 'MANUAL' && e.exitReason !== undefined)?.journal
-                || pos.executions.find(e => e.journal?.systemMoveAlign)?.journal;
+            const entryExec = pos.executions.find(e => e.journal?.ltMarket);
+            const entryJournal = entryExec?.journal;
+
+            const exitExec = pos.executions.find(e => e.journal?.systemMoveAlign && e.exitReason !== 'MANUAL' && e.exitReason !== undefined)
+                || pos.executions.find(e => e.journal?.systemMoveAlign);
+            const exitJournal = exitExec?.journal;
 
             // Collect and concatenate all unique notes from all executions in this position
             const combinedNotes = Array.from(new Set(pos.executions
@@ -131,13 +134,13 @@ export function TradeReportDialog({ isOpen, onClose }: TradeReportDialogProps) {
                 .filter(note => note && note.length > 0)))
                 .join(" | ");
 
-            csvContent += `${pos.id},${pos.direction},${formatTimestamp(pos.entryTime)},${pos.exitTime ? formatTimestamp(pos.exitTime) : 'OPEN'},${pos.avgEntryPrice},${pos.avgExitPrice || ''},${pos.totalQuantity},${pos.realizedPnL.toFixed(2)},${pos.durationMinutes ? pos.durationMinutes.toFixed(1) : ''},${pos.stopLoss || ''},${pos.target || ''},${pos.slHit ? 'YES' : 'NO'},${pos.tpHit ? 'YES' : 'NO'},${entryJournal?.tradeCategory || ''},${entryJournal?.ltMarket || ''},${entryJournal?.htMarket || ''},${entryJournal?.pivotPosition || ''},${entryJournal?.llhhPivot || ''},${entryJournal?.entrySign || ''},${entryJournal?.systemEntryAlign || ''},${entryJournal?.myViewEntryAlign || ''},${exitJournal?.systemMoveAlign || ''},${exitJournal?.myViewMoveAlign || ''},"${(combinedNotes || '').replace(/"/g, '""')}"\n`;
+            csvContent += `${pos.id},${pos.direction},${formatTimestamp(pos.entryTime)},${pos.exitTime ? formatTimestamp(pos.exitTime) : 'OPEN'},${pos.avgEntryPrice},${pos.avgExitPrice || ''},${pos.totalQuantity},${pos.realizedPnL.toFixed(2)},${pos.durationMinutes ? pos.durationMinutes.toFixed(1) : ''},${pos.stopLoss || ''},${pos.target || ''},${pos.slHit ? 'YES' : 'NO'},${pos.tpHit ? 'YES' : 'NO'},${entryJournal?.tradeCategory || ''},${entryJournal?.ltMarket || ''},${entryJournal?.htMarket || ''},${entryJournal?.pivotPosition || ''},${entryJournal?.llhhPivot || ''},${entryJournal?.entrySign || ''},${entryJournal?.systemEntryAlign || ''},${entryJournal?.myViewEntryAlign || ''},${exitJournal?.systemMoveAlign || ''},${exitJournal?.myViewMoveAlign || ''},"${(combinedNotes || '').replace(/"/g, '""')}",${entryJournal?.screenshotUrl || ''},${exitJournal?.screenshotUrl || ''}\n`;
         });
 
         csvContent += "\nRAW TRADE EXECUTIONS\n";
-        csvContent += "Timestamp,Type,Price,Quantity,Instrument,P&L,SL,Target,Min SL Hit,Min Target Hit,Category,LT Market,HT Market,Pivot Position,LLHH Pivot,Entry Sign,Align-Entry(Sys),Align-Entry(View),Align-Move(Sys),Align-Move(View),Notes\n";
+        csvContent += "Timestamp,Type,Price,Quantity,Instrument,P&L,SL,Target,Min SL Hit,Min Target Hit,Category,LT Market,HT Market,Pivot Position,LLHH Pivot,Entry Sign,Align-Entry(Sys),Align-Entry(View),Align-Move(Sys),Align-Move(View),Notes,Screenshot\n";
         selectedSession.trades.forEach(trade => {
-            csvContent += `${new Date(trade.timestamp).toISOString()},${trade.type},${trade.price},${trade.quantity},${trade.instrument},${(trade.pnl || 0).toFixed(2)},${trade.stopLoss || ''},${trade.target || ''},${trade.slHit ? 'YES' : 'NO'},${trade.tpHit ? 'YES' : 'NO'},${trade.journal?.tradeCategory || ''},${trade.journal?.ltMarket || ''},${trade.journal?.htMarket || ''},${trade.journal?.pivotPosition || ''},${trade.journal?.llhhPivot || ''},${trade.journal?.entrySign || ''},${trade.journal?.systemEntryAlign || ''},${trade.journal?.myViewEntryAlign || ''},${trade.journal?.systemMoveAlign || ''},${trade.journal?.myViewMoveAlign || ''},"${(trade.journal?.notes || '').replace(/"/g, '""')}"\n`;
+            csvContent += `${new Date(trade.timestamp).toISOString()},${trade.type},${trade.price},${trade.quantity},${trade.instrument},${(trade.pnl || 0).toFixed(2)},${trade.stopLoss || ''},${trade.target || ''},${trade.slHit ? 'YES' : 'NO'},${trade.tpHit ? 'YES' : 'NO'},${trade.journal?.tradeCategory || ''},${trade.journal?.ltMarket || ''},${trade.journal?.htMarket || ''},${trade.journal?.pivotPosition || ''},${trade.journal?.llhhPivot || ''},${trade.journal?.entrySign || ''},${trade.journal?.systemEntryAlign || ''},${trade.journal?.myViewEntryAlign || ''},${trade.journal?.systemMoveAlign || ''},${trade.journal?.myViewMoveAlign || ''},"${(trade.journal?.notes || '').replace(/"/g, '""')}",${trade.journal?.screenshotUrl || ''}\n`;
         });
 
         const blob = new Blob([csvContent], { type: 'text/csv' });
@@ -479,6 +482,7 @@ export function TradeReportDialog({ isOpen, onClose }: TradeReportDialogProps) {
                                                         <th className="text-left p-3 font-semibold text-gray-700">Entry Sign</th>
                                                         <th className="text-left p-3 font-semibold text-gray-700">Align (Sys/View)</th>
                                                         <th className="text-left p-3 font-semibold text-gray-700 max-w-[100px]">Notes</th>
+                                                        <th className="text-center p-3 font-semibold text-gray-700">Img</th>
                                                         <th className="text-center p-3 font-semibold text-gray-700">Min SL Hit</th>
                                                         <th className="text-center p-3 font-semibold text-gray-700">Min Target Hit</th>
                                                         <th className="text-right p-3 font-semibold text-gray-700">P&L</th>
@@ -561,6 +565,20 @@ export function TradeReportDialog({ isOpen, onClose }: TradeReportDialogProps) {
                                                             </td>
                                                             <td className="p-3 text-left text-[10px] text-gray-500 truncate max-w-[100px]" title={trade.journal?.notes}>
                                                                 {trade.journal?.notes || '-'}
+                                                            </td>
+                                                            <td className="p-3 text-center text-[10px]">
+                                                                {trade.journal?.screenshotUrl ? (
+                                                                    <a
+                                                                        href={trade.journal.screenshotUrl}
+                                                                        target="_blank"
+                                                                        rel="noopener noreferrer"
+                                                                        className="text-blue-500 hover:text-blue-700 flex items-center justify-center p-1 hover:bg-blue-50 rounded transition-colors"
+                                                                        title="View screenshot"
+                                                                        onClick={(e) => e.stopPropagation()}
+                                                                    >
+                                                                        <LinkIcon size={14} />
+                                                                    </a>
+                                                                ) : '-'}
                                                             </td>
                                                             <td className="p-3 text-center">
                                                                 {trade.slHit ? (

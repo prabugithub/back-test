@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { useSessionStore } from '../stores/sessionStore';
-import { Target, ShieldAlert, X, Check } from 'lucide-react';
+import { Target, ShieldAlert, X, Check, Link as LinkIcon } from 'lucide-react';
 import { formatCurrency } from '../utils/formatters';
 
 export function TradeExitDialog() {
@@ -11,7 +11,8 @@ export function TradeExitDialog() {
     const [journalData, setJournalData] = useState({
         systemMoveAlign: 'Yes' as 'Yes' | 'No',
         myViewMoveAlign: 'Yes' as 'Yes' | 'No',
-        notes: ''
+        notes: '',
+        screenshotUrl: ''
     });
 
     if (!pendingRequest) return null;
@@ -24,6 +25,7 @@ export function TradeExitDialog() {
             systemMoveAlign: journalData.systemMoveAlign,
             myViewMoveAlign: journalData.myViewMoveAlign,
             notes: journalData.notes,
+            screenshotUrl: journalData.screenshotUrl,
             // Fill other required journal fields with defaults or empty if not applicable to exit
             ltMarket: '',
             htMarket: '',
@@ -38,7 +40,7 @@ export function TradeExitDialog() {
 
     return (
         <div className="fixed inset-0 z-[3000] flex items-center justify-end p-4 pointer-events-none">
-            <div className="bg-white/95 backdrop-blur-md rounded-2xl shadow-2xl border-2 border-orange-500 w-[400px] max-w-[90vw] overflow-hidden animate-in slide-in-from-right duration-300 pointer-events-auto">
+            <div className="bg-white/95 backdrop-blur-md rounded-2xl shadow-2xl border-2 border-orange-500 w-[400px] max-w-[90vw] max-h-[90vh] flex flex-col overflow-hidden animate-in slide-in-from-right duration-300 pointer-events-auto">
                 {/* Header */}
                 <div className={`p-4 flex items-center gap-4 ${isTP ? 'bg-green-50' : 'bg-red-50'}`}>
                     <div className={`p-2 rounded-xl ${isTP ? 'bg-green-100 text-green-600' : 'bg-red-100 text-red-600'}`}>
@@ -58,7 +60,7 @@ export function TradeExitDialog() {
                 </div>
 
                 {/* Content */}
-                <div className="p-5">
+                <div className="p-5 overflow-y-auto flex-1 custom-scrollbar">
                     <div className="flex gap-3 mb-4">
                         <div className="flex-1 bg-gray-50 rounded-xl p-3 border border-gray-100 text-center">
                             <span className="text-gray-500 text-[10px] font-bold uppercase tracking-wider block mb-1">{isTP ? 'Target' : 'Stop Loss'}</span>
@@ -117,7 +119,7 @@ export function TradeExitDialog() {
                     </div>
 
                     {/* Exit Notes */}
-                    <div className="mb-6">
+                    <div className="mb-4">
                         <label className="block text-[10px] font-bold text-gray-500 uppercase tracking-wider mb-1">Exit Notes</label>
                         <textarea
                             value={journalData.notes}
@@ -128,12 +130,25 @@ export function TradeExitDialog() {
                         />
                     </div>
 
+                    {/* Screenshot URL Input */}
+                    <div className="mb-6">
+                        <label className="block text-[10px] font-bold text-gray-500 uppercase tracking-wider mb-1 flex items-center justify-between">
+                            <span>Screenshot URL (Manual Link)</span>
+                            {journalData.screenshotUrl && <LinkIcon size={12} className="text-blue-500" />}
+                        </label>
+                        <input
+                            type="text"
+                            value={journalData.screenshotUrl}
+                            onChange={(e) => setJournalData(p => ({ ...p, screenshotUrl: e.target.value }))}
+                            placeholder="https://drive.google.com/..."
+                            className="w-full bg-white border border-gray-200 rounded-xl px-4 py-2 text-xs focus:ring-2 focus:ring-orange-500 outline-none"
+                        />
+                    </div>
+
                     <div className="flex flex-col gap-3">
                         <button
                             onClick={handleConfirm}
-                            className={`w-full py-3 rounded-xl font-bold text-white shadow-lg transition-all active:scale-95 flex items-center justify-center gap-2 ${isTP
-                                ? 'bg-green-600 hover:bg-green-700 shadow-green-100'
-                                : 'bg-red-600 hover:bg-red-700 shadow-red-100'
+                            className={`w-full py-3 rounded-xl font-bold text-white shadow-lg transition-all active:scale-95 flex items-center justify-center gap-2 ${isTP ? 'bg-green-600 hover:bg-green-700 shadow-green-100' : 'bg-red-600 hover:bg-red-700 shadow-red-100'
                                 }`}
                         >
                             Exit Trade & Save Move Align
@@ -147,7 +162,7 @@ export function TradeExitDialog() {
                     </div>
 
                     <p className="mt-4 text-center text-[10px] text-gray-400">
-                        Capture move alignment before closing the position.
+                        Capture move alignment and enter screenshot link before closing.
                     </p>
                 </div>
             </div>

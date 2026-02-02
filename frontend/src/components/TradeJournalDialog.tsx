@@ -1,6 +1,6 @@
-import React, { useState, useEffect } from 'react';
+import { useState, useEffect } from 'react';
 import { useSessionStore } from '../stores/sessionStore';
-import { Info, X, Check } from 'lucide-react';
+import { Info, X, Check, Link as LinkIcon } from 'lucide-react';
 import type { TradeJournal } from '../types';
 
 export function TradeJournalDialog() {
@@ -20,6 +20,7 @@ export function TradeJournalDialog() {
         systemMoveAlign: 'Yes',
         myViewMoveAlign: 'Yes',
         tradeCategory: 'System',
+        screenshotUrl: ''
     });
 
     // Reset state when a new request comes in
@@ -37,6 +38,7 @@ export function TradeJournalDialog() {
                 systemMoveAlign: 'Yes',
                 myViewMoveAlign: 'Yes',
                 tradeCategory: 'System',
+                screenshotUrl: ''
             });
         }
     }, [pendingTradeRequest]);
@@ -51,9 +53,9 @@ export function TradeJournalDialog() {
         resolveTradeRequest(null);
     };
 
-    const handleChange = (e: React.ChangeEvent<HTMLSelectElement | HTMLTextAreaElement>) => {
+    const handleChange = (e: React.ChangeEvent<HTMLSelectElement | HTMLTextAreaElement | HTMLInputElement>) => {
         const { name, value } = e.target;
-        setJournal((prev) => ({ ...prev, [name]: value }));
+        setJournal((prev) => ({ ...prev, [name]: value as any }));
     };
 
     return (
@@ -75,7 +77,7 @@ export function TradeJournalDialog() {
                     </button>
                 </div>
 
-                <div className="p-4 max-h-[90vh] overflow-y-auto">
+                <div className="p-4 max-h-[90vh] overflow-y-auto custom-scrollbar">
                     <div className="mb-4 bg-gray-50 p-2 rounded-lg border border-gray-100 flex justify-between items-center text-xs">
                         <div>
                             <span className="font-semibold text-gray-900 uppercase">Action: </span>
@@ -259,6 +261,24 @@ export function TradeJournalDialog() {
                         />
                     </div>
 
+                    {/* Screenshot URL (Exit Only) */}
+                    {isPositionOpen && (
+                        <div className="mt-4">
+                            <label className="block text-[10px] font-bold text-gray-500 uppercase tracking-wider mb-1 flex items-center gap-1">
+                                <LinkIcon size={12} />
+                                Screenshot URL (Optional)
+                            </label>
+                            <input
+                                type="text"
+                                name="screenshotUrl"
+                                value={journal.screenshotUrl}
+                                onChange={handleChange}
+                                placeholder="Paste screenshot URL here..."
+                                className="w-full bg-white border border-gray-200 rounded-lg px-3 py-1.5 text-xs focus:ring-2 focus:ring-orange-500 outline-none"
+                            />
+                        </div>
+                    )}
+
                     {/* Footer Buttons */}
                     <div className="mt-6 flex gap-3">
                         <button
@@ -269,7 +289,7 @@ export function TradeJournalDialog() {
                         </button>
                         <button
                             onClick={handleConfirm}
-                            className={`flex-1 px-4 py-2 ${isPositionOpen ? 'bg-gradient-to-r from-orange-600 to-red-600' : 'bg-gradient-to-r from-green-600 to-emerald-600'} text-white rounded-lg font-bold transition-all shadow-md flex items-center justify-center gap-2 uppercase tracking-widest text-[10px]`}
+                            className={`flex-1 px-4 py-2 ${isPositionOpen ? 'bg-gradient-to-r from-orange-600 to-red-600' : 'bg-gradient-to-r from-green-600 to-emerald-600'} text-white rounded-lg font-bold transition-all shadow-md flex items-center justify-center gap-2 uppercase tracking-widest text-[10px] hover:scale-[1.02]`}
                         >
                             <Check size={14} />
                             Confirm
