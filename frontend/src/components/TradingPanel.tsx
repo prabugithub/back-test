@@ -8,17 +8,17 @@ export function TradingPanel() {
   // Use selector to get current candle
   const currentCandle = useSessionStore((s) => s.candles[s.currentIndex] || null);
   const position = useSessionStore((s) => s.position);
-  const executeTrade = useSessionStore((s) => s.executeTrade);
+  const initiateTrade = useSessionStore((s) => s.initiateTrade);
 
   const handleBuy = () => {
     if (quantity > 0) {
-      executeTrade('BUY', quantity);
+      initiateTrade('BUY', quantity);
     }
   };
 
   const handleSell = () => {
     if (quantity > 0) {
-      executeTrade('SELL', quantity);
+      initiateTrade('SELL', quantity);
     }
   };
 

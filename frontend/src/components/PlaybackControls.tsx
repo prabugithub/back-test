@@ -23,7 +23,7 @@ export function PlaybackControls({ onOpenHistory }: { onOpenHistory?: () => void
     setSpeed,
     setCurrentIndex,
     jump,
-    executeTrade,
+    initiateTrade,
     loadCandles,
   } = useSessionStore();
 
@@ -306,7 +306,7 @@ export function PlaybackControls({ onOpenHistory }: { onOpenHistory?: () => void
       }
     }
 
-    executeTrade(type, tradeQuantity, sl, target);
+    initiateTrade(type, tradeQuantity, sl, target);
   };
 
   const progress = candles.length > 0 ? (currentIndex / (candles.length - 1)) * 100 : 0;

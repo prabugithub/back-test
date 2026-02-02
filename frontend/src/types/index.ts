@@ -8,6 +8,20 @@ export interface Candle {
   volume: number;
 }
 
+export interface TradeJournal {
+  ltMarket: string;
+  htMarket: string;
+  pivotPosition: string;
+  llhhPivot: string;
+  entrySign: string;
+  notes: string;
+  systemEntryAlign: 'Yes' | 'No';
+  myViewEntryAlign: 'Yes' | 'No';
+  systemMoveAlign: 'Yes' | 'No';
+  myViewMoveAlign: 'Yes' | 'No';
+  tradeCategory: 'System' | 'Discretionary';
+}
+
 // Trade record
 export interface Trade {
   id: string;
@@ -22,6 +36,7 @@ export interface Trade {
   exitReason?: 'SL' | 'TP' | 'MANUAL';
   slHit?: boolean;
   tpHit?: boolean;
+  journal?: TradeJournal;
 }
 
 // Position tracking

@@ -10,6 +10,7 @@ import { useSessionStore } from './stores/sessionStore';
 import { useState } from 'react';
 import { NotificationToast } from './components/NotificationToast';
 import { TradeExitDialog } from './components/TradeExitDialog';
+import { TradeJournalDialog } from './components/TradeJournalDialog';
 import { Save, FilePlus, RotateCcw } from 'lucide-react';
 
 const queryClient = new QueryClient();
@@ -25,6 +26,7 @@ function App() {
       <div className="h-screen w-screen bg-gray-100 flex overflow-hidden font-sans">
         <NotificationToast />
         <TradeExitDialog />
+        <TradeJournalDialog />
         {/* Main Content Area */}
         <main className="flex-1 flex flex-col relative min-w-0">
           {!hasData ? (

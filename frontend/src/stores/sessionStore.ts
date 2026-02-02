@@ -1,5 +1,5 @@
 import { create } from 'zustand';
-import type { Candle, Trade, Position } from '../types';
+import type { Candle, Trade, Position, TradeJournal } from '../types';
 import { saveTradeSession } from '../utils/tradeStorage';
 import { groupTradesIntoPositions, calculatePerformanceStats, recalculateTradesPnL } from '../utils/tradeAnalysis';
 import { saveSession, loadSession, restoreBackup, type SessionState } from '../services/firebaseSessionService';
@@ -29,6 +29,7 @@ interface SessionStore {
   speed: number;
   isLoading: boolean;
   pendingExitRequest: { type: 'SL' | 'TP', price: number, spotPrice: number } | null;
+  pendingTradeRequest: { type: 'BUY' | 'SELL', quantity: number, stopLoss?: number, target?: number } | null;
 
   // Actions
   loadCandles: (candles: Candle[], instrument: string, config?: SessionConfig) => void;
@@ -38,7 +39,9 @@ interface SessionStore {
   jump: (count: number) => void;
   setSpeed: (speed: number) => void;
   setCurrentIndex: (index: number) => void;
-  executeTrade: (type: 'BUY' | 'SELL', quantity: number, stopLoss?: number, target?: number, priceOverride?: number, exitReason?: 'SL' | 'TP' | 'MANUAL') => void;
+  executeTrade: (type: 'BUY' | 'SELL', quantity: number, stopLoss?: number, target?: number, priceOverride?: number, exitReason?: 'SL' | 'TP' | 'MANUAL', journal?: TradeJournal) => void;
+  initiateTrade: (type: 'BUY' | 'SELL', quantity: number, stopLoss?: number, target?: number) => void;
+  resolveTradeRequest: (journal: TradeJournal | null) => void;
   saveRemoteSession: () => Promise<void>;
   loadRemoteSession: () => Promise<{ config: SessionConfig, data: { trades: Trade[], position: Position | null, currentIndex: number } } | null>;
   restoreSessionState: (trades: Trade[], position: Position | null, currentIndex: number) => void;
@@ -46,7 +49,7 @@ interface SessionStore {
   saveCurrentSession: () => void;
   deleteTrade: (tradeId: string) => void;
   deleteTrades: (tradeIds: string[]) => void;
-  resolveExitRequest: (confirm: boolean) => void;
+  resolveExitRequest: (confirm: boolean, journal?: TradeJournal) => void;
   checkSLTPHits: (index: number) => void;
   restoreRemoteBackup: () => Promise<void>;
 
@@ -73,6 +76,7 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
   speed: 1,
   isLoading: false,
   pendingExitRequest: null,
+  pendingTradeRequest: null,
 
   // Actions
   loadCandles: (candles, instrument, config) => {
@@ -189,20 +193,54 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
     }
   },
 
-  resolveExitRequest: (confirm) => {
+  resolveExitRequest: (confirm, journal) => {
     const { pendingExitRequest, position, executeTrade } = get();
     if (!pendingExitRequest || !position) return;
 
     if (confirm) {
       // Execute exit trade
       const exitType = position.quantity > 0 ? 'SELL' : 'BUY';
-      executeTrade(exitType, Math.abs(position.quantity), undefined, undefined, undefined, pendingExitRequest.type);
+      executeTrade(
+        exitType,
+        Math.abs(position.quantity),
+        undefined,
+        undefined,
+        undefined,
+        pendingExitRequest.type,
+        journal
+      );
     }
 
     set({ pendingExitRequest: null });
   },
 
-  executeTrade: (type, quantity, stopLoss, target, priceOverride, exitReason = 'MANUAL') => {
+  initiateTrade: (type, quantity, stopLoss, target) => {
+    set({
+      isPlaying: false,
+      pendingTradeRequest: { type, quantity, stopLoss, target }
+    });
+  },
+
+  resolveTradeRequest: (journal) => {
+    const { pendingTradeRequest, executeTrade } = get();
+    if (!pendingTradeRequest) return;
+
+    if (journal) {
+      executeTrade(
+        pendingTradeRequest.type,
+        pendingTradeRequest.quantity,
+        pendingTradeRequest.stopLoss,
+        pendingTradeRequest.target,
+        undefined,
+        'MANUAL',
+        journal
+      );
+    }
+
+    set({ pendingTradeRequest: null });
+  },
+
+  executeTrade: (type, quantity, stopLoss, target, priceOverride, exitReason = 'MANUAL', journal) => {
     const { candles, currentIndex, trades, position, instrument } = get();
     const currentCandle = candles[currentIndex];
 
@@ -229,6 +267,7 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
       exitReason: finalExitReason,
       slHit: position?.slHit,
       tpHit: position?.tpHit,
+      journal: journal || undefined,
     };
 
     const currentQty = position ? position.quantity : 0;

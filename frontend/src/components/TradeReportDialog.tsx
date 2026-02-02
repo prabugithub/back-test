@@ -119,15 +119,25 @@ export function TradeReportDialog({ isOpen, onClose }: TradeReportDialogProps) {
         csvContent += `Profit Factor,${selectedSessionStats.profitFactor.toFixed(2)}\n\n`;
 
         csvContent += "POSITION SUMMARY\n";
-        csvContent += "ID,Direction,Entry Time,Exit Time,Entry Price,Exit Price,Qty,PnL,Duration (min)\n";
-        positions.forEach(p => {
-            csvContent += `${p.id},${p.direction},${formatTimestamp(p.entryTime)},${p.exitTime ? formatTimestamp(p.exitTime) : 'OPEN'},${p.avgEntryPrice},${p.avgExitPrice || ''},${p.totalQuantity},${p.realizedPnL.toFixed(2)},${p.durationMinutes ? p.durationMinutes.toFixed(1) : ''}\n`;
+        csvContent += "ID,Direction,Entry Time,Exit Time,Entry Price,Exit Price,Qty,PnL,Duration (min),SL,Target,SL Hit,TP Hit,Category,LT Market,HT Market,Pivot Pos,LLHH Pivot,Entry Sign,Align E(S),Align E(V),Align M(S),Align M(V),Notes\n";
+        positions.forEach(pos => {
+            const entryJournal = pos.executions.find(e => e.journal?.ltMarket)?.journal;
+            const exitJournal = pos.executions.find(e => e.journal?.systemMoveAlign && e.exitReason !== 'MANUAL' && e.exitReason !== undefined)?.journal
+                || pos.executions.find(e => e.journal?.systemMoveAlign)?.journal;
+
+            // Collect and concatenate all unique notes from all executions in this position
+            const combinedNotes = Array.from(new Set(pos.executions
+                .map(e => e.journal?.notes?.trim())
+                .filter(note => note && note.length > 0)))
+                .join(" | ");
+
+            csvContent += `${pos.id},${pos.direction},${formatTimestamp(pos.entryTime)},${pos.exitTime ? formatTimestamp(pos.exitTime) : 'OPEN'},${pos.avgEntryPrice},${pos.avgExitPrice || ''},${pos.totalQuantity},${pos.realizedPnL.toFixed(2)},${pos.durationMinutes ? pos.durationMinutes.toFixed(1) : ''},${pos.stopLoss || ''},${pos.target || ''},${pos.slHit ? 'YES' : 'NO'},${pos.tpHit ? 'YES' : 'NO'},${entryJournal?.tradeCategory || ''},${entryJournal?.ltMarket || ''},${entryJournal?.htMarket || ''},${entryJournal?.pivotPosition || ''},${entryJournal?.llhhPivot || ''},${entryJournal?.entrySign || ''},${entryJournal?.systemEntryAlign || ''},${entryJournal?.myViewEntryAlign || ''},${exitJournal?.systemMoveAlign || ''},${exitJournal?.myViewMoveAlign || ''},"${(combinedNotes || '').replace(/"/g, '""')}"\n`;
         });
 
         csvContent += "\nRAW TRADE EXECUTIONS\n";
-        csvContent += "Timestamp,Type,Price,Quantity,Instrument,P&L\n";
+        csvContent += "Timestamp,Type,Price,Quantity,Instrument,P&L,SL,Target,Min SL Hit,Min Target Hit,Category,LT Market,HT Market,Pivot Position,LLHH Pivot,Entry Sign,Align-Entry(Sys),Align-Entry(View),Align-Move(Sys),Align-Move(View),Notes\n";
         selectedSession.trades.forEach(trade => {
-            csvContent += `${new Date(trade.timestamp).toISOString()},${trade.type},${trade.price},${trade.quantity},${trade.instrument},${(trade.pnl || 0).toFixed(2)}\n`;
+            csvContent += `${new Date(trade.timestamp).toISOString()},${trade.type},${trade.price},${trade.quantity},${trade.instrument},${(trade.pnl || 0).toFixed(2)},${trade.stopLoss || ''},${trade.target || ''},${trade.slHit ? 'YES' : 'NO'},${trade.tpHit ? 'YES' : 'NO'},${trade.journal?.tradeCategory || ''},${trade.journal?.ltMarket || ''},${trade.journal?.htMarket || ''},${trade.journal?.pivotPosition || ''},${trade.journal?.llhhPivot || ''},${trade.journal?.entrySign || ''},${trade.journal?.systemEntryAlign || ''},${trade.journal?.myViewEntryAlign || ''},${trade.journal?.systemMoveAlign || ''},${trade.journal?.myViewMoveAlign || ''},"${(trade.journal?.notes || '').replace(/"/g, '""')}"\n`;
         });
 
         const blob = new Blob([csvContent], { type: 'text/csv' });
@@ -463,6 +473,12 @@ export function TradeReportDialog({ isOpen, onClose }: TradeReportDialogProps) {
                                                         <th className="text-right p-3 font-semibold text-gray-700">Price</th>
                                                         <th className="text-right p-3 font-semibold text-gray-700">Quantity</th>
                                                         <th className="text-right p-3 font-semibold text-gray-700">Info</th>
+                                                        <th className="text-left p-3 font-semibold text-gray-700">Category</th>
+                                                        <th className="text-left p-3 font-semibold text-gray-700">LT/HT Market</th>
+                                                        <th className="text-left p-3 font-semibold text-gray-700">Pivot Pos/LLHH</th>
+                                                        <th className="text-left p-3 font-semibold text-gray-700">Entry Sign</th>
+                                                        <th className="text-left p-3 font-semibold text-gray-700">Align (Sys/View)</th>
+                                                        <th className="text-left p-3 font-semibold text-gray-700 max-w-[100px]">Notes</th>
                                                         <th className="text-center p-3 font-semibold text-gray-700">Min SL Hit</th>
                                                         <th className="text-center p-3 font-semibold text-gray-700">Min Target Hit</th>
                                                         <th className="text-right p-3 font-semibold text-gray-700">P&L</th>
@@ -500,6 +516,51 @@ export function TradeReportDialog({ isOpen, onClose }: TradeReportDialogProps) {
                                                                         {trade.exitReason}
                                                                     </span>
                                                                 )}
+                                                            </td>
+                                                            <td className="p-3 text-left text-[10px]">
+                                                                {trade.journal ? (
+                                                                    <span className={`font-bold ${trade.journal.tradeCategory === 'System' ? 'text-blue-600' : 'text-purple-600'}`}>
+                                                                        {trade.journal.tradeCategory}
+                                                                    </span>
+                                                                ) : '-'}
+                                                            </td>
+                                                            <td className="p-3 text-left text-[10px] text-gray-500">
+                                                                {trade.journal ? (
+                                                                    <div>
+                                                                        <div className="font-semibold text-gray-700">{trade.journal.ltMarket}</div>
+                                                                        <div className="text-gray-400 text-[9px]">{trade.journal.htMarket}</div>
+                                                                    </div>
+                                                                ) : '-'}
+                                                            </td>
+                                                            <td className="p-3 text-left text-[10px] text-gray-500">
+                                                                {trade.journal ? (
+                                                                    <div>
+                                                                        <div className="font-semibold text-gray-700">{trade.journal.pivotPosition}</div>
+                                                                        <div className="text-gray-400 text-[9px]">{trade.journal.llhhPivot}</div>
+                                                                    </div>
+                                                                ) : '-'}
+                                                            </td>
+                                                            <td className="p-3 text-left text-[10px] text-gray-500">
+                                                                {trade.journal?.entrySign || '-'}
+                                                            </td>
+                                                            <td className="p-3 text-left text-[10px]">
+                                                                {trade.journal ? (
+                                                                    <div className="flex flex-col gap-0.5">
+                                                                        <div className="flex gap-1 text-[9px]">
+                                                                            <span className="text-gray-400">E:</span>
+                                                                            <span className={`font-bold ${trade.journal.systemEntryAlign === 'Yes' ? 'text-green-600' : 'text-red-500'}`}>S:{trade.journal.systemEntryAlign?.[0]}</span>
+                                                                            <span className={`font-bold ${trade.journal.myViewEntryAlign === 'Yes' ? 'text-green-600' : 'text-red-500'}`}>V:{trade.journal.myViewEntryAlign?.[0]}</span>
+                                                                        </div>
+                                                                        <div className="flex gap-1 text-[9px]">
+                                                                            <span className="text-gray-400">M:</span>
+                                                                            <span className={`font-bold ${trade.journal.systemMoveAlign === 'Yes' ? 'text-green-600' : 'text-red-500'}`}>S:{trade.journal.systemMoveAlign?.[0]}</span>
+                                                                            <span className={`font-bold ${trade.journal.myViewMoveAlign === 'Yes' ? 'text-green-600' : 'text-red-500'}`}>V:{trade.journal.myViewMoveAlign?.[0]}</span>
+                                                                        </div>
+                                                                    </div>
+                                                                ) : '-'}
+                                                            </td>
+                                                            <td className="p-3 text-left text-[10px] text-gray-500 truncate max-w-[100px]" title={trade.journal?.notes}>
+                                                                {trade.journal?.notes || '-'}
                                                             </td>
                                                             <td className="p-3 text-center">
                                                                 {trade.slHit ? (
