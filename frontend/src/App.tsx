@@ -12,6 +12,7 @@ import { NotificationToast } from './components/NotificationToast';
 import { TradeExitDialog } from './components/TradeExitDialog';
 import { TradeJournalDialog } from './components/TradeJournalDialog';
 import { BackupHistoryDialog } from './components/BackupHistoryDialog';
+import { PromptDialog } from './components/PromptDialog';
 import { Save, FilePlus, RotateCcw } from 'lucide-react';
 
 const queryClient = new QueryClient();
@@ -20,8 +21,13 @@ function App() {
   const candles = useSessionStore((s: any) => s.candles);
   const [isTradeHistoryOpen, setIsTradeHistoryOpen] = useState(false);
   const [isBackupHistoryOpen, setIsBackupHistoryOpen] = useState(false);
+  const [isSnapshotPromptOpen, setIsSnapshotPromptOpen] = useState(false);
 
   const hasData = candles.length > 0;
+
+  const handleSaveSnapshot = (name: string) => {
+    useSessionStore.getState().saveRemoteSnapshot(name);
+  };
 
   return (
     <QueryClientProvider client={queryClient}>
@@ -32,6 +38,15 @@ function App() {
         <BackupHistoryDialog
           isOpen={isBackupHistoryOpen}
           onClose={() => setIsBackupHistoryOpen(false)}
+        />
+        <PromptDialog
+          isOpen={isSnapshotPromptOpen}
+          onClose={() => setIsSnapshotPromptOpen(false)}
+          onSubmit={handleSaveSnapshot}
+          title="Save Snapshot"
+          message="Enter a name for this snapshot to identify it later (e.g., 'Before News Event')."
+          placeholder="Snapshot Name..."
+          confirmText="Save Snapshot"
         />
         {/* Main Content Area */}
         <main className="flex-1 flex flex-col relative min-w-0">
@@ -78,10 +93,7 @@ function App() {
                   <Save size={16} />
                 </button>
                 <button
-                  onClick={() => {
-                    const name = prompt("Enter a name for this snapshot (e.g., 'Before Big Trade'):");
-                    if (name) useSessionStore.getState().saveRemoteSnapshot(name);
-                  }}
+                  onClick={() => setIsSnapshotPromptOpen(true)}
                   className="p-1.5 text-purple-700 bg-purple-50 border border-purple-200 hover:bg-purple-100 rounded"
                   title="Save Permanent Snapshot"
                 >

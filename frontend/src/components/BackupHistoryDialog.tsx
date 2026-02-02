@@ -2,6 +2,7 @@ import React, { useEffect, useState } from 'react';
 import { X, Clock, RotateCcw, AlertCircle, Trash2 } from 'lucide-react';
 import { useSessionStore } from '../stores/sessionStore';
 import type { SessionState } from '../services/firebaseSessionService';
+import { ConfirmDialog } from './ConfirmDialog';
 
 interface BackupHistoryDialogProps {
     isOpen: boolean;
@@ -13,6 +14,7 @@ export const BackupHistoryDialog: React.FC<BackupHistoryDialogProps> = ({ isOpen
     const [snapshots, setSnapshots] = useState<SessionState[]>([]);
     const [activeTab, setActiveTab] = useState<'backups' | 'snapshots'>('backups');
     const [loading, setLoading] = useState(false);
+    const [confirmAction, setConfirmAction] = useState<{ type: 'restore' | 'delete', id: string, name: string } | null>(null);
 
     const getRemoteHistory = useSessionStore(s => s.getRemoteHistory);
     const getRemoteSnapshots = useSessionStore(s => s.getRemoteSnapshots);
@@ -41,19 +43,26 @@ export const BackupHistoryDialog: React.FC<BackupHistoryDialogProps> = ({ isOpen
         }
     };
 
-    const handleRestore = async (id: string, name: string) => {
-        if (window.confirm(`Are you sure you want to restore "${name}"? Current unsaved progress will be lost.`)) {
-            await restoreRemoteBackup(id);
-            onClose();
-        }
+    const handleRestoreClick = (id: string, name: string) => {
+        setConfirmAction({ type: 'restore', id, name });
     };
 
-    const handleDelete = async (e: React.MouseEvent, id: string, name: string) => {
+    const handleDeleteClick = (e: React.MouseEvent, id: string, name: string) => {
         e.stopPropagation();
-        if (window.confirm(`Delete snapshot "${name}" permanently?`)) {
-            await deleteRemoteSnapshot(id);
-            loadData(); // Reload list
+        setConfirmAction({ type: 'delete', id, name });
+    };
+
+    const executeConfirmAction = async () => {
+        if (!confirmAction) return;
+
+        if (confirmAction.type === 'restore') {
+            await restoreRemoteBackup(confirmAction.id);
+            onClose();
+        } else {
+            await deleteRemoteSnapshot(confirmAction.id);
+            loadData();
         }
+        setConfirmAction(null);
     };
 
     if (!isOpen) return null;
@@ -62,6 +71,19 @@ export const BackupHistoryDialog: React.FC<BackupHistoryDialogProps> = ({ isOpen
 
     return (
         <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm">
+            <ConfirmDialog
+                isOpen={!!confirmAction}
+                onClose={() => setConfirmAction(null)}
+                onConfirm={executeConfirmAction}
+                title={confirmAction?.type === 'restore' ? "Restore Session?" : "Delete Snapshot?"}
+                message={confirmAction?.type === 'restore'
+                    ? `Are you sure you want to restore "${confirmAction.name}"? Current unsaved progress will be lost.`
+                    : `Delete snapshot "${confirmAction?.name}" permanently? This action cannot be undone.`
+                }
+                confirmText={confirmAction?.type === 'restore' ? "Restore" : "Delete"}
+                isDestructive={confirmAction?.type === 'delete'}
+            />
+
             <div className="bg-white rounded-xl shadow-2xl w-full max-w-md max-h-[95vh] flex flex-col overflow-hidden animate-in fade-in zoom-in duration-200">
                 {/* Header */}
                 <div className="px-6 py-4 bg-amber-50 border-b border-amber-100 flex items-center justify-between shrink-0">
@@ -121,7 +143,7 @@ export const BackupHistoryDialog: React.FC<BackupHistoryDialogProps> = ({ isOpen
                             currentList.map((item, index) => (
                                 <button
                                     key={item.id || index}
-                                    onClick={() => handleRestore(item.id!, item.name)}
+                                    onClick={() => handleRestoreClick(item.id!, item.name)}
                                     className={`w-full text-left p-4 border rounded-xl transition-all group relative ${activeTab === 'backups'
                                             ? 'border-gray-200 hover:border-amber-500 hover:bg-amber-50'
                                             : 'border-purple-200 hover:border-purple-500 hover:bg-purple-50'
@@ -138,7 +160,7 @@ export const BackupHistoryDialog: React.FC<BackupHistoryDialogProps> = ({ isOpen
                                         )}
                                         {activeTab === 'snapshots' && (
                                             <div
-                                                onClick={(e) => handleDelete(e, item.id!, item.name)}
+                                                onClick={(e) => handleDeleteClick(e, item.id!, item.name)}
                                                 className="absolute top-4 right-4 p-1.5 text-gray-400 hover:text-red-600 hover:bg-red-50 rounded transition-colors z-10"
                                                 title="Delete Snapshot"
                                             >
