@@ -1,5 +1,5 @@
 import { db } from '../config/firebase';
-import { doc, setDoc, getDoc, writeBatch } from 'firebase/firestore';
+import { doc, setDoc, getDoc, writeBatch, deleteDoc } from 'firebase/firestore';
 import type { Trade, Position } from '../types';
 
 export interface SessionState {
@@ -18,6 +18,7 @@ export interface SessionState {
 
 const CONSTANT_SESSION_ID = "current_session";
 const HISTORY_PREFIX = "history_session_";
+const SNAPSHOT_PREFIX = "snapshot_session_";
 
 export const saveSession = async (state: SessionState) => {
     try {
@@ -62,6 +63,41 @@ export const saveSession = async (state: SessionState) => {
     }
 };
 
+/**
+ * Saves a permanent manual snapshot that won't be rotated
+ */
+export const saveSnapshot = async (state: SessionState, snapshotName: string) => {
+    try {
+        const id = `${SNAPSHOT_PREFIX}${Date.now()}`;
+        const snapshotRef = doc(db, 'sessions', id);
+
+        await setDoc(snapshotRef, {
+            ...state,
+            name: snapshotName,
+            archivedAt: Date.now(),
+            isSnapshot: true
+        });
+        console.log('Manual snapshot saved:', snapshotName);
+    } catch (error) {
+        console.error('Error saving snapshot:', error);
+        throw error;
+    }
+};
+
+export const deleteSnapshot = async (snapshotId: string) => {
+    try {
+        if (!snapshotId.startsWith(SNAPSHOT_PREFIX)) {
+            throw new Error("Invalid snapshot ID");
+        }
+        const snapshotRef = doc(db, 'sessions', snapshotId);
+        await deleteDoc(snapshotRef);
+        console.log('Snapshot deleted:', snapshotId);
+    } catch (error) {
+        console.error('Error deleting snapshot:', error);
+        throw error;
+    }
+};
+
 export const loadSession = async (): Promise<SessionState | null> => {
     try {
         const sessionRef = doc(db, 'sessions', CONSTANT_SESSION_ID);
@@ -102,18 +138,37 @@ export const listHistory = async (): Promise<SessionState[]> => {
 };
 
 /**
- * Restores a specific backup slot
+ * Lists all manual snapshots
  */
-export const restoreBackup = async (historyId?: string): Promise<SessionState | null> => {
+export const listSnapshots = async (): Promise<SessionState[]> => {
+    try {
+        const { collection, getDocs } = await import('firebase/firestore');
+        const sessCol = collection(db, 'sessions');
+        const snap = await getDocs(sessCol);
+
+        return snap.docs
+            .map(d => ({ ...d.data(), id: d.id } as SessionState))
+            .filter(d => d.id?.startsWith(SNAPSHOT_PREFIX))
+            .sort((a, b) => (b.archivedAt || 0) - (a.archivedAt || 0));
+    } catch (error) {
+        console.error('Error listing snapshots:', error);
+        return [];
+    }
+};
+
+/**
+ * Restores a specific backup slot or snapshot
+ */
+export const restoreBackup = async (idOrPath?: string): Promise<SessionState | null> => {
     try {
         const sessionRef = doc(db, 'sessions', CONSTANT_SESSION_ID);
         let backupData: SessionState | null = null;
 
-        if (historyId) {
-            const historyDocRef = doc(db, 'sessions', historyId);
-            const historySnap = await getDoc(historyDocRef);
-            if (historySnap.exists()) {
-                backupData = historySnap.data() as SessionState;
+        if (idOrPath) {
+            const docRef = doc(db, 'sessions', idOrPath);
+            const snap = await getDoc(docRef);
+            if (snap.exists()) {
+                backupData = snap.data() as SessionState;
             }
         } else {
             const history = await listHistory();
@@ -126,7 +181,7 @@ export const restoreBackup = async (historyId?: string): Promise<SessionState | 
             throw new Error('No backup version found to restore.');
         }
 
-        const { id, archivedAt, ...cleanData } = backupData as any;
+        const { id, archivedAt, isSnapshot, ...cleanData } = backupData as any;
         await setDoc(sessionRef, {
             ...cleanData,
             lastUpdated: Date.now()

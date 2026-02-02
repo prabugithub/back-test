@@ -73,9 +73,19 @@ function App() {
                 <button
                   onClick={() => useSessionStore.getState().saveRemoteSession()}
                   className="p-1.5 text-blue-700 bg-blue-50 border border-blue-200 hover:bg-blue-100 rounded"
-                  title="Save current session to Firebase"
+                  title="Save current session to Firebase (Auto-Backup)"
                 >
                   <Save size={16} />
+                </button>
+                <button
+                  onClick={() => {
+                    const name = prompt("Enter a name for this snapshot (e.g., 'Before Big Trade'):");
+                    if (name) useSessionStore.getState().saveRemoteSnapshot(name);
+                  }}
+                  className="p-1.5 text-purple-700 bg-purple-50 border border-purple-200 hover:bg-purple-100 rounded"
+                  title="Save Permanent Snapshot"
+                >
+                  <Save size={16} className="fill-purple-700" />
                 </button>
                 <button
                   onClick={() => setIsBackupHistoryOpen(true)}

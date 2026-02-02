@@ -2,7 +2,7 @@ import { create } from 'zustand';
 import type { Candle, Trade, Position, TradeJournal } from '../types';
 import { saveTradeSession } from '../utils/tradeStorage';
 import { groupTradesIntoPositions, calculatePerformanceStats, recalculateTradesPnL } from '../utils/tradeAnalysis';
-import { saveSession, loadSession, restoreBackup, type SessionState } from '../services/firebaseSessionService';
+import { saveSession, loadSession, restoreBackup, saveSnapshot, listSnapshots, listHistory, deleteSnapshot, type SessionState } from '../services/firebaseSessionService';
 import { useNotificationStore } from './notificationStore';
 
 export interface SessionConfig {
@@ -52,6 +52,9 @@ interface SessionStore {
   resolveExitRequest: (confirm: boolean, journal?: TradeJournal) => void;
   checkSLTPHits: (index: number) => void;
   restoreRemoteBackup: (historyId?: string) => Promise<void>;
+  saveRemoteSnapshot: (name: string) => Promise<void>;
+  deleteRemoteSnapshot: (id: string) => Promise<void>;
+  getRemoteSnapshots: () => Promise<SessionState[]>;
   getRemoteHistory: () => Promise<SessionState[]>;
 
   // Computed getters
@@ -516,9 +519,62 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
   },
 
   getRemoteHistory: async () => {
-    const { listHistory } = await import('../services/firebaseSessionService');
     try {
       return await listHistory();
+    } catch (error) {
+      console.error(error);
+      return [];
+    }
+  },
+
+  saveRemoteSnapshot: async (name: string) => {
+    const { instrument, trades, position, currentIndex, sessionConfig } = get();
+
+    if (!sessionConfig) {
+      useNotificationStore.getState().notify('Cannot save snapshot: Missing configuration', 'error');
+      return;
+    }
+
+    const state: SessionState = {
+      name: name,
+      lastUpdated: Date.now(),
+      instrument,
+      interval: sessionConfig.interval,
+      fromDate: sessionConfig.fromDate,
+      toDate: sessionConfig.toDate,
+      currentIndex,
+      trades,
+      position,
+    };
+
+    set({ isLoading: true });
+    try {
+      await saveSnapshot(state, name);
+      useNotificationStore.getState().notify(`Snapshot "${name}" saved!`, 'success');
+    } catch (e: any) {
+      console.error(e);
+      useNotificationStore.getState().notify(`Failed to save snapshot: ${e.message}`, 'error');
+    } finally {
+      set({ isLoading: false });
+    }
+  },
+
+  deleteRemoteSnapshot: async (id: string) => {
+    set({ isLoading: true });
+    try {
+      await deleteSnapshot(id);
+      useNotificationStore.getState().notify('Snapshot deleted successfully', 'success');
+    } catch (e: any) {
+      console.error(e);
+      useNotificationStore.getState().notify(`Failed to delete snapshot: ${e.message}`, 'error');
+    } finally {
+      set({ isLoading: false });
+    }
+  },
+
+  getRemoteSnapshots: async () => {
+    try {
+      return await listSnapshots();
     } catch (error) {
       console.error(error);
       return [];
