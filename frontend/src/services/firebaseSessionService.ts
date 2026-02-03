@@ -20,6 +20,25 @@ const CONSTANT_SESSION_ID = "current_session";
 const HISTORY_PREFIX = "history_session_";
 const SNAPSHOT_PREFIX = "snapshot_session_";
 
+// Helper to remove undefined values which Firestore doesn't support
+const sanitizeData = (data: any): any => {
+    if (data === null || data === undefined) return null;
+    if (typeof data !== 'object') return data;
+
+    if (Array.isArray(data)) {
+        return data.map(item => sanitizeData(item));
+    }
+
+    const cleaned: any = {};
+    Object.keys(data).forEach(key => {
+        const value = data[key];
+        if (value !== undefined) {
+            cleaned[key] = sanitizeData(value);
+        }
+    });
+    return cleaned;
+};
+
 export const saveSession = async (state: SessionState) => {
     try {
         const sessionRef = doc(db, 'sessions', CONSTANT_SESSION_ID);
@@ -52,10 +71,12 @@ export const saveSession = async (state: SessionState) => {
         }
 
         // 2. Save new state to primary slot
-        await setDoc(sessionRef, {
+        const dataToSave = sanitizeData({
             ...state,
             lastUpdated: Date.now()
         });
+
+        await setDoc(sessionRef, dataToSave);
         console.log('Session saved successfully (Flat history rotation)');
     } catch (error) {
         console.error('Error saving session:', error);
@@ -71,12 +92,13 @@ export const saveSnapshot = async (state: SessionState, snapshotName: string) =>
         const id = `${SNAPSHOT_PREFIX}${Date.now()}`;
         const snapshotRef = doc(db, 'sessions', id);
 
-        await setDoc(snapshotRef, {
+        const dataToSave = sanitizeData({
             ...state,
             name: snapshotName,
             archivedAt: Date.now(),
             isSnapshot: true
         });
+        await setDoc(snapshotRef, dataToSave);
         console.log('Manual snapshot saved:', snapshotName);
     } catch (error) {
         console.error('Error saving snapshot:', error);
@@ -182,10 +204,11 @@ export const restoreBackup = async (idOrPath?: string): Promise<SessionState | n
         }
 
         const { id, archivedAt, isSnapshot, ...cleanData } = backupData as any;
-        await setDoc(sessionRef, {
+        const dataToRestore = sanitizeData({
             ...cleanData,
             lastUpdated: Date.now()
         });
+        await setDoc(sessionRef, dataToRestore);
 
         return backupData;
     } catch (error) {

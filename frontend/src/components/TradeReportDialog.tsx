@@ -121,6 +121,7 @@ export function TradeReportDialog({ isOpen, onClose }: TradeReportDialogProps) {
         csvContent += "POSITION SUMMARY\n";
         csvContent += "ID,Direction,Entry Time,Exit Time,Entry Price,Exit Price,Qty,PnL,Duration (min),SL,Target,SL Hit,TP Hit,Category,LT Market,HT Market,Pivot Pos,LLHH Pivot,Entry Sign,Align E(S),Align E(V),Align M(S),Align M(V),Notes,Screenshot (E),Screenshot (M)\n";
         positions.forEach(pos => {
+            // 1. Strict Semantic Mapping
             const entryExec = pos.executions.find(e => e.journal?.ltMarket);
             const entryJournal = entryExec?.journal;
 
@@ -128,13 +129,53 @@ export function TradeReportDialog({ isOpen, onClose }: TradeReportDialogProps) {
                 || pos.executions.find(e => e.journal?.systemMoveAlign);
             const exitJournal = exitExec?.journal;
 
+            // 2. Smart Screenshot Resolution
+            let urlE = entryJournal?.screenshotUrl || '';
+            let urlM = exitJournal?.screenshotUrl || '';
+
+            const allWithScreenshots = pos.executions.filter(e => e.journal?.screenshotUrl);
+
+            // If strict mapping missed screenshots, try heuristics
+            if (!urlE && !urlM) {
+                if (allWithScreenshots.length === 1) {
+                    const sc = allWithScreenshots[0];
+                    // Decide E or M based on direction match (Entry is Buy for Long, Sell for Short)
+                    const isEntry = (pos.direction === 'LONG' && sc.type === 'BUY') || (pos.direction === 'SHORT' && sc.type === 'SELL');
+                    if (isEntry) urlE = sc.journal!.screenshotUrl!;
+                    else urlM = sc.journal!.screenshotUrl!;
+                } else if (allWithScreenshots.length >= 2) {
+                    // Assume chronological order: First is Entry, Last is Ex/Mgmt
+                    urlE = allWithScreenshots[0].journal!.screenshotUrl!;
+                    urlM = allWithScreenshots[allWithScreenshots.length - 1].journal!.screenshotUrl!;
+                }
+            } else if (!urlE && allWithScreenshots.length > 0) {
+                // Have M (Strict) but missing E. Use first available if different.
+                const first = allWithScreenshots[0];
+                if (first.journal?.screenshotUrl && first.journal.screenshotUrl !== urlM) {
+                    urlE = first.journal.screenshotUrl;
+                }
+            } else if (!urlM && allWithScreenshots.length > 0) {
+                // Have E (Strict) but missing M. Use last available if different.
+                const last = allWithScreenshots[allWithScreenshots.length - 1];
+                if (last.journal?.screenshotUrl && last.journal.screenshotUrl !== urlE) {
+                    urlM = last.journal.screenshotUrl;
+                }
+            }
+
+
+
+
+
+
+
+
             // Collect and concatenate all unique notes from all executions in this position
             const combinedNotes = Array.from(new Set(pos.executions
                 .map(e => e.journal?.notes?.trim())
                 .filter(note => note && note.length > 0)))
                 .join(" | ");
 
-            csvContent += `${pos.id},${pos.direction},${formatTimestamp(pos.entryTime)},${pos.exitTime ? formatTimestamp(pos.exitTime) : 'OPEN'},${pos.avgEntryPrice},${pos.avgExitPrice || ''},${pos.totalQuantity},${pos.realizedPnL.toFixed(2)},${pos.durationMinutes ? pos.durationMinutes.toFixed(1) : ''},${pos.stopLoss || ''},${pos.target || ''},${pos.slHit ? 'YES' : 'NO'},${pos.tpHit ? 'YES' : 'NO'},${entryJournal?.tradeCategory || ''},${entryJournal?.ltMarket || ''},${entryJournal?.htMarket || ''},${entryJournal?.pivotPosition || ''},${entryJournal?.llhhPivot || ''},${entryJournal?.entrySign || ''},${entryJournal?.systemEntryAlign || ''},${entryJournal?.myViewEntryAlign || ''},${exitJournal?.systemMoveAlign || ''},${exitJournal?.myViewMoveAlign || ''},"${(combinedNotes || '').replace(/"/g, '""')}",${entryJournal?.screenshotUrl || ''},${exitJournal?.screenshotUrl || ''}\n`;
+            csvContent += `${pos.id},${pos.direction},${formatTimestamp(pos.entryTime)},${pos.exitTime ? formatTimestamp(pos.exitTime) : 'OPEN'},${pos.avgEntryPrice},${pos.avgExitPrice || ''},${pos.totalQuantity},${pos.realizedPnL.toFixed(2)},${pos.durationMinutes ? pos.durationMinutes.toFixed(1) : ''},${pos.stopLoss || ''},${pos.target || ''},${pos.slHit ? 'YES' : 'NO'},${pos.tpHit ? 'YES' : 'NO'},${entryJournal?.tradeCategory || ''},${entryJournal?.ltMarket || ''},${entryJournal?.htMarket || ''},${entryJournal?.pivotPosition || ''},${entryJournal?.llhhPivot || ''},${entryJournal?.entrySign || ''},${entryJournal?.systemEntryAlign || ''},${entryJournal?.myViewEntryAlign || ''},${exitJournal?.systemMoveAlign || ''},${exitJournal?.myViewMoveAlign || ''},"${(combinedNotes || '').replace(/"/g, '""')}",${urlE},${urlM}\n`;
         });
 
         csvContent += "\nRAW TRADE EXECUTIONS\n";
