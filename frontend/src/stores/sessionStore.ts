@@ -28,7 +28,7 @@ interface SessionStore {
   isPlaying: boolean;
   speed: number;
   isLoading: boolean;
-  pendingExitRequest: { type: 'SL' | 'TP', price: number, spotPrice: number } | null;
+  pendingExitRequest: { type: 'SL' | 'TP' | 'TIME_OVER', price: number, spotPrice: number } | null;
   pendingTradeRequest: { type: 'BUY' | 'SELL', quantity: number, stopLoss?: number, target?: number } | null;
 
   // Actions
@@ -39,9 +39,9 @@ interface SessionStore {
   jump: (count: number) => void;
   setSpeed: (speed: number) => void;
   setCurrentIndex: (index: number) => void;
-  executeTrade: (type: 'BUY' | 'SELL', quantity: number, stopLoss?: number, target?: number, priceOverride?: number, exitReason?: 'SL' | 'TP' | 'MANUAL', journal?: TradeJournal) => void;
+  executeTrade: (type: 'BUY' | 'SELL', quantity: number, stopLoss?: number, target?: number, priceOverride?: number, exitReason?: 'SL' | 'TP' | 'MANUAL' | 'TIME_OVER', journal?: TradeJournal) => void;
   initiateTrade: (type: 'BUY' | 'SELL', quantity: number, stopLoss?: number, target?: number) => void;
-  resolveTradeRequest: (journal: TradeJournal | null) => void;
+  resolveTradeRequest: (journal: TradeJournal | null, exitReason?: 'SL' | 'TP' | 'MANUAL' | 'TIME_OVER') => void;
   saveRemoteSession: () => Promise<void>;
   loadRemoteSession: () => Promise<{ config: SessionConfig, data: { trades: Trade[], position: Position | null, currentIndex: number } } | null>;
   restoreSessionState: (trades: Trade[], position: Position | null, currentIndex: number) => void;
@@ -225,7 +225,7 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
     });
   },
 
-  resolveTradeRequest: (journal) => {
+  resolveTradeRequest: (journal, exitReason = 'MANUAL') => {
     const { pendingTradeRequest, executeTrade } = get();
     if (!pendingTradeRequest) return;
 
@@ -236,7 +236,7 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
         pendingTradeRequest.stopLoss,
         pendingTradeRequest.target,
         undefined,
-        'MANUAL',
+        exitReason,
         journal
       );
     }

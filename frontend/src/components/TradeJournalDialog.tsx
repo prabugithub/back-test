@@ -23,6 +23,8 @@ export function TradeJournalDialog() {
         screenshotUrl: ''
     });
 
+    const [exitReason, setExitReason] = useState<'MANUAL' | 'TIME_OVER'>('MANUAL');
+
     // Reset state when a new request comes in
     useEffect(() => {
         if (pendingTradeRequest) {
@@ -40,13 +42,14 @@ export function TradeJournalDialog() {
                 tradeCategory: 'System',
                 screenshotUrl: ''
             });
+            setExitReason('MANUAL');
         }
     }, [pendingTradeRequest]);
 
     if (!pendingTradeRequest) return null;
 
     const handleConfirm = () => {
-        resolveTradeRequest(journal);
+        resolveTradeRequest(journal, isPositionOpen ? exitReason : 'MANUAL');
     };
 
     const handleCancel = () => {
@@ -213,6 +216,18 @@ export function TradeJournalDialog() {
                     ) : (
                         /* EXIT FIELDS */
                         <div className="space-y-4">
+                            <div>
+                                <label className="block text-[10px] font-bold text-gray-400 uppercase tracking-wider mb-1">Exit Reason</label>
+                                <select
+                                    value={exitReason}
+                                    onChange={(e) => setExitReason(e.target.value as any)}
+                                    className="w-full bg-white border border-gray-200 rounded-lg px-3 py-1.5 text-xs focus:ring-2 focus:ring-blue-500 outline-none"
+                                >
+                                    <option value="MANUAL">Manual Decision</option>
+                                    <option value="TIME_OVER">Time Over</option>
+                                </select>
+                            </div>
+
                             <div className="bg-orange-50 p-3 rounded-lg border border-orange-100">
                                 <h3 className="text-[11px] font-bold text-orange-800 uppercase tracking-widest mb-3 flex items-center gap-2">
                                     <Check size={14} />

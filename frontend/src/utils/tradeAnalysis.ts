@@ -17,7 +17,7 @@ export interface GroupedPosition {
     durationMinutes?: number;
     stopLoss?: number;
     target?: number;
-    exitReason?: 'SL' | 'TP' | 'MANUAL';
+    exitReason?: 'SL' | 'TP' | 'MANUAL' | 'TIME_OVER';
     slHit?: boolean;
     tpHit?: boolean;
 }

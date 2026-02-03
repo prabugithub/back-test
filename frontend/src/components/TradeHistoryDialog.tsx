@@ -44,7 +44,7 @@ export function TradeHistoryDialog({ isOpen, onClose }: TradeHistoryDialogProps)
         csvContent += `Profit Factor,${stats.profitFactor.toFixed(2)}\n\n`;
 
         csvContent += "POSITION SUMMARY\n";
-        csvContent += "ID,Direction,Entry Date/Time,Exit Date/Time,Entry Price,Exit Price,Qty,PnL,Duration (min),SL,Target,SL Hit,TP Hit,Category,LT Market,HT Market,Pivot Pos,LLHH Pivot,Entry Sign,Align E(S),Align E(V),Align M(S),Align M(V),Notes,Screenshot (E),Screenshot (M)\n";
+        csvContent += "ID,Direction,Entry Date/Time,Exit Date/Time,Entry Price,Exit Price,Qty,PnL,Duration (min),SL,Target,SL Hit,TP Hit,Exit Reason,Category,LT Market,HT Market,Pivot Pos,LLHH Pivot,Entry Sign,Align E(S),Align E(V),Align M(S),Align M(V),Notes,Screenshot (E),Screenshot (M)\n";
         positions.forEach(pos => {
             const entryExec = pos.executions.find(e => e.journal?.ltMarket);
             const entryJournal = entryExec?.journal;
@@ -59,13 +59,13 @@ export function TradeHistoryDialog({ isOpen, onClose }: TradeHistoryDialogProps)
                 .filter(note => note && note.length > 0)))
                 .join(" | ");
 
-            csvContent += `${pos.id},${pos.direction},${formatTimestamp(pos.entryTime)},${pos.exitTime ? formatTimestamp(pos.exitTime) : 'OPEN'},${pos.avgEntryPrice},${pos.avgExitPrice || ''},${pos.totalQuantity},${pos.realizedPnL.toFixed(2)},${pos.durationMinutes ? pos.durationMinutes.toFixed(1) : ''},${pos.stopLoss || ''},${pos.target || ''},${pos.slHit ? 'YES' : 'NO'},${pos.tpHit ? 'YES' : 'NO'},${entryJournal?.tradeCategory || ''},${entryJournal?.ltMarket || ''},${entryJournal?.htMarket || ''},${entryJournal?.pivotPosition || ''},${entryJournal?.llhhPivot || ''},${entryJournal?.entrySign || ''},${entryJournal?.systemEntryAlign || ''},${entryJournal?.myViewEntryAlign || ''},${exitJournal?.systemMoveAlign || ''},${exitJournal?.myViewMoveAlign || ''},"${(combinedNotes || '').replace(/"/g, '""')}",${entryJournal?.screenshotUrl || ''},${exitJournal?.screenshotUrl || ''}\n`;
+            csvContent += `${pos.id},${pos.direction},${formatTimestamp(pos.entryTime)},${pos.exitTime ? formatTimestamp(pos.exitTime) : 'OPEN'},${pos.avgEntryPrice},${pos.avgExitPrice || ''},${pos.totalQuantity},${pos.realizedPnL.toFixed(2)},${pos.durationMinutes ? pos.durationMinutes.toFixed(1) : ''},${pos.stopLoss || ''},${pos.target || ''},${pos.slHit ? 'YES' : 'NO'},${pos.tpHit ? 'YES' : 'NO'},${pos.exitReason || ''},${entryJournal?.tradeCategory || ''},${entryJournal?.ltMarket || ''},${entryJournal?.htMarket || ''},${entryJournal?.pivotPosition || ''},${entryJournal?.llhhPivot || ''},${entryJournal?.entrySign || ''},${entryJournal?.systemEntryAlign || ''},${entryJournal?.myViewEntryAlign || ''},${exitJournal?.systemMoveAlign || ''},${exitJournal?.myViewMoveAlign || ''},"${(combinedNotes || '').replace(/"/g, '""')}",${entryJournal?.screenshotUrl || ''},${exitJournal?.screenshotUrl || ''}\n`;
         });
 
         csvContent += "\nRAW TRADE EXECUTIONS\n";
-        csvContent += "Timestamp,Type,Price,Quantity,Instrument,P&L,SL,Target,Min SL Hit,Min Target Hit,Category,LT Market,HT Market,Pivot Position,LLHH Pivot,Entry Sign,Align-Entry(Sys),Align-Entry(View),Align-Move(Sys),Align-Move(View),Notes,Screenshot\n";
+        csvContent += "Timestamp,Type,Price,Quantity,Instrument,P&L,SL,Target,Min SL Hit,Min Target Hit,Exit Reason,Category,LT Market,HT Market,Pivot Position,LLHH Pivot,Entry Sign,Align-Entry(Sys),Align-Entry(View),Align-Move(Sys),Align-Move(View),Notes,Screenshot\n";
         trades.forEach(trade => {
-            csvContent += `${new Date(trade.timestamp * 1000).toISOString()},${trade.type},${trade.price},${trade.quantity},${trade.instrument},${(trade.pnl || 0).toFixed(2)},${trade.stopLoss || ''},${trade.target || ''},${trade.slHit ? 'YES' : 'NO'},${trade.tpHit ? 'YES' : 'NO'},${trade.journal?.tradeCategory || ''},${trade.journal?.ltMarket || ''},${trade.journal?.htMarket || ''},${trade.journal?.pivotPosition || ''},${trade.journal?.llhhPivot || ''},${trade.journal?.entrySign || ''},${trade.journal?.systemEntryAlign || ''},${trade.journal?.myViewEntryAlign || ''},${trade.journal?.systemMoveAlign || ''},${trade.journal?.myViewMoveAlign || ''},"${(trade.journal?.notes || '').replace(/"/g, '""')}",${trade.journal?.screenshotUrl || ''}\n`;
+            csvContent += `${new Date(trade.timestamp * 1000).toISOString()},${trade.type},${trade.price},${trade.quantity},${trade.instrument},${(trade.pnl || 0).toFixed(2)},${trade.stopLoss || ''},${trade.target || ''},${trade.slHit ? 'YES' : 'NO'},${trade.tpHit ? 'YES' : 'NO'},${trade.exitReason || ''},${trade.journal?.tradeCategory || ''},${trade.journal?.ltMarket || ''},${trade.journal?.htMarket || ''},${trade.journal?.pivotPosition || ''},${trade.journal?.llhhPivot || ''},${trade.journal?.entrySign || ''},${trade.journal?.systemEntryAlign || ''},${trade.journal?.myViewEntryAlign || ''},${trade.journal?.systemMoveAlign || ''},${trade.journal?.myViewMoveAlign || ''},"${(trade.journal?.notes || '').replace(/"/g, '""')}",${trade.journal?.screenshotUrl || ''}\n`;
         });
 
         const blob = new Blob([csvContent], { type: 'text/csv' });
@@ -356,8 +356,11 @@ export function TradeHistoryDialog({ isOpen, onClose }: TradeHistoryDialogProps)
                                                             {pos.direction}
                                                         </span>
                                                         {pos.exitReason && pos.exitReason !== 'MANUAL' && (
-                                                            <span className={`ml-1 px-1 py-0.5 rounded text-[8px] font-bold ${pos.exitReason === 'TP' ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-700'}`}>
-                                                                {pos.exitReason} HIT
+                                                            <span className={`ml-1 px-1 py-0.5 rounded text-[8px] font-bold ${pos.exitReason === 'TP' ? 'bg-green-100 text-green-700' :
+                                                                pos.exitReason === 'TIME_OVER' ? 'bg-orange-100 text-orange-700' :
+                                                                    'bg-red-100 text-red-700'
+                                                                }`}>
+                                                                {pos.exitReason === 'TIME_OVER' ? 'TIME OVER' : `${pos.exitReason} HIT`}
                                                             </span>
                                                         )}
                                                     </td>
@@ -442,9 +445,11 @@ export function TradeHistoryDialog({ isOpen, onClose }: TradeHistoryDialogProps)
                                                                                 <td className="px-3 py-2 text-right font-mono text-[10px]">{exec.quantity}</td>
                                                                                 <td className="px-3 py-2 text-right">
                                                                                     {exec.exitReason && exec.exitReason !== 'MANUAL' && (
-                                                                                        <span className={`px-1.5 py-0.5 rounded text-[9px] font-bold ${exec.exitReason === 'TP' ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-700'
+                                                                                        <span className={`px-1.5 py-0.5 rounded text-[9px] font-bold ${exec.exitReason === 'TP' ? 'bg-green-100 text-green-700' :
+                                                                                                exec.exitReason === 'TIME_OVER' ? 'bg-orange-100 text-orange-700' :
+                                                                                                    'bg-red-100 text-red-700'
                                                                                             }`}>
-                                                                                            {exec.exitReason}
+                                                                                            {exec.exitReason === 'TIME_OVER' ? 'TIME OVER' : exec.exitReason}
                                                                                         </span>
                                                                                     )}
                                                                                 </td>
