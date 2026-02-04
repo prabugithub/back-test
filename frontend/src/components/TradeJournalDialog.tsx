@@ -101,10 +101,13 @@ export function TradeJournalDialog() {
                                     onChange={handleChange}
                                     className="w-full bg-white border border-gray-200 rounded-lg px-3 py-1.5 text-xs focus:ring-2 focus:ring-blue-500 outline-none"
                                 >
-                                    <option value="Trend">Trend</option>
-                                    <option value="Trending-Impulse">Trending-Impulse</option>
+                                    <option value="Bull-Trend">Bull Trend</option>
                                     <option value="Range">Range</option>
-                                    <option value="Reversal">Reversal</option>
+                                    <option value="Bear-Trend">Bear Trend</option>
+                                    <option value="Bear-Reversal">Bear Reversal</option>
+                                    <option value="Bull-Reversal">Bull Reversal</option>
+                                    <option value="Bear-Trending-range">Bear Trending range</option>
+                                    <option value="Bull-Trending-range">Bull Trending range</option>
                                 </select>
                             </div>
 
@@ -116,10 +119,13 @@ export function TradeJournalDialog() {
                                     onChange={handleChange}
                                     className="w-full bg-white border border-gray-200 rounded-lg px-3 py-1.5 text-xs focus:ring-2 focus:ring-blue-500 outline-none"
                                 >
-                                    <option value="Trend">Trend</option>
-                                    <option value="Trending-Impulse">Trending-Impulse</option>
+                                    <option value="Bull-Trend">Bull Trend</option>
                                     <option value="Range">Range</option>
-                                    <option value="Reversal">Reversal</option>
+                                    <option value="Bear-Trend">Bear Trend</option>
+                                    <option value="Bear-Reversal">Bear Reversal</option>
+                                    <option value="Bull-Reversal">Bull Reversal</option>
+                                    <option value="Bear-Trending-range">Bear Trending range</option>
+                                    <option value="Bull-Trending-range">Bull Trending range</option>
                                 </select>
                             </div>
 
