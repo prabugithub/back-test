@@ -145,19 +145,21 @@ export function calculatePivotPoints(candles: Candle[]): PivotPoint[] {
       current.close > prev.high &&
       current.close > current.open;
 
+    // low condition check
+    const low_condition_bull = prev.low < prev2.low || prev2.close < prev3.low || current.low < prev.low;
     // Condition 1 OR: Three-candle bullish reversal pattern
     const condition1_bull_or =
       current.close > current.open &&           // Current is bullish
       prev.close > prev.open &&                 // Previous is bullish
       prev.close < current.close &&             // Current closes higher than previous
       prev2.close < prev2.open &&               // Two back is bearish
-      (prev.low < prev2.low || prev2.close < prev3.low) &&                // Two back closes below three back's low
+      low_condition_bull &&                // Two back closes below three back's low
       !isPreviousBullPivot;
 
     // Condition 3: Two back is bearish and breaks below three back's low
     const condition3_bull =
       prev2.close < prev2.open &&
-      (prev.low < prev2.low || prev2.close < prev3.low);
+      low_condition_bull;
 
     // Combined bullish signal
     const bullishPivot = (condition1_bull_or || condition1_bull) && condition3_bull;
@@ -197,19 +199,21 @@ export function calculatePivotPoints(candles: Candle[]): PivotPoint[] {
       current.close < prev.low &&
       current.close < current.open;
 
+    // high condition check
+    const high_condition_bear = prev.high > prev2.high || prev2.close > prev3.high || current.high > prev.high;
     // Condition 1 OR: Three-candle bearish reversal pattern
     const condition1_bear_or =
       current.close < current.open &&           // Current is bearish
       prev.close < prev.open &&                 // Previous is bearish
       prev.close > current.close &&             // Current closes lower than previous
       prev2.close > prev2.open &&               // Two back is bullish
-      (prev.high > prev2.high || prev2.close > prev3.high) &&               // Two back closes above three back's high
+      high_condition_bear &&               // Two back closes above three back's high
       !isPreviousBearPivot;
 
     // Condition 3: Two back is bullish and breaks above three back's high
     const condition3_bear =
       prev2.close > prev2.open &&
-      (prev.high > prev2.high || prev2.close > prev3.high);
+      high_condition_bear;
 
     // Combined bearish signal
     const bearishPivot = condition1_bear_or || (condition1_bear && condition3_bear);

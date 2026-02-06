@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { useSessionStore } from '../stores/sessionStore';
 import { Target, ShieldAlert, X, Check, Link as LinkIcon } from 'lucide-react';
 import { formatCurrency } from '../utils/formatters';
@@ -14,6 +14,17 @@ export function TradeExitDialog() {
         notes: '',
         screenshotUrl: ''
     });
+
+    useEffect(() => {
+        if (pendingRequest) {
+            setJournalData({
+                systemMoveAlign: 'Yes',
+                myViewMoveAlign: 'Yes',
+                notes: '',
+                screenshotUrl: ''
+            });
+        }
+    }, [pendingRequest]);
 
     if (!pendingRequest) return null;
 
