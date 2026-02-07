@@ -73,11 +73,6 @@ export function TimeframeSwitcher() {
                     // Find the closest candle index based on the saved timestamp BEFORE loading
                     let newIndex = 0;
                     if (currentTimestamp) {
-                        console.log('[TimeframeSwitcher] Current timestamp:', currentTimestamp, 'Date:', new Date(currentTimestamp * 1000).toISOString());
-                        console.log('[TimeframeSwitcher] Resampled candles count:', resampledCandles.length);
-                        console.log('[TimeframeSwitcher] First candle:', resampledCandles[0]?.timestamp, new Date(resampledCandles[0]?.timestamp * 1000).toISOString());
-                        console.log('[TimeframeSwitcher] Last candle:', resampledCandles[resampledCandles.length - 1]?.timestamp, new Date(resampledCandles[resampledCandles.length - 1]?.timestamp * 1000).toISOString());
-
                         // Special case: if current timestamp is before the first candle (e.g., daily at 00:00 but 5m starts at 09:15)
                         // Find the first candle on the same day instead of going to index 0
                         if (currentTimestamp < resampledCandles[0].timestamp) {

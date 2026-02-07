@@ -231,7 +231,6 @@ export function AdvancedChart() {
 
           // Format: "Mon, 15 Jan 2024, 09:30"
           const formatted = `${dayName}, ${day} ${month} ${year}, ${hours}:${minutes}`;
-          console.log('[TimeFormatter] Input:', time, 'Output:', formatted);
           return formatted;
         },
       },

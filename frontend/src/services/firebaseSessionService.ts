@@ -77,7 +77,6 @@ export const saveSession = async (state: SessionState) => {
         });
 
         await setDoc(sessionRef, dataToSave);
-        console.log('Session saved successfully (Flat history rotation)');
     } catch (error) {
         console.error('Error saving session:', error);
         throw error;
