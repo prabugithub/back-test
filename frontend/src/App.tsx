@@ -13,6 +13,7 @@ import { TradeExitDialog } from './components/TradeExitDialog';
 import { TradeJournalDialog } from './components/TradeJournalDialog';
 import { BackupHistoryDialog } from './components/BackupHistoryDialog';
 import { PromptDialog } from './components/PromptDialog';
+import { TimeframeSwitcher } from './components/TimeframeSwitcher';
 import { Save, FilePlus, RotateCcw } from 'lucide-react';
 
 const queryClient = new QueryClient();
@@ -84,6 +85,7 @@ function App() {
                 <div className="flex-1 min-w-0">
                   <PlaybackControls onOpenHistory={() => setIsTradeHistoryOpen(true)} />
                 </div>
+                <TimeframeSwitcher />
                 {/* Compact Stats or Buttons could go here */}
                 <button
                   onClick={() => useSessionStore.getState().saveRemoteSession()}

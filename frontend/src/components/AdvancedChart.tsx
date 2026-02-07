@@ -215,8 +215,25 @@ export function AdvancedChart() {
         fixLeftEdge: true,
         lockVisibleTimeRangeOnResize: true,
       },
+      localization: {
+        timeFormatter: (time: any) => {
+          const date = new Date(time * 1000);
+          const dayNames = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+          const monthNames = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+
+          const dayName = dayNames[date.getDay()];
+          const day = date.getDate();
+          const month = monthNames[date.getMonth()];
+          const year = date.getFullYear();
+          const hours = date.getHours().toString().padStart(2, '0');
+          const minutes = date.getMinutes().toString().padStart(2, '0');
+
+          // Format: "Mon, 15 Jan 2024, 09:30"
+          return `${dayName}, ${day} ${month} ${year}, ${hours}:${minutes}`;
+        },
+      },
       crosshair: {
-        mode: 1, // Normal crosshair
+        mode: 0, // Normal crosshair - follows mouse pointer exactly (not magnet mode)
       },
     });
 
