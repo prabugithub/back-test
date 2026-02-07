@@ -67,9 +67,9 @@ Identifies a potential upward trend reversal.
     - Previous is Bullish
     - Previous Close < Current Close
     - 2-Back is Bearish
-    - (Previous Low < 2-Back Low) OR (2-Back Close < 3-Back Low) OR (Current Low < Previous Low)
+    - (Previous Low < 2-Back Low) OR (2-Back Low < 3-Back Low) OR (Current Low < Previous Low)
 3.  **Confirmation:**
-    - 2-Back is Bearish AND ((Previous Low < 2-Back Low) OR (2-Back Close < 3-Back Low) OR (Current Low < Previous Low))
+    - 2-Back is Bearish AND ((Previous Low < 2-Back Low) OR (2-Back Low < 3-Back Low) OR (Current Low < Previous Low))
 
 **Logic:**
 - A signal is valid if `(Condition 1 OR Condition 2) AND Condition 3` is met.
@@ -91,9 +91,9 @@ Identifies a potential downward trend reversal.
     - Previous is Bearish
     - Previous Close > Current Close
     - 2-Back is Bullish
-    - (Previous High > 2-Back High) OR (2-Back Close > 3-Back High) OR (Current High > Previous High)
+    - (Previous High > 2-Back High) OR (2-Back High > 3-Back High) OR (Current High > Previous High)
 3.  **Confirmation:**
-    - 2-Back is Bullish AND ((Previous High > 2-Back High) OR (2-Back Close > 3-Back High) OR (Current High > Previous High))
+    - 2-Back is Bullish AND ((Previous High > 2-Back High) OR (2-Back High > 3-Back High) OR (Current High > Previous High))
 
 **Logic:**
 - A signal is valid if `(Condition 1 OR Condition 2) AND Condition 3` is met.

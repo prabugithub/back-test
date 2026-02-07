@@ -146,7 +146,7 @@ export function calculatePivotPoints(candles: Candle[]): PivotPoint[] {
       current.close > current.open;
 
     // low condition check
-    const low_condition_bull = prev.low < prev2.low || prev2.close < prev3.low || current.low < prev.low;
+    const low_condition_bull = prev.low < prev2.low || prev2.low < prev3.low || current.low < prev.low;
     // Condition 1 OR: Three-candle bullish reversal pattern
     const condition1_bull_or =
       current.close > current.open &&           // Current is bullish
@@ -200,7 +200,7 @@ export function calculatePivotPoints(candles: Candle[]): PivotPoint[] {
       current.close < current.open;
 
     // high condition check
-    const high_condition_bear = prev.high > prev2.high || prev2.close > prev3.high || current.high > prev.high;
+    const high_condition_bear = prev.high > prev2.high || prev2.high > prev3.high || current.high > prev.high;
     // Condition 1 OR: Three-candle bearish reversal pattern
     const condition1_bear_or =
       current.close < current.open &&           // Current is bearish
