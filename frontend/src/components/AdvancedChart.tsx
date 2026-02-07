@@ -221,15 +221,18 @@ export function AdvancedChart() {
           const dayNames = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
           const monthNames = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
 
-          const dayName = dayNames[date.getDay()];
-          const day = date.getDate();
-          const month = monthNames[date.getMonth()];
-          const year = date.getFullYear();
-          const hours = date.getHours().toString().padStart(2, '0');
-          const minutes = date.getMinutes().toString().padStart(2, '0');
+          // Use UTC methods to match the chart's time interpretation
+          const dayName = dayNames[date.getUTCDay()];
+          const day = date.getUTCDate();
+          const month = monthNames[date.getUTCMonth()];
+          const year = date.getUTCFullYear();
+          const hours = date.getUTCHours().toString().padStart(2, '0');
+          const minutes = date.getUTCMinutes().toString().padStart(2, '0');
 
           // Format: "Mon, 15 Jan 2024, 09:30"
-          return `${dayName}, ${day} ${month} ${year}, ${hours}:${minutes}`;
+          const formatted = `${dayName}, ${day} ${month} ${year}, ${hours}:${minutes}`;
+          console.log('[TimeFormatter] Input:', time, 'Output:', formatted);
+          return formatted;
         },
       },
       crosshair: {
