@@ -31,6 +31,9 @@ interface SessionStore {
   pendingExitRequest: { type: 'SL' | 'TP' | 'TIME_OVER', price: number, spotPrice: number } | null;
   pendingTradeRequest: { type: 'BUY' | 'SELL', quantity: number, stopLoss?: number, target?: number } | null;
 
+  // UI settings
+  showMarkers: boolean;
+
   // Actions
   loadCandles: (candles: Candle[], instrument: string, config?: SessionConfig) => void;
   play: () => void;
@@ -56,6 +59,7 @@ interface SessionStore {
   deleteRemoteSnapshot: (id: string) => Promise<void>;
   getRemoteSnapshots: () => Promise<SessionState[]>;
   getRemoteHistory: () => Promise<SessionState[]>;
+  toggleMarkers: () => void;
 
   // Computed getters
   getCurrentCandle: () => Candle | null;
@@ -81,6 +85,7 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
   isLoading: false,
   pendingExitRequest: null,
   pendingTradeRequest: null,
+  showMarkers: true,
 
   // Actions
   loadCandles: (candles, instrument, config) => {
@@ -622,4 +627,6 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
     const { position } = get();
     return position?.realizedPnL || 0;
   },
+
+  toggleMarkers: () => set((state) => ({ showMarkers: !state.showMarkers })),
 }));

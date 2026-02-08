@@ -41,6 +41,7 @@ export function AdvancedChart() {
   const trades = useSessionStore((s) => s.trades);
   const saveCurrentSession = useSessionStore((s) => s.saveCurrentSession);
   const saveRemoteSession = useSessionStore((s) => s.saveRemoteSession);
+  const showMarkers = useSessionStore((s) => s.showMarkers);
 
   const visibleCandles = useMemo(() =>
     candles.slice(0, currentIndex + 1),
@@ -65,7 +66,7 @@ export function AdvancedChart() {
   // Callback to render pivot risk-reward lines
   const handleCustomRender = useCallback((ctx: CanvasRenderingContext2D) => {
     if (!chart || !series || visibleCandles.length === 0) return;
-    if (!activeIndicators.includes('pivotPoints')) return;
+    if (!activeIndicators.includes('pivotPoints') || !showMarkers) return;
 
     // Calculate pivots
     const allPivots = calculatePivotPoints(visibleCandles);
@@ -157,7 +158,7 @@ export function AdvancedChart() {
 
     // Reset context
     ctx.textAlign = 'start';
-  }, [chart, series, visibleCandles, activeIndicators]);
+  }, [chart, series, visibleCandles, activeIndicators, showMarkers]);
 
   const {
     clearDrawings,
@@ -380,53 +381,56 @@ export function AdvancedChart() {
     const allMarkers: any[] = [];
 
     // 1. Add Trade Markers
-    trades.forEach((trade) => {
-      if (trade.timestamp <= visibleCandles[visibleCandles.length - 1].timestamp) {
-        const isMs = trade.timestamp > 1e11;
-        const date = new Date(isMs ? trade.timestamp : trade.timestamp * 1000);
+    if (showMarkers) {
+      trades.forEach((trade) => {
+        if (trade.timestamp <= visibleCandles[visibleCandles.length - 1].timestamp) {
+          const isMs = trade.timestamp > 1e11;
+          const date = new Date(isMs ? trade.timestamp : trade.timestamp * 1000);
 
-        // Use UTC methods to ensure the label matches the chart's time scale (which usually interprets unix as UTC)
-        const hours = date.getUTCHours();
-        const minutes = date.getUTCMinutes();
-        const seconds = date.getUTCSeconds();
+          // Use UTC methods to ensure the label matches the chart's time scale (which usually interprets unix as UTC)
+          const hours = date.getUTCHours();
+          const minutes = date.getUTCMinutes();
+          const seconds = date.getUTCSeconds();
 
-        // Format as HH:mm if it has time, or dd MMM if it's a daily candle (midnight)
-        const timeStr = hours === 0 && minutes === 0 && seconds === 0
-          ? `${date.getUTCDate()} ${date.toLocaleString('default', { month: 'short', timeZone: 'UTC' })}`
-          : `${hours.toString().padStart(2, '0')}:${minutes.toString().padStart(2, '0')}`;
+          // Format as HH:mm if it has time, or dd MMM if it's a daily candle (midnight)
+          const timeStr = hours === 0 && minutes === 0 && seconds === 0
+            ? `${date.getUTCDate()} ${date.toLocaleString('default', { month: 'short', timeZone: 'UTC' })}`
+            : `${hours.toString().padStart(2, '0')}:${minutes.toString().padStart(2, '0')}`;
 
-        allMarkers.push({
-          time: trade.timestamp as any,
-          position: trade.type === 'BUY' ? 'belowBar' : 'aboveBar',
-          color: trade.type === 'BUY' ? '#26a69a' : '#ef5350',
-          shape: trade.type === 'BUY' ? 'arrowUp' : 'arrowDown',
-          text: `${trade.type === 'BUY' ? 'B' : 'S'}@${trade.price.toFixed(2)} [${timeStr}]`,
-          size: 2,
+          allMarkers.push({
+            time: trade.timestamp as any,
+            position: trade.type === 'BUY' ? 'belowBar' : 'aboveBar',
+            color: trade.type === 'BUY' ? '#26a69a' : '#ef5350',
+            shape: trade.type === 'BUY' ? 'arrowUp' : 'arrowDown',
+            text: `${trade.type === 'BUY' ? 'B' : 'S'}@${trade.price.toFixed(2)} [${timeStr}]`,
+            size: 2,
+          });
+        }
+      });
+
+      // 2. Add Pivot Point Markers if active
+      if (activeIndicators.includes('pivotPoints')) {
+        const allPivots = calculatePivotPoints(visibleCandles);
+        allPivots.forEach((p, index) => {
+          const isLast = index === allPivots.length - 1;
+          const gapTooltip = isLast ? ` SL:${p.slDistance}` : '';
+          const label = p.trendLabel || '';
+
+          allMarkers.push({
+            time: p.time as any,
+            position: p.type === 'bullish' ? 'belowBar' : 'aboveBar',
+            color: p.type === 'bullish' ? '#26a69a' : '#ef5350',
+            shape: p.type === 'bullish' ? 'arrowUp' : 'arrowDown',
+            text: `${label}${gapTooltip}`,
+            size: 1,
+          });
         });
       }
-    });
-
-    // 2. Add Pivot Point Markers if active
-    if (activeIndicators.includes('pivotPoints')) {
-      const allPivots = calculatePivotPoints(visibleCandles);
-      allPivots.forEach((p, index) => {
-        const isLast = index === allPivots.length - 1;
-        const gap = isLast ? p.slDistance.toString() : '';
-
-        allMarkers.push({
-          time: p.time as any,
-          position: p.type === 'bullish' ? 'belowBar' : 'aboveBar',
-          color: p.type === 'bullish' ? '#26a69a' : '#ef5350',
-          shape: p.type === 'bullish' ? 'arrowUp' : 'arrowDown',
-          text: gap,
-          size: 1,
-        });
-      });
     }
 
     allMarkers.sort((a, b) => (a.time as number) - (b.time as number));
     markersPrimitiveRef.current.setMarkers(allMarkers);
-  }, [activeIndicators, visibleCandles, trades]);
+  }, [activeIndicators, visibleCandles, trades, showMarkers]);
 
   const handleIndicatorToggle = (indicator: Indicator) => {
     setActiveIndicators((prev) =>

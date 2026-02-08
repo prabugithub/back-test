@@ -11,8 +11,11 @@ import {
   Pen,
   Camera,
   Type,
-  MessageSquare
+  MessageSquare,
+  Eye,
+  EyeOff
 } from 'lucide-react';
+import { useSessionStore } from '../stores/sessionStore';
 
 export type DrawingTool = 'none' | 'select' | 'trendline' | 'horizontal' | 'rectangle' | 'fibonacci' | 'riskReward' | 'freehand' | 'text' | 'callout';
 export type Indicator = 'none' | 'sma21' | 'sma60' | 'ema21' | 'ema60' | 'pivotPoints';
@@ -41,6 +44,8 @@ export function ChartToolbar({
   hasSelection,
 }: ChartToolbarProps) {
   const [showIndicators, setShowIndicators] = useState(false);
+  const showMarkers = useSessionStore((s) => s.showMarkers);
+  const toggleMarkers = useSessionStore((s) => s.toggleMarkers);
 
   const tools: Array<{ id: DrawingTool; icon: any; label: string; shortcut: string }> = [
     { id: 'select', icon: MousePointer, label: 'Select', shortcut: 'V or 1' },
@@ -112,6 +117,18 @@ export function ChartToolbar({
           title={isUploadingScreenshot ? 'Uploading...' : 'Take Chart Screenshot'}
         >
           <Camera size={18} />
+        </button>
+      </div>
+
+      {/* Visibility Toggle */}
+      <div className="flex items-center gap-1 border-r pr-3">
+        <button
+          onClick={toggleMarkers}
+          className={`p-2 rounded hover:bg-gray-100 transition-colors ${showMarkers ? 'text-blue-600 bg-blue-50' : 'text-gray-400'
+            }`}
+          title={showMarkers ? 'Hide Trading Activity Markers' : 'Show Trading Activity Markers'}
+        >
+          {showMarkers ? <Eye size={18} /> : <EyeOff size={18} />}
         </button>
       </div>
 
