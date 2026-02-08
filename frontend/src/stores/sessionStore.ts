@@ -181,12 +181,12 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
         hitType === 'TP' ? 'success' : 'warning'
       );
 
-      // Update position with hit flags
       set({
         position: {
           ...position,
           slHit: hitType === 'SL' ? true : (position.slHit || false),
           tpHit: hitType === 'TP' ? true : (position.tpHit || false),
+          hitFirst: position.hitFirst || hitType,
         }
       });
     }
@@ -276,6 +276,7 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
       exitReason: finalExitReason,
       slHit: position?.slHit,
       tpHit: position?.tpHit,
+      hitFirst: position?.hitFirst,
       journal: journal || undefined,
     };
 
@@ -324,6 +325,7 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
       target: target || position?.target,
       slHit: position?.slHit,
       tpHit: position?.tpHit,
+      hitFirst: position?.hitFirst,
     };
 
     set({

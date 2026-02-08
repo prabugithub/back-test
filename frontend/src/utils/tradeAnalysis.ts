@@ -20,6 +20,7 @@ export interface GroupedPosition {
     exitReason?: 'SL' | 'TP' | 'MANUAL' | 'TIME_OVER';
     slHit?: boolean;
     tpHit?: boolean;
+    hitFirst?: 'SL' | 'TP';
 }
 
 export interface TradePerformanceSummary {
@@ -67,6 +68,7 @@ export function groupTradesIntoPositions(trades: Trade[]): GroupedPosition[] {
                 stopLoss: trade.stopLoss,
                 slHit: trade.slHit,
                 tpHit: trade.tpHit,
+                hitFirst: trade.hitFirst,
                 executions: [trade],
             };
             // Note: We don't push to 'positions' yet, we keep it in 'currentPos' until closed or loop ends?
@@ -94,6 +96,7 @@ export function groupTradesIntoPositions(trades: Trade[]): GroupedPosition[] {
                 // Aggregrate hits
                 if (trade.slHit) currentPos.slHit = true;
                 if (trade.tpHit) currentPos.tpHit = true;
+                if (trade.hitFirst) currentPos.hitFirst = trade.hitFirst;
 
                 runningQty += tradeQtySigned;
             }
@@ -147,6 +150,7 @@ export function groupTradesIntoPositions(trades: Trade[]): GroupedPosition[] {
                     currentPos.exitReason = trade.exitReason;
                     if (trade.slHit) currentPos.slHit = true;
                     if (trade.tpHit) currentPos.tpHit = true;
+                    if (trade.hitFirst) currentPos.hitFirst = trade.hitFirst;
 
                     positions.push(currentPos);
 
@@ -179,6 +183,7 @@ export function groupTradesIntoPositions(trades: Trade[]): GroupedPosition[] {
                         currentPos.exitReason = trade.exitReason;
                         if (trade.slHit) currentPos.slHit = true;
                         if (trade.tpHit) currentPos.tpHit = true;
+                        if (trade.hitFirst) currentPos.hitFirst = trade.hitFirst;
                         positions.push(currentPos);
                         currentPos = null;
                     }

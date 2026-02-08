@@ -37,6 +37,7 @@ export interface Trade {
   exitReason?: 'SL' | 'TP' | 'MANUAL' | 'TIME_OVER';
   slHit?: boolean;
   tpHit?: boolean;
+  hitFirst?: 'SL' | 'TP';
   journal?: TradeJournal;
 }
 
@@ -51,6 +52,7 @@ export interface Position {
   target?: number;
   slHit?: boolean;
   tpHit?: boolean;
+  hitFirst?: 'SL' | 'TP';
 }
 
 // API request/response types
