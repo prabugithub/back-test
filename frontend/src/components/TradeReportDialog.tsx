@@ -417,13 +417,13 @@ export function TradeReportDialog({ isOpen, onClose }: TradeReportDialogProps) {
                                     )}
                                 </div>
 
-                                <div className="flex-1 overflow-auto p-6 space-y-8">
+                                <div className="flex-1 flex flex-col overflow-hidden p-6 space-y-6">
                                     {/* Positions Table */}
-                                    <div>
+                                    <div className="flex-1 flex flex-col min-h-0">
                                         <h4 className="font-semibold text-gray-700 mb-3">Positions Summary</h4>
-                                        <div className="overflow-x-auto bg-white rounded-lg border shadow-sm">
+                                        <div className="flex-1 overflow-auto bg-white rounded-lg border shadow-sm">
                                             <table className="w-full text-sm text-left border-collapse" style={{ minWidth: '1000px' }}>
-                                                <thead className="bg-gray-50 text-gray-600 font-semibold border-b">
+                                                <thead className="bg-gray-50 text-gray-600 font-semibold border-b sticky top-0 z-10">
                                                     <tr>
                                                         <th className="px-4 py-3">Status</th>
                                                         <th className="px-4 py-3">Direction</th>
@@ -518,11 +518,11 @@ export function TradeReportDialog({ isOpen, onClose }: TradeReportDialogProps) {
                                     </div>
 
                                     {/* Trades Table */}
-                                    <div>
+                                    <div className="flex-1 flex flex-col min-h-0">
                                         <h4 className="font-semibold text-gray-700 mb-3">Raw Executions</h4>
-                                        <div className="overflow-x-auto border rounded-lg shadow-sm bg-white">
+                                        <div className="flex-1 overflow-auto border rounded-lg shadow-sm bg-white">
                                             <table className="w-full text-sm border-collapse" style={{ minWidth: '900px' }}>
-                                                <thead className="bg-gray-100 sticky top-0">
+                                                <thead className="bg-gray-100 sticky top-0 z-10">
                                                     <tr>
                                                         <th className="text-left p-3 font-semibold text-gray-700">Date/Time</th>
                                                         <th className="text-left p-3 font-semibold text-gray-700">Type</th>

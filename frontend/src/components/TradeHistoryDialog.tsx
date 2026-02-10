@@ -249,7 +249,7 @@ export function TradeHistoryDialog({ isOpen, onClose }: TradeHistoryDialogProps)
                 </div>
 
                 {/* content */}
-                <div className="flex-1 overflow-auto bg-gray-50 p-6">
+                <div className="flex-1 flex flex-col overflow-hidden bg-gray-50 p-6">
 
                     {/* Stats Summary Cards */}
                     <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-6">
@@ -302,9 +302,9 @@ export function TradeHistoryDialog({ isOpen, onClose }: TradeHistoryDialogProps)
                     </div>
 
                     {/* Positions Table */}
-                    <div className="bg-white rounded-lg shadow-sm border overflow-x-auto">
+                    <div className="bg-white rounded-lg shadow-sm border flex-1 overflow-auto">
                         <table className="w-full text-sm text-left border-collapse" style={{ minWidth: '1100px' }}>
-                            <thead className="bg-gray-50 text-gray-600 font-semibold border-b">
+                            <thead className="bg-gray-50 text-gray-600 font-semibold border-b sticky top-0 z-10">
                                 <tr>
                                     <th className="px-4 py-3 w-10"></th>
                                     <th className="px-4 py-3">Status</th>
@@ -446,8 +446,8 @@ export function TradeHistoryDialog({ isOpen, onClose }: TradeHistoryDialogProps)
                                                                                 <td className="px-3 py-2 text-right">
                                                                                     {exec.exitReason && exec.exitReason !== 'MANUAL' && (
                                                                                         <span className={`px-1.5 py-0.5 rounded text-[9px] font-bold ${exec.exitReason === 'TP' ? 'bg-green-100 text-green-700' :
-                                                                                                exec.exitReason === 'TIME_OVER' ? 'bg-orange-100 text-orange-700' :
-                                                                                                    'bg-red-100 text-red-700'
+                                                                                            exec.exitReason === 'TIME_OVER' ? 'bg-orange-100 text-orange-700' :
+                                                                                                'bg-red-100 text-red-700'
                                                                                             }`}>
                                                                                             {exec.exitReason === 'TIME_OVER' ? 'TIME OVER' : exec.exitReason}
                                                                                         </span>
