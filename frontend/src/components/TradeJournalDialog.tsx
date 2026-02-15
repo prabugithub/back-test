@@ -2,11 +2,14 @@ import { useState, useEffect } from 'react';
 import { useSessionStore } from '../stores/sessionStore';
 import { Info, X, Check, Link as LinkIcon } from 'lucide-react';
 import type { TradeJournal } from '../types';
+import { analyzePivotForTrade } from '../utils/pivotAnalysis';
 
 export function TradeJournalDialog() {
     const pendingTradeRequest = useSessionStore((s) => s.pendingTradeRequest);
     const resolveTradeRequest = useSessionStore((s) => s.resolveTradeRequest);
     const isPositionOpen = !!useSessionStore((s) => s.position);
+    const candles = useSessionStore((s) => s.candles);
+    const currentIndex = useSessionStore((s) => s.currentIndex);
 
     const [journal, setJournal] = useState<TradeJournal>({
         ltMarket: 'Trend',
@@ -28,11 +31,25 @@ export function TradeJournalDialog() {
     // Reset state when a new request comes in
     useEffect(() => {
         if (pendingTradeRequest) {
+            // Automatically analyze pivot for entry trades
+            let autoPivotPosition = 'gap';
+            let autoLlhhPivot = 'HH-HL';
+
+            if (!isPositionOpen && candles.length > 0 && currentIndex >= 0) {
+                const pivotAnalysis = analyzePivotForTrade(candles, currentIndex, pendingTradeRequest.type);
+                if (pivotAnalysis.pivotPosition) {
+                    autoPivotPosition = pivotAnalysis.pivotPosition;
+                }
+                if (pivotAnalysis.llhhPivot) {
+                    autoLlhhPivot = pivotAnalysis.llhhPivot;
+                }
+            }
+
             setJournal({
                 ltMarket: 'Trend',
                 htMarket: 'Trend',
-                pivotPosition: 'gap',
-                llhhPivot: 'HH-HL',
+                pivotPosition: autoPivotPosition,
+                llhhPivot: autoLlhhPivot,
                 entrySign: 'H2-PullBack',
                 notes: '',
                 systemEntryAlign: 'Yes',
@@ -44,7 +61,7 @@ export function TradeJournalDialog() {
             });
             setExitReason('MANUAL');
         }
-    }, [pendingTradeRequest]);
+    }, [pendingTradeRequest, isPositionOpen, candles, currentIndex]);
 
     if (!pendingTradeRequest) return null;
 
