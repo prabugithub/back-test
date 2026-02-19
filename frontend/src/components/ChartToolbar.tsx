@@ -18,7 +18,7 @@ import {
 import { useSessionStore } from '../stores/sessionStore';
 
 export type DrawingTool = 'none' | 'select' | 'trendline' | 'horizontal' | 'rectangle' | 'fibonacci' | 'riskReward' | 'freehand' | 'text' | 'callout';
-export type Indicator = 'none' | 'sma21' | 'sma60' | 'ema21' | 'ema60' | 'pivotPoints';
+export type Indicator = 'none' | 'sma21' | 'sma60' | 'ema21' | 'ema60' | 'pivotPoints' | 'alBrooks';
 
 interface ChartToolbarProps {
   activeTool: DrawingTool;
@@ -65,6 +65,7 @@ export function ChartToolbar({
     { id: 'ema21', label: 'EMA 21', color: '#00897B' },
     { id: 'ema60', label: 'EMA 60', color: '#D81B60' },
     { id: 'pivotPoints', label: 'Pivot Points', color: '#6A1B9A' },
+    { id: 'alBrooks', label: 'Al Brooks H/L', color: '#00BCD4' },
   ];
 
   return (

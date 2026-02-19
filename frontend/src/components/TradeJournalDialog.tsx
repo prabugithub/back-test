@@ -148,12 +148,15 @@ export function TradeJournalDialog() {
 
                             <div className="grid grid-cols-2 gap-3">
                                 <div>
-                                    <label className="block text-[10px] font-bold text-gray-500 uppercase tracking-wider mb-1">PivotPosition</label>
+                                    <label className="block text-[10px] font-bold text-gray-500 uppercase tracking-wider mb-1">
+                                        PivotPosition <span className="text-green-600 text-[8px]">●AUTO</span>
+                                    </label>
                                     <select
                                         name="pivotPosition"
                                         value={journal.pivotPosition}
                                         onChange={handleChange}
-                                        className="w-full bg-white border border-gray-200 rounded-lg px-3 py-1.5 text-xs focus:ring-2 focus:ring-blue-500 outline-none"
+                                        disabled
+                                        className="w-full bg-gray-100 border border-gray-300 rounded-lg px-3 py-1.5 text-xs outline-none cursor-not-allowed opacity-75"
                                     >
                                         <option value="gap">Gap</option>
                                         <option value="on-MA">On-MA</option>
@@ -162,12 +165,15 @@ export function TradeJournalDialog() {
                                 </div>
 
                                 <div>
-                                    <label className="block text-[10px] font-bold text-gray-400 uppercase tracking-wider mb-1">LLHH-Pivot</label>
+                                    <label className="block text-[10px] font-bold text-gray-400 uppercase tracking-wider mb-1">
+                                        LLHH-Pivot <span className="text-green-600 text-[8px]">●AUTO</span>
+                                    </label>
                                     <select
                                         name="llhhPivot"
                                         value={journal.llhhPivot}
                                         onChange={handleChange}
-                                        className="w-full bg-white border border-gray-200 rounded-lg px-3 py-1.5 text-xs focus:ring-2 focus:ring-blue-500 outline-none"
+                                        disabled
+                                        className="w-full bg-gray-100 border border-gray-300 rounded-lg px-3 py-1.5 text-xs outline-none cursor-not-allowed opacity-75"
                                     >
                                         <option value="HH-HL">HH-HL</option>
                                         <option value="HH-LL">HH-LL</option>

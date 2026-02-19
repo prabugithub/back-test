@@ -93,6 +93,47 @@ export function calculateFibonacciLevels(high: number, low: number) {
   };
 }
 
+/**
+ * Calculate Average True Range (ATR)
+ * Standard Wilder's smoothing (RMA)
+ */
+export function calculateATR(candles: Candle[], period: number = 14) {
+  const result: Array<{ time: number; value: number }> = [];
+  if (!candles || candles.length < period) return result;
+
+  const trs: number[] = [];
+  for (let i = 0; i < candles.length; i++) {
+    const c = candles[i];
+    const prev = i > 0 ? candles[i - 1] : null;
+    if (!prev) {
+      trs.push(c.high - c.low);
+    } else {
+      trs.push(Math.max(
+        c.high - c.low,
+        Math.abs(c.high - prev.close),
+        Math.abs(c.low - prev.close)
+      ));
+    }
+  }
+
+  const alpha = 1 / period;
+  let atr = 0;
+
+  // Initial ATR is SMA of first TRs
+  let sum = 0;
+  for (let i = 0; i < period; i++) sum += trs[i];
+  atr = sum / period;
+
+  result.push({ time: candles[period - 1].timestamp, value: atr });
+
+  for (let i = period; i < candles.length; i++) {
+    atr = alpha * trs[i] + (1 - alpha) * atr;
+    result.push({ time: candles[i].timestamp, value: atr });
+  }
+
+  return result;
+}
+
 export interface PivotPoint {
   time: number;
   type: 'bullish' | 'bearish';
@@ -241,4 +282,205 @@ export function calculatePivotPoints(candles: Candle[]): PivotPoint[] {
 
   return result;
 }
+
+export type AlBrooksSignal = 'H1' | 'H2' | 'H3' | 'L1' | 'L2' | 'L3';
+
+export interface AlBrooksMarker {
+  time: number;
+  signal: AlBrooksSignal;
+}
+
+/**
+ * Calculate Al Brooks H1/H2/H3 – L1/L2/L3 pullback signals.
+ *
+ * Core logic:
+ *   - Bias: close > EMA21 = Bull, close < EMA21 = Bear
+ *   - Pullback starts when price fails to make a new trend extreme
+ *   - Confirmed swing LOW (bull) = low[i-1] < low[i-2] AND low[i-1] < low[i]
+ *   - Confirmed swing HIGH (bear) = high[i-1] > high[i-2] AND high[i-1] > high[i]
+ *   - A candidate break level is stored when a swing is confirmed
+ *   - A leg (H1/H2/H3 or L1/L2/L3) fires when price actually breaks that level
+ *   - A new trend extreme resets the leg counter
+ */
+export function calculateAlBrooks(
+  candles: Candle[],
+  usePullbackDepth: boolean = false,
+  atrDepthMultiplier: number = 1.0
+): AlBrooksMarker[] {
+  const result: AlBrooksMarker[] = [];
+
+  if (!candles || candles.length < 22) return result;
+
+  // ── ATR Calculation (14-period) ──────────────────────────
+  const atrValues = usePullbackDepth ? calculateATR(candles, 14) : [];
+  const getAtrAt = (timestamp: number) => {
+    const found = atrValues.find(a => a.time === timestamp);
+    return found ? found.value : 0;
+  };
+
+  // ── EMA 21 ───────────────────────────────────────────────
+  const ema21Period = 21;
+  const ema21Mult = 2 / (ema21Period + 1);
+  let ema21 = 0;
+  {
+    let seed = 0;
+    for (let i = 0; i < ema21Period; i++) seed += candles[i].close;
+    ema21 = seed / ema21Period;
+  }
+
+  // ── State ─────────────────────────────────────────────────
+  let highestHigh = NaN;
+  let lowestLow = NaN;
+  let legCount = 0;
+  let inPullback = false;
+
+  let candidateBullBreak = NaN; // high[i-1] of confirmed swing-low bar
+  let candidateBearBreak = NaN; // low[i-1] of confirmed swing-high bar
+
+  // ── Main loop (start at ema21Period so we have a valid EMA) ──
+  for (let i = ema21Period; i < candles.length; i++) {
+    const c = candles[i];
+    const c1 = candles[i - 1]; // bar[-1]
+    const c2 = candles[i - 2]; // bar[-2]
+
+    // Update EMA21
+    ema21 = (c.close - ema21) * ema21Mult + ema21;
+
+    const bullBias = c.close > ema21;
+    const bearBias = c.close < ema21;
+
+    // Swing confirmation at bar[i] (pivot was at bar[i-1])
+    const confirmSwingLo = c1.low < c2.low && c1.low < c.low;
+    const confirmSwingHi = c1.high > c2.high && c1.high > c.high;
+
+    // ── Candidate bull break check ───────────────────────────
+    if (!isNaN(candidateBullBreak) && inPullback) {
+      if (c.high > candidateBullBreak) {
+        legCount++;
+        if (legCount === 1) result.push({ time: c.timestamp, signal: 'H1' });
+        else if (legCount === 2) result.push({ time: c.timestamp, signal: 'H2' });
+        else if (legCount === 3) {
+          result.push({ time: c.timestamp, signal: 'H3' });
+          legCount = 0;
+          inPullback = false;
+        }
+        candidateBullBreak = NaN;
+      }
+    }
+
+    // ── Candidate bear break check ───────────────────────────
+    if (!isNaN(candidateBearBreak) && inPullback) {
+      if (c.low < candidateBearBreak) {
+        legCount++;
+        if (legCount === 1) result.push({ time: c.timestamp, signal: 'L1' });
+        else if (legCount === 2) result.push({ time: c.timestamp, signal: 'L2' });
+        else if (legCount === 3) {
+          result.push({ time: c.timestamp, signal: 'L3' });
+          legCount = 0;
+          inPullback = false;
+        }
+        candidateBearBreak = NaN;
+      }
+    }
+
+    // ════════════════════════════════════════
+    // BULL BIAS
+    // ════════════════════════════════════════
+    if (bullBias) {
+      const newHigh = isNaN(highestHigh) || c.high > highestHigh;
+
+      if (newHigh) {
+        highestHigh = c.high;
+        if (inPullback) {
+          // Trend resumed → reset
+          legCount = 0;
+          inPullback = false;
+          candidateBullBreak = NaN;
+        }
+      } else {
+        // Pullback starts when price stops making new highs
+        if (!inPullback && c.high < highestHigh) {
+          inPullback = true;
+        }
+
+        // Swing low confirmed during pullback
+        if (inPullback && confirmSwingLo) {
+          const swingLowPrice = c1.low;
+          const swingLowBarHi = c1.high; // level to break upward
+
+          const depthOk = usePullbackDepth ?
+            (swingLowPrice <= ema21 + getAtrAt(c.timestamp) * atrDepthMultiplier) : true;
+
+          if (depthOk) {
+            if (c.high > swingLowBarHi) {
+              // Already broken on confirmation bar — fire immediately
+              legCount++;
+              if (legCount === 1) result.push({ time: c.timestamp, signal: 'H1' });
+              else if (legCount === 2) result.push({ time: c.timestamp, signal: 'H2' });
+              else if (legCount === 3) {
+                result.push({ time: c.timestamp, signal: 'H3' });
+                legCount = 0;
+                inPullback = false;
+              }
+              candidateBullBreak = NaN;
+            } else {
+              candidateBullBreak = swingLowBarHi;
+            }
+          }
+        }
+      }
+    }
+
+    // ════════════════════════════════════════
+    // BEAR BIAS
+    // ════════════════════════════════════════
+    if (bearBias) {
+      const newLow = isNaN(lowestLow) || c.low < lowestLow;
+
+      if (newLow) {
+        lowestLow = c.low;
+        if (inPullback) {
+          legCount = 0;
+          inPullback = false;
+          candidateBearBreak = NaN;
+        }
+      } else {
+        if (!inPullback && c.low > lowestLow) {
+          inPullback = true;
+        }
+
+        if (inPullback && confirmSwingHi) {
+          const swingHighPrice = c1.high;
+          const swingHighBarLo = c1.low; // level to break downward
+
+          const depthOk = usePullbackDepth ?
+            (swingHighPrice >= ema21 - getAtrAt(c.timestamp) * atrDepthMultiplier) : true;
+
+          if (depthOk) {
+            if (c.low < swingHighBarLo) {
+              legCount++;
+              if (legCount === 1) result.push({ time: c.timestamp, signal: 'L1' });
+              else if (legCount === 2) result.push({ time: c.timestamp, signal: 'L2' });
+              else if (legCount === 3) {
+                result.push({ time: c.timestamp, signal: 'L3' });
+                legCount = 0;
+                inPullback = false;
+              }
+              candidateBearBreak = NaN;
+            } else {
+              candidateBearBreak = swingHighBarLo;
+            }
+          }
+        }
+      }
+    }
+
+    // Reset highest/lowest when bias flips
+    if (!bullBias) highestHigh = NaN;
+    if (!bearBias) lowestLow = NaN;
+  }
+
+  return result;
+}
+
 

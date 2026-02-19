@@ -11,7 +11,7 @@ import { useSessionStore } from '../stores/sessionStore';
 import { ChartToolbar } from './ChartToolbar';
 import type { DrawingTool } from './ChartToolbar';
 import type { Indicator } from './ChartToolbar';
-import { calculateSMA, calculateEMA, calculatePivotPoints } from '../utils/indicators';
+import { calculateSMA, calculateEMA, calculatePivotPoints, calculateAlBrooks } from '../utils/indicators';
 import { useChartDrawings } from '../hooks/useChartDrawings';
 import type { Point } from '../hooks/useChartDrawings';
 import { format } from 'date-fns';
@@ -29,7 +29,7 @@ export function AdvancedChart() {
   const indicatorSeriesRef = useRef<Map<string, any>>(new Map());
 
   const [activeTool, setActiveTool] = useState<DrawingTool>('none');
-  const [activeIndicators, setActiveIndicators] = useState<Indicator[]>(['ema21', 'pivotPoints']);
+  const [activeIndicators, setActiveIndicators] = useState<Indicator[]>(['ema21', 'pivotPoints', 'alBrooks']);
 
   const [isTextDialogOpen, setIsTextDialogOpen] = useState(false);
   const [pendingTextPoint, setPendingTextPoint] = useState<Point | null>(null);
@@ -426,6 +426,31 @@ export function AdvancedChart() {
           });
         });
       }
+    }
+
+    // 3. Add Al Brooks Markers if active
+    if (showMarkers && activeIndicators.includes('alBrooks')) {
+      const alBrooksSignals = calculateAlBrooks(visibleCandles, true, 1.0);
+      alBrooksSignals.forEach((s) => {
+        let color = '#00BCD4'; // Default aqua
+        const signal = s.signal;
+
+        if (signal === 'H1') color = '#00FFFF';
+        else if (signal === 'H2') color = '#008000';
+        else if (signal === 'H3') color = '#00FF00';
+        else if (signal === 'L1') color = '#FFA500';
+        else if (signal === 'L2') color = '#FF0000';
+        else if (signal === 'L3') color = '#FF00FF';
+
+        allMarkers.push({
+          time: s.time as any,
+          position: signal.startsWith('H') ? 'belowBar' : 'aboveBar',
+          color: color,
+          shape: signal.startsWith('H') ? 'arrowUp' : 'arrowDown',
+          text: signal,
+          size: 1,
+        });
+      });
     }
 
     allMarkers.sort((a, b) => (a.time as number) - (b.time as number));
