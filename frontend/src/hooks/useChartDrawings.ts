@@ -1,5 +1,6 @@
 import { useRef, useEffect, useState, useCallback } from 'react';
 import type { DrawingTool } from '../components/ChartToolbar';
+import { useSessionStore } from '../stores/sessionStore';
 
 export interface Point {
   x: number;
@@ -37,6 +38,9 @@ export function useChartDrawings({
   onCalloutTrigger,
   onCustomRender,
 }: UseChartDrawingsProps) {
+  const setTradeQuantity = useSessionStore((s) => s.setTradeQuantity);
+  const riskPerTrade = useSessionStore((s) => s.riskPerTrade);
+
   const [drawings, setDrawings] = useState<Drawing[]>([]);
   const [currentDrawing, setCurrentDrawing] = useState<Point[]>([]);
   const [isDrawing, setIsDrawing] = useState(false);
@@ -423,6 +427,17 @@ export function useChartDrawings({
               };
             });
 
+            // Auto-update quantity if RR tool is moved
+            if (drawing.type === 'riskReward' && newPoints[0].price && newPoints[1].price) {
+              const p1Price = newPoints[0].price;
+              const p2Price = newPoints[1].price;
+              const slDist = Math.abs(p1Price - p2Price);
+              if (slDist > 0) {
+                const newQty = Math.floor(riskPerTrade / slDist);
+                setTradeQuantity(newQty);
+              }
+            }
+
             return { ...drawing, points: newPoints };
           }
           return drawing;
@@ -484,6 +499,17 @@ export function useChartDrawings({
       };
       setDrawings((prev) => [...prev, newDrawing]);
       setSelectedDrawingId(newId);
+
+      // Auto-update quantity when RR tool is first placed
+      if (activeToolRef.current === 'riskReward' && currentDrawingRef.current[0].price && currentDrawingRef.current[1].price) {
+        const p1Price = currentDrawingRef.current[0].price;
+        const p2Price = currentDrawingRef.current[1].price;
+        const slDist = Math.abs(p1Price - p2Price);
+        if (slDist > 0) {
+          const newQty = Math.floor(riskPerTrade / slDist);
+          setTradeQuantity(newQty);
+        }
+      }
     }
 
     setCurrentDrawing([]);
@@ -582,6 +608,18 @@ export function useChartDrawings({
       ctx.fillStyle = color;
       ctx.fillText(`TP ${label}`, maxX + 5, rewardY + 4);
     });
+
+    // Draw Quantity Info
+    if (p1.price && p2.price) {
+      const slDist = Math.abs(p1.price - p2.price);
+      if (slDist > 0) {
+        const qty = Math.floor(riskPerTrade / slDist);
+        ctx.font = 'bold 13px Inter, sans-serif';
+        ctx.fillStyle = '#000000';
+        ctx.textAlign = 'right';
+        ctx.fillText(`Risk: ₹${riskPerTrade.toLocaleString()} | Qty: ${qty}`, maxX - 5, entryY - 8);
+      }
+    }
 
     ctx.textAlign = 'start'; // Reset
   };

@@ -30,6 +30,9 @@ interface SessionStore {
   isLoading: boolean;
   pendingExitRequest: { type: 'SL' | 'TP' | 'TIME_OVER', price: number, spotPrice: number } | null;
   pendingTradeRequest: { type: 'BUY' | 'SELL', quantity: number, stopLoss?: number, target?: number } | null;
+  tradeQuantity: number;
+  riskPerTrade: number;
+
 
   // UI settings
   showMarkers: boolean;
@@ -60,6 +63,9 @@ interface SessionStore {
   getRemoteSnapshots: () => Promise<SessionState[]>;
   getRemoteHistory: () => Promise<SessionState[]>;
   toggleMarkers: () => void;
+  setTradeQuantity: (qty: number) => void;
+  setRiskPerTrade: (risk: number) => void;
+
 
   // Computed getters
   getCurrentCandle: () => Candle | null;
@@ -86,6 +92,9 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
   pendingExitRequest: null,
   pendingTradeRequest: null,
   showMarkers: true,
+  tradeQuantity: 65,
+  riskPerTrade: 10000,
+
 
   // Actions
   loadCandles: (candles, instrument, config) => {
@@ -631,4 +640,6 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
   },
 
   toggleMarkers: () => set((state) => ({ showMarkers: !state.showMarkers })),
+  setTradeQuantity: (tradeQuantity) => set({ tradeQuantity }),
+  setRiskPerTrade: (riskPerTrade) => set({ riskPerTrade }),
 }));

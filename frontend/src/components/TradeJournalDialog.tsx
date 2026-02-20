@@ -8,7 +8,12 @@ import { calculateAlBrooks } from '../utils/indicators';
 export function TradeJournalDialog() {
     const pendingTradeRequest = useSessionStore((s) => s.pendingTradeRequest);
     const resolveTradeRequest = useSessionStore((s) => s.resolveTradeRequest);
-    const isPositionOpen = !!useSessionStore((s) => s.position);
+    const position = useSessionStore((s) => s.position);
+    const isExitTrade = pendingTradeRequest && position
+        ? (position.quantity > 0 && pendingTradeRequest.type === 'SELL') ||
+        (position.quantity < 0 && pendingTradeRequest.type === 'BUY')
+        : false;
+
     const candles = useSessionStore((s) => s.candles);
     const currentIndex = useSessionStore((s) => s.currentIndex);
 
@@ -40,7 +45,7 @@ export function TradeJournalDialog() {
 
             // Automatically analyze Al Brooks signals for entrySign
             let autoEntrySign: string = 'None';
-            if (!isPositionOpen && candles.length > 0 && currentIndex >= 0) {
+            if (!isExitTrade && candles.length > 0 && currentIndex >= 0) {
                 // 1. Pivot & Market Analysis
                 const pivotAnalysis = analyzePivotForTrade(candles, currentIndex, pendingTradeRequest.type);
                 if (pivotAnalysis.pivotPosition) {
@@ -105,12 +110,12 @@ export function TradeJournalDialog() {
             });
             setExitReason('MANUAL');
         }
-    }, [pendingTradeRequest, isPositionOpen, candles, currentIndex]);
+    }, [pendingTradeRequest, isExitTrade, candles, currentIndex]);
 
     if (!pendingTradeRequest) return null;
 
     const handleConfirm = () => {
-        resolveTradeRequest(journal, isPositionOpen ? exitReason : 'MANUAL');
+        resolveTradeRequest(journal, isExitTrade ? exitReason : 'MANUAL');
     };
 
     const handleCancel = () => {
@@ -124,13 +129,13 @@ export function TradeJournalDialog() {
 
     return (
         <div className="fixed inset-0 z-[3000] flex items-center justify-end p-4 pointer-events-none">
-            <div className={`bg-white/95 backdrop-blur-md border-2 ${isPositionOpen ? 'border-orange-500' : 'border-blue-500'} rounded-xl shadow-2xl w-[400px] overflow-hidden animate-in slide-in-from-right duration-300 pointer-events-auto`}>
+            <div className={`bg-white/95 backdrop-blur-md border-2 ${isExitTrade ? 'border-orange-500' : 'border-blue-500'} rounded-xl shadow-2xl w-[400px] overflow-hidden animate-in slide-in-from-right duration-300 pointer-events-auto`}>
                 {/* Header */}
-                <div className={`bg-gradient-to-r ${isPositionOpen ? 'from-orange-600 to-red-600' : 'from-blue-600 to-indigo-600'} px-4 py-3 text-white flex justify-between items-center`}>
+                <div className={`bg-gradient-to-r ${isExitTrade ? 'from-orange-600 to-red-600' : 'from-blue-600 to-indigo-600'} px-4 py-3 text-white flex justify-between items-center`}>
                     <div className="flex items-center gap-2">
                         <Info size={18} />
                         <h2 className="text-lg font-bold tracking-tight">
-                            {isPositionOpen ? 'Trade Exit Journal' : 'Trade Entry Journal'}
+                            {isExitTrade ? 'Trade Exit Journal' : 'Trade Entry Journal'}
                         </h2>
                     </div>
                     <button
@@ -151,7 +156,8 @@ export function TradeJournalDialog() {
                         </div>
                     </div>
 
-                    {!isPositionOpen ? (
+                    {!isExitTrade ? (
+
                         /* ENTRY FIELDS */
                         <div className="space-y-3">
                             <div>
@@ -354,7 +360,7 @@ export function TradeJournalDialog() {
                     </div>
 
                     {/* Screenshot URL (Exit Only) */}
-                    {isPositionOpen && (
+                    {isExitTrade && (
                         <div className="mt-4">
                             <label className="block text-[10px] font-bold text-gray-500 uppercase tracking-wider mb-1 flex items-center gap-1">
                                 <LinkIcon size={12} />
@@ -381,7 +387,7 @@ export function TradeJournalDialog() {
                         </button>
                         <button
                             onClick={handleConfirm}
-                            className={`flex-1 px-4 py-2 ${isPositionOpen ? 'bg-gradient-to-r from-orange-600 to-red-600' : 'bg-gradient-to-r from-green-600 to-emerald-600'} text-white rounded-lg font-bold transition-all shadow-md flex items-center justify-center gap-2 uppercase tracking-widest text-[10px] hover:scale-[1.02]`}
+                            className={`flex-1 px-4 py-2 ${isExitTrade ? 'bg-gradient-to-r from-orange-600 to-red-600' : 'bg-gradient-to-r from-green-600 to-emerald-600'} text-white rounded-lg font-bold transition-all shadow-md flex items-center justify-center gap-2 uppercase tracking-widest text-[10px] hover:scale-[1.02]`}
                         >
                             <Check size={14} />
                             Confirm

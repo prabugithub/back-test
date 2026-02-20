@@ -25,10 +25,15 @@ export function PlaybackControls({ onOpenHistory }: { onOpenHistory?: () => void
     jump,
     initiateTrade,
     loadCandles,
+    tradeQuantity,
+    setTradeQuantity,
+    riskPerTrade,
   } = useSessionStore();
 
+
+
+
   const [customJump, setCustomJump] = useState('10');
-  const [tradeQuantity, setTradeQuantity] = useState(65);
   const [showSettings, setShowSettings] = useState(false);
   const [showDatePicker, setShowDatePicker] = useState(false);
   const [jumpToDate, setJumpToDate] = useState('2021-02-01');
@@ -292,7 +297,7 @@ export function PlaybackControls({ onOpenHistory }: { onOpenHistory?: () => void
         const pivots = calculatePivotPoints(candles.slice(0, currentIndex + 1));
         const recentPivot = pivots.length > 0 ? pivots[pivots.length - 1] : null;
         if (recentPivot && recentPivot.slDistance > 0) {
-          const suggestedQty = Math.floor(10000 / recentPivot.slDistance);
+          const suggestedQty = Math.floor(riskPerTrade / recentPivot.slDistance);
           setTradeQuantity(suggestedQty);
         }
 
@@ -448,7 +453,7 @@ export function PlaybackControls({ onOpenHistory }: { onOpenHistory?: () => void
               const recentPivot = pivots.length > 0 ? pivots[pivots.length - 1] : null;
 
               const pointsAtRisk = recentPivot ? recentPivot.slDistance : 0;
-              const calcQty = pointsAtRisk > 0 ? Math.floor(10000 / pointsAtRisk) : tradeQuantity;
+              const calcQty = pointsAtRisk > 0 ? Math.floor(riskPerTrade / pointsAtRisk) : tradeQuantity;
 
               const buySL = recentPivot && currentCandle ? (currentCandle.close - pointsAtRisk) : 0;
               const buyTgt = recentPivot && currentCandle ? (currentCandle.close + pointsAtRisk * 2) : 0;
@@ -469,15 +474,19 @@ export function PlaybackControls({ onOpenHistory }: { onOpenHistory?: () => void
                     </button>
                   )}
 
-                  <input
-                    id="trade-quantity-input"
-                    type="number"
-                    min="1"
-                    value={tradeQuantity}
-                    onChange={(e) => setTradeQuantity(Math.max(1, parseInt(e.target.value) || 1))}
-                    className="w-10 px-0.5 py-1 border rounded text-center text-xs font-medium"
-                    title="Trade Quantity (Q)"
-                  />
+                  <div className="flex flex-col items-center">
+                    <span className="text-[8px] text-gray-400 uppercase font-bold leading-none mb-0.5">Qty</span>
+                    <input
+                      id="trade-quantity-input"
+                      type="number"
+                      min="1"
+                      value={tradeQuantity}
+                      onChange={(e) => setTradeQuantity(Math.max(1, parseInt(e.target.value) || 1))}
+                      className="w-10 px-0.5 py-1 border rounded text-center text-xs font-medium"
+                      title="Trade Quantity (Q)"
+                    />
+                  </div>
+
                   <div className="flex items-center gap-0.5">
                     <button
                       onClick={() => handleExecuteTrade('BUY')}
