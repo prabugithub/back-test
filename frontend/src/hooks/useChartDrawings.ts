@@ -740,7 +740,14 @@ export function useChartDrawings({
     const ctx = canvas.getContext('2d');
     if (!ctx) return;
     ctx.clearRect(0, 0, canvas.width, canvas.height);
+    const currentIndex = useSessionStore.getState().currentIndex;
+
     drawings.forEach((drawing) => {
+      // Filter drawings by time to create the "Time Travel" effect
+      // If a drawing point has time, only show it if it's <= current index
+      if (drawing.points.length > 0 && drawing.points[0].time !== undefined) {
+        if (drawing.points[0].time > currentIndex) return;
+      }
       renderDrawing(ctx, drawing, drawing.id === selectedDrawingId);
     });
     if (currentDrawing.length >= 2) {

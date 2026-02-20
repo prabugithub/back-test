@@ -1,5 +1,5 @@
 import { useRef, useEffect, useMemo, useState } from 'react';
-import { X, ChevronRight, ChevronDown, FileJson, Printer, FileSpreadsheet, Trash2, Link as LinkIcon } from 'lucide-react';
+import { X, ChevronRight, ChevronDown, FileJson, Printer, FileSpreadsheet, Trash2, Link as LinkIcon, Eye } from 'lucide-react';
 import { useSessionStore } from '../stores/sessionStore';
 import { formatCurrency, formatTimestamp } from '../utils/formatters';
 import { groupTradesIntoPositions, calculatePerformanceStats } from '../utils/tradeAnalysis';
@@ -14,6 +14,8 @@ export function TradeHistoryDialog({ isOpen, onClose }: TradeHistoryDialogProps)
     const instrument = useSessionStore((s) => s.instrument);
     const deleteTrade = useSessionStore((s) => s.deleteTrade);
     const deleteTrades = useSessionStore((s) => s.deleteTrades);
+    const candles = useSessionStore((s) => s.candles);
+    const setCurrentIndex = useSessionStore((s) => s.setCurrentIndex);
     const dialogRef = useRef<HTMLDivElement>(null);
     const [expandedPosId, setExpandedPosId] = useState<string | null>(null);
 
@@ -108,6 +110,31 @@ export function TradeHistoryDialog({ isOpen, onClose }: TradeHistoryDialogProps)
         e.stopPropagation();
         if (confirm('Delete this trade? Position metrics will be recalculated.')) {
             deleteTrade(tradeId);
+        }
+    };
+
+    const handleJumpToTrade = (e: React.MouseEvent, timestamp: number) => {
+        e.stopPropagation();
+        // The trade timestamp might be slightly ahead or behind candle timestamps due to formatting
+        // We find the candle that is closest to this timestamp (at or before)
+        const index = candles.findIndex(c => c.timestamp === timestamp);
+        if (index !== -1) {
+            setCurrentIndex(index);
+            onClose(); // Close dialog to show the chart
+        } else {
+            // Find the closest candle if exact match not found
+            let closestIndex = -1;
+            for (let i = 0; i < candles.length; i++) {
+                if (candles[i].timestamp <= timestamp) {
+                    closestIndex = i;
+                } else {
+                    break;
+                }
+            }
+            if (closestIndex !== -1) {
+                setCurrentIndex(closestIndex);
+                onClose();
+            }
         }
     };
 
@@ -319,6 +346,7 @@ export function TradeHistoryDialog({ isOpen, onClose }: TradeHistoryDialogProps)
                                     <th className="px-4 py-3 text-right">PnL @ Rev</th>
                                     <th className="px-4 py-3 text-right">P&L</th>
                                     <th className="px-4 py-3 text-right">Duration</th>
+                                    <th className="px-4 py-3 text-center w-8">View</th>
                                     <th className="px-4 py-3 text-center w-10"></th>
                                 </tr>
                             </thead>
@@ -398,6 +426,15 @@ export function TradeHistoryDialog({ isOpen, onClose }: TradeHistoryDialogProps)
                                                     </td>
                                                     <td className="px-4 py-3 text-center">
                                                         <button
+                                                            onClick={(e) => handleJumpToTrade(e, pos.entryTime)}
+                                                            className="p-1.5 text-blue-400 hover:text-blue-600 hover:bg-blue-50 rounded transition-colors"
+                                                            title="Jump to entry on chart"
+                                                        >
+                                                            <Eye size={16} />
+                                                        </button>
+                                                    </td>
+                                                    <td className="px-4 py-3 text-center">
+                                                        <button
                                                             onClick={(e) => handleDeletePosition(e, pos)}
                                                             className="p-1.5 text-red-400 hover:text-red-600 hover:bg-red-50 rounded transition-colors"
                                                             title="Delete entire position"
@@ -429,6 +466,7 @@ export function TradeHistoryDialog({ isOpen, onClose }: TradeHistoryDialogProps)
                                                                             <th className="px-3 py-2 text-center">Trend Rev</th>
                                                                             <th className="px-3 py-2 text-right">PnL @ Rev</th>
                                                                             <th className="px-3 py-2 text-right">Realized P&L</th>
+                                                                            <th className="px-3 py-2 text-center w-8">View</th>
                                                                             <th className="px-3 py-2 text-center w-10"></th>
                                                                         </tr>
                                                                     </thead>
@@ -520,6 +558,15 @@ export function TradeHistoryDialog({ isOpen, onClose }: TradeHistoryDialogProps)
                                                                                 </td>
                                                                                 <td className="px-3 py-2 text-right font-mono text-gray-500 text-[10px]">
                                                                                     {exec.pnl ? formatCurrency(exec.pnl) : '-'}
+                                                                                </td>
+                                                                                <td className="px-3 py-2 text-center">
+                                                                                    <button
+                                                                                        onClick={(e) => handleJumpToTrade(e, exec.timestamp)}
+                                                                                        className="p-1 text-blue-400 hover:text-blue-600 transition-colors"
+                                                                                        title="Jump to this execution on chart"
+                                                                                    >
+                                                                                        <Eye size={14} />
+                                                                                    </button>
                                                                                 </td>
                                                                                 <td className="px-3 py-2 text-center">
                                                                                     <button
