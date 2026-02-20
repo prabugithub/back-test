@@ -3,6 +3,7 @@ import { useSessionStore } from '../stores/sessionStore';
 import { Info, X, Check, Link as LinkIcon } from 'lucide-react';
 import type { TradeJournal } from '../types';
 import { analyzePivotForTrade } from '../utils/pivotAnalysis';
+import { calculateAlBrooks } from '../utils/indicators';
 
 export function TradeJournalDialog() {
     const pendingTradeRequest = useSessionStore((s) => s.pendingTradeRequest);
@@ -16,7 +17,7 @@ export function TradeJournalDialog() {
         htMarket: 'Trend',
         pivotPosition: 'gap',
         llhhPivot: 'HH-HL',
-        entrySign: 'H2-PullBack',
+        entrySign: 'None',
         notes: '',
         systemEntryAlign: 'Yes',
         myViewEntryAlign: 'Yes',
@@ -31,11 +32,16 @@ export function TradeJournalDialog() {
     // Reset state when a new request comes in
     useEffect(() => {
         if (pendingTradeRequest) {
-            // Automatically analyze pivot for entry trades
+            // Automatically analyze pivot and market structure for entry trades
             let autoPivotPosition = 'gap';
             let autoLlhhPivot = 'HH-HL';
+            let autoLtMarket = 'Range';
+            let autoHtMarket = 'Range';
 
+            // Automatically analyze Al Brooks signals for entrySign
+            let autoEntrySign: string = 'None';
             if (!isPositionOpen && candles.length > 0 && currentIndex >= 0) {
+                // 1. Pivot & Market Analysis
                 const pivotAnalysis = analyzePivotForTrade(candles, currentIndex, pendingTradeRequest.type);
                 if (pivotAnalysis.pivotPosition) {
                     autoPivotPosition = pivotAnalysis.pivotPosition;
@@ -43,14 +49,52 @@ export function TradeJournalDialog() {
                 if (pivotAnalysis.llhhPivot) {
                     autoLlhhPivot = pivotAnalysis.llhhPivot;
                 }
+                if (pivotAnalysis.ltMarket) {
+                    autoLtMarket = pivotAnalysis.ltMarket;
+                }
+                if (pivotAnalysis.htMarket) {
+                    autoHtMarket = pivotAnalysis.htMarket;
+                }
+
+                // 2. Al Brooks Signal Analysis
+                const visibleCandles = candles.slice(0, currentIndex + 1);
+                const alBrooksSignals = calculateAlBrooks(visibleCandles, true, 1.0);
+
+                // Check current and previous bar for signals
+                const currentCandle = candles[currentIndex];
+                const prevCandle = currentIndex > 0 ? candles[currentIndex - 1] : null;
+
+                const currentSignal = alBrooksSignals.find(s => s.time === currentCandle.timestamp);
+                const prevSignal = prevCandle ? alBrooksSignals.find(s => s.time === prevCandle.timestamp) : null;
+
+                // Prioritize current bar, then previous
+                const activeSignal = currentSignal || prevSignal;
+
+                if (activeSignal) {
+                    const signalName = activeSignal.signal; // H1, H2, H3, L1, L2, L3
+                    const tradeType = pendingTradeRequest.type; // BUY or SELL
+
+                    const isLong = tradeType === 'BUY';
+                    const isH = signalName.startsWith('H');
+                    const num = signalName.substring(1); // 1, 2, or 3
+
+                    // Normal trend entries
+                    if ((isLong && isH) || (!isLong && !isH)) {
+                        autoEntrySign = `H${num}/L${num}`;
+                    }
+                    // Reverse entries
+                    else {
+                        autoEntrySign = `Reverse-H${num}/L${num}`;
+                    }
+                }
             }
 
             setJournal({
-                ltMarket: 'Trend',
-                htMarket: 'Trend',
+                ltMarket: autoLtMarket,
+                htMarket: autoHtMarket,
                 pivotPosition: autoPivotPosition,
                 llhhPivot: autoLlhhPivot,
-                entrySign: 'H2-PullBack',
+                entrySign: autoEntrySign,
                 notes: '',
                 systemEntryAlign: 'Yes',
                 myViewEntryAlign: 'Yes',
@@ -205,11 +249,15 @@ export function TradeJournalDialog() {
                                         onChange={handleChange}
                                         className="w-full bg-white border border-gray-200 rounded-lg px-3 py-1.5 text-xs focus:ring-2 focus:ring-blue-500 outline-none"
                                     >
-                                        <option value="H2-PullBack">H2-PullBack</option>
+                                        <option value="None">None</option>
+                                        <option value="H1/L1">H1/L1</option>
+                                        <option value="H2/L2">H2/L2</option>
+                                        <option value="H3/L3">H3/L3</option>
+                                        <option value="Reverse-H1/L1">Reverse-H1/L1</option>
+                                        <option value="Reverse-H2/L2">Reverse-H2/L2</option>
+                                        <option value="Reverse-H3/L3">Reverse-H3/L3</option>
                                         <option value="BO">BO</option>
                                         <option value="BO-Fail">BO-Fail</option>
-                                        <option value="Range">Range</option>
-                                        <option value="H1-PullBack">H1-PullBack</option>
                                     </select>
                                 </div>
                             </div>

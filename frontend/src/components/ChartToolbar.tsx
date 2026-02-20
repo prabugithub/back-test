@@ -13,7 +13,8 @@ import {
   Type,
   MessageSquare,
   Eye,
-  EyeOff
+  EyeOff,
+  Download
 } from 'lucide-react';
 import { useSessionStore } from '../stores/sessionStore';
 
@@ -28,6 +29,7 @@ interface ChartToolbarProps {
   onClearDrawings: () => void;
   onDeleteSelected: () => void;
   onTakeScreenshot: () => void;
+  onDownloadScreenshot: () => void;
   isUploadingScreenshot: boolean;
   hasSelection: boolean;
 }
@@ -40,6 +42,7 @@ export function ChartToolbar({
   onClearDrawings,
   onDeleteSelected,
   onTakeScreenshot,
+  onDownloadScreenshot,
   isUploadingScreenshot,
   hasSelection,
 }: ChartToolbarProps) {
@@ -115,9 +118,17 @@ export function ChartToolbar({
           data-screenshot-btn
           className={`p-2 rounded hover:bg-gray-100 transition-colors text-gray-700 ${isUploadingScreenshot ? 'animate-pulse opacity-50 cursor-wait' : ''
             }`}
-          title={isUploadingScreenshot ? 'Uploading...' : 'Take Chart Screenshot'}
+          title={isUploadingScreenshot ? 'Uploading...' : 'Take Chart Screenshot (Upload)'}
         >
           <Camera size={18} />
+        </button>
+        <button
+          onClick={onDownloadScreenshot}
+          disabled={isUploadingScreenshot}
+          className="p-2 rounded hover:bg-gray-100 transition-colors text-gray-700"
+          title="Download Chart Screenshot Locally"
+        >
+          <Download size={18} />
         </button>
       </div>
 

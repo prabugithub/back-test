@@ -4,6 +4,8 @@ import { calculatePivotPoints, calculateEMA, type PivotPoint } from './indicator
 export interface PivotAnalysisResult {
     llhhPivot: 'HH-HL' | 'HH-LL' | 'LH-HL' | 'LH-LL' | '';
     pivotPosition: 'gap' | 'on-MA' | 'gap-opposite' | '';
+    ltMarket: string;
+    htMarket: string;
 }
 
 /**
@@ -19,6 +21,8 @@ export function analyzePivotForTrade(
     const result: PivotAnalysisResult = {
         llhhPivot: '',
         pivotPosition: '',
+        ltMarket: 'Range',
+        htMarket: 'Range',
     };
 
     // Need enough candles for analysis
@@ -45,7 +49,79 @@ export function analyzePivotForTrade(
     // Determine PivotPosition based on MA relationship
     result.pivotPosition = determinePivotPosition(visibleCandles, recentPivot, tradeType);
 
+    // Analyze Market Structure
+    const marketStructure = analyzeMarketStructure(visibleCandles, pivots);
+    result.ltMarket = marketStructure.ltMarket;
+    result.htMarket = marketStructure.htMarket;
+
     return result;
+}
+
+/**
+ * Automatically identifies market structure (Trend, Range, Reversal)
+ */
+function analyzeMarketStructure(candles: Candle[], pivots: PivotPoint[]): { ltMarket: string, htMarket: string } {
+    if (candles.length < 25) return { ltMarket: 'Range', htMarket: 'Range' };
+
+    const ema21 = calculateEMA(candles, 21);
+    const ema60 = calculateEMA(candles, 60);
+
+    const getSlope = (ema: { value: number }[], lookback: number) => {
+        if (ema.length < lookback + 1) return 0;
+        const current = ema[ema.length - 1].value;
+        const prev = ema[ema.length - 1 - lookback].value;
+        return (current - prev) / lookback;
+    };
+
+    const ltSlope = getSlope(ema21, 10);
+    const htSlope = getSlope(ema60, 20);
+
+    const lastPrice = candles[candles.length - 1].close;
+    const currentEma21 = ema21[ema21.length - 1].value;
+    const currentEma60 = ema60[ema60.length - 1].value;
+
+    // Check bar overlap (Range vs Trend)
+    let overlapCount = 0;
+    const overlapLookback = 10;
+    for (let i = candles.length - overlapLookback; i < candles.length; i++) {
+        const c = candles[i];
+        const prev = candles[i - 1];
+        if (c.high > prev.low && c.low < prev.high) {
+            const overlapRange = Math.min(c.high, prev.high) - Math.max(c.low, prev.low);
+            const totalRange = Math.max(c.high, prev.high) - Math.min(c.low, prev.low);
+            if (overlapRange / totalRange > 0.5) overlapCount++;
+        }
+    }
+    const isHighOverlap = overlapCount > 6;
+
+    // Analyze Pivots
+    const lastPivots = pivots.slice(-4);
+    const hasHH = lastPivots.some(p => p.trendLabel === 'HH');
+    const hasLL = lastPivots.some(p => p.trendLabel === 'LL');
+    const hasHL = lastPivots.some(p => p.trendLabel === 'HL');
+    const hasLH = lastPivots.some(p => p.trendLabel === 'LH');
+
+    // LT Structure Identification
+    let ltMarket = 'Range';
+    if (ltSlope > 0.05 && lastPrice > currentEma21 && hasHH && hasHL) {
+        ltMarket = isHighOverlap ? 'Bull-Trending-range' : 'Bull-Trend';
+    } else if (ltSlope < -0.05 && lastPrice < currentEma21 && hasLL && hasLH) {
+        ltMarket = isHighOverlap ? 'Bear-Trending-range' : 'Bear-Trend';
+    } else if (ltSlope > 0 && lastPrice > currentEma21 && hasHL && !hasHH) {
+        ltMarket = 'Bull-Reversal'; // Potential MTR
+    } else if (ltSlope < 0 && lastPrice < currentEma21 && hasLH && !hasLL) {
+        ltMarket = 'Bear-Reversal'; // Potential MTR
+    }
+
+    // HT Structure Identification (Proxy using 60 EMA and longer lookback)
+    let htMarket = 'Range';
+    if (htSlope > 0.02 && lastPrice > currentEma60) {
+        htMarket = 'Bull-Trend';
+    } else if (htSlope < -0.02 && lastPrice < currentEma60) {
+        htMarket = 'Bear-Trend';
+    }
+
+    return { ltMarket, htMarket };
 }
 
 /**

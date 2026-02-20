@@ -476,49 +476,64 @@ export function AdvancedChart() {
 
   const notify = useNotificationStore((s: any) => s.notify);
 
-  const handleTakeScreenshot = () => {
-    if (!chart || !canvasRef.current) return;
+  const getScreenshotData = () => {
+    if (!chart || !canvasRef.current) return null;
 
     const chartCanvas = chart.takeScreenshot();
-    if (!chartCanvas) return;
+    if (!chartCanvas) return null;
 
     const combinedCanvas = document.createElement('canvas');
     combinedCanvas.width = chartCanvas.width;
     combinedCanvas.height = chartCanvas.height;
     const ctx = combinedCanvas.getContext('2d');
-    if (!ctx) return;
+    if (!ctx) return null;
 
     ctx.drawImage(chartCanvas, 0, 0);
     ctx.drawImage(canvasRef.current, 0, 0, combinedCanvas.width, combinedCanvas.height);
 
-    const base64Image = combinedCanvas.toDataURL('image/png');
-    const currentCandle = useSessionStore.getState().getCurrentCandle();
+    return combinedCanvas.toDataURL('image/png');
+  };
 
+  const getScreenshotDefaultName = () => {
+    const currentCandle = useSessionStore.getState().getCurrentCandle();
     let defaultBase = 'chart-screenshot';
     let dateStr = '';
+
     if (currentCandle) {
       const ts = currentCandle.timestamp as number;
       const date = new Date(ts > 1e11 ? ts : ts * 1000);
       dateStr = format(date, 'dd-MM-yyyy');
     }
 
-    // Count trades for the same day to make it unique
     const tradesForDay = trades.filter(t => {
       const tDate = new Date(t.timestamp > 1e11 ? t.timestamp : t.timestamp * 1000);
       return format(tDate, 'dd-MM-yyyy') === dateStr;
     });
 
     const tradeCount = tradesForDay.length;
-    // User logic: "if i did three trade we need to add trade 3".
-    // "but next day start from count 1".
-    // This implies we want the *current* count of trades for the screenshot name.
-    // If 0 trades, we default to 1 (Planning Trade 1).
     const countToUse = tradeCount > 0 ? tradeCount : 1;
-    const filename = dateStr ? `${dateStr}_Trade-${countToUse}` : defaultBase;
+    return dateStr ? `${dateStr}_Trade-${countToUse}` : defaultBase;
+  };
 
-    setScreenshotDefaultName(filename);
+  const handleTakeScreenshot = () => {
+    const base64Image = getScreenshotData();
+    if (!base64Image) return;
+
+    setScreenshotDefaultName(getScreenshotDefaultName());
     setPendingScreenshotData(base64Image);
     setIsScreenshotDialogOpen(true);
+  };
+
+  const handleDownloadScreenshot = () => {
+    const base64Image = getScreenshotData();
+    if (!base64Image) return;
+
+    const filename = getScreenshotDefaultName();
+    const link = document.createElement('a');
+    link.download = `${filename}.png`;
+    link.href = base64Image;
+    link.click();
+    notify('Screenshot downloaded locally', 'success');
   };
 
   const handleScreenshotSubmit = (name: string) => {
@@ -638,6 +653,7 @@ export function AdvancedChart() {
         onClearDrawings={handleClearDrawings}
         onDeleteSelected={deleteSelectedDrawing}
         onTakeScreenshot={handleTakeScreenshot}
+        onDownloadScreenshot={handleDownloadScreenshot}
         isUploadingScreenshot={isUploadingScreenshot}
         hasSelection={!!selectedDrawingId}
       />
