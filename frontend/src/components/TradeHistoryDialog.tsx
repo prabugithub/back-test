@@ -44,7 +44,7 @@ export function TradeHistoryDialog({ isOpen, onClose }: TradeHistoryDialogProps)
         csvContent += `Profit Factor,${stats.profitFactor.toFixed(2)}\n\n`;
 
         csvContent += "POSITION SUMMARY\n";
-        csvContent += "ID,Direction,Entry Date/Time,Exit Date/Time,Entry Price,Exit Price,Qty,PnL,Duration (min),SL,Target,SL Hit,TP Hit,Exit Reason,Category,LT Market,HT Market,Pivot Pos,LLHH Pivot,Entry Sign,Align E(S),Align E(V),Align M(S),Align M(V),Notes,Screenshot (E),Screenshot (M)\n";
+        csvContent += "ID,Direction,Entry Date/Time,Exit Date/Time,Entry Price,Exit Price,Qty,PnL,Duration (min),SL,Target,SL Hit,TP Hit,Trend Reversed,PnL at Reversal,Exit Reason,Category,LT Market,HT Market,Pivot Pos,LLHH Pivot,Entry Sign,Align E(S),Align E(V),Align M(S),Align M(V),Notes,Screenshot (E),Screenshot (M)\n";
         positions.forEach(pos => {
             const entryExec = pos.executions.find(e => e.journal?.ltMarket);
             const entryJournal = entryExec?.journal;
@@ -59,13 +59,13 @@ export function TradeHistoryDialog({ isOpen, onClose }: TradeHistoryDialogProps)
                 .filter(note => note && note.length > 0)))
                 .join(" | ");
 
-            csvContent += `${pos.id},${pos.direction},${formatTimestamp(pos.entryTime)},${pos.exitTime ? formatTimestamp(pos.exitTime) : 'OPEN'},${pos.avgEntryPrice},${pos.avgExitPrice || ''},${pos.totalQuantity},${pos.realizedPnL.toFixed(2)},${pos.durationMinutes ? pos.durationMinutes.toFixed(1) : ''},${pos.stopLoss || ''},${pos.target || ''},${pos.slHit ? 'YES' : 'NO'},${pos.tpHit ? 'YES' : 'NO'},${pos.exitReason || ''},${entryJournal?.tradeCategory || ''},${entryJournal?.ltMarket || ''},${entryJournal?.htMarket || ''},${entryJournal?.pivotPosition || ''},${entryJournal?.llhhPivot || ''},${entryJournal?.entrySign || ''},${entryJournal?.systemEntryAlign || ''},${entryJournal?.myViewEntryAlign || ''},${exitJournal?.systemMoveAlign || ''},${exitJournal?.myViewMoveAlign || ''},"${(combinedNotes || '').replace(/"/g, '""')}",${entryJournal?.screenshotUrl || ''},${exitJournal?.screenshotUrl || ''}\n`;
+            csvContent += `${pos.id},${pos.direction},${formatTimestamp(pos.entryTime)},${pos.exitTime ? formatTimestamp(pos.exitTime) : 'OPEN'},${pos.avgEntryPrice},${pos.avgExitPrice || ''},${pos.totalQuantity},${pos.realizedPnL.toFixed(2)},${pos.durationMinutes ? pos.durationMinutes.toFixed(1) : ''},${pos.stopLoss || ''},${pos.target || ''},${pos.slHit ? 'YES' : 'NO'},${pos.tpHit ? 'YES' : 'NO'},${pos.trendReversed ? 'YES' : 'NO'},${pos.trendReversedPnL?.toFixed(2) || ''},${pos.exitReason || ''},${entryJournal?.tradeCategory || ''},${entryJournal?.ltMarket || ''},${entryJournal?.htMarket || ''},${entryJournal?.pivotPosition || ''},${entryJournal?.llhhPivot || ''},${entryJournal?.entrySign || ''},${entryJournal?.systemEntryAlign || ''},${entryJournal?.myViewEntryAlign || ''},${exitJournal?.systemMoveAlign || ''},${exitJournal?.myViewMoveAlign || ''},"${(combinedNotes || '').replace(/"/g, '""')}",${entryJournal?.screenshotUrl || ''},${exitJournal?.screenshotUrl || ''}\n`;
         });
 
         csvContent += "\nRAW TRADE EXECUTIONS\n";
-        csvContent += "Timestamp,Type,Price,Quantity,Instrument,P&L,SL,Target,Min SL Hit,Min Target Hit,Exit Reason,Category,LT Market,HT Market,Pivot Position,LLHH Pivot,Entry Sign,Align-Entry(Sys),Align-Entry(View),Align-Move(Sys),Align-Move(View),Notes,Screenshot\n";
+        csvContent += "Timestamp,Type,Price,Quantity,Instrument,P&L,SL,Target,SL Hit,TP Hit,Trend Reversed,PnL at Reversal,Exit Reason,Category,LT Market,HT Market,Pivot Position,LLHH Pivot,Entry Sign,Align-Entry(Sys),Align-Entry(View),Align-Move(Sys),Align-Move(View),Notes,Screenshot\n";
         trades.forEach(trade => {
-            csvContent += `${new Date(trade.timestamp * 1000).toISOString()},${trade.type},${trade.price},${trade.quantity},${trade.instrument},${(trade.pnl || 0).toFixed(2)},${trade.stopLoss || ''},${trade.target || ''},${trade.slHit ? 'YES' : 'NO'},${trade.tpHit ? 'YES' : 'NO'},${trade.exitReason || ''},${trade.journal?.tradeCategory || ''},${trade.journal?.ltMarket || ''},${trade.journal?.htMarket || ''},${trade.journal?.pivotPosition || ''},${trade.journal?.llhhPivot || ''},${trade.journal?.entrySign || ''},${trade.journal?.systemEntryAlign || ''},${trade.journal?.myViewEntryAlign || ''},${trade.journal?.systemMoveAlign || ''},${trade.journal?.myViewMoveAlign || ''},"${(trade.journal?.notes || '').replace(/"/g, '""')}",${trade.journal?.screenshotUrl || ''}\n`;
+            csvContent += `${new Date(trade.timestamp).toISOString()},${trade.type},${trade.price},${trade.quantity},${trade.instrument},${(trade.pnl || 0).toFixed(2)},${trade.stopLoss || ''},${trade.target || ''},${trade.slHit ? 'YES' : 'NO'},${trade.tpHit ? 'YES' : 'NO'},${trade.trendReversed ? 'YES' : 'NO'},${trade.trendReversedPnL?.toFixed(2) || ''},${trade.exitReason || ''},${trade.journal?.tradeCategory || ''},${trade.journal?.ltMarket || ''},${trade.journal?.htMarket || ''},${trade.journal?.pivotPosition || ''},${trade.journal?.llhhPivot || ''},${trade.journal?.entrySign || ''},${trade.journal?.systemEntryAlign || ''},${trade.journal?.myViewEntryAlign || ''},${trade.journal?.systemMoveAlign || ''},${trade.journal?.myViewMoveAlign || ''},"${(trade.journal?.notes || '').replace(/"/g, '""')}",${trade.journal?.screenshotUrl || ''}\n`;
         });
 
         const blob = new Blob([csvContent], { type: 'text/csv' });
@@ -315,8 +315,8 @@ export function TradeHistoryDialog({ isOpen, onClose }: TradeHistoryDialogProps)
                                     <th className="px-4 py-3 text-right">Avg Exit</th>
                                     <th className="px-4 py-3 text-right">SL</th>
                                     <th className="px-4 py-3 text-right">Target</th>
-                                    <th className="px-4 py-3 text-center">Min SL Hit</th>
-                                    <th className="px-4 py-3 text-center">Min Target Hit</th>
+                                    <th className="px-4 py-3 text-center">Trend Rev</th>
+                                    <th className="px-4 py-3 text-right">PnL @ Rev</th>
                                     <th className="px-4 py-3 text-right">P&L</th>
                                     <th className="px-4 py-3 text-right">Duration</th>
                                     <th className="px-4 py-3 text-center w-10"></th>
@@ -380,18 +380,14 @@ export function TradeHistoryDialog({ isOpen, onClose }: TradeHistoryDialogProps)
                                                         {pos.target ? formatCurrency(pos.target) : '-'}
                                                     </td>
                                                     <td className="px-4 py-3 text-center">
-                                                        {pos.slHit ? (
-                                                            <span className="px-1.5 py-0.5 rounded text-[10px] bg-red-100 text-red-700 font-bold">YES</span>
+                                                        {pos.trendReversed ? (
+                                                            <span className="px-1.5 py-0.5 rounded text-[10px] bg-orange-100 text-orange-700 font-bold uppercase">Rev</span>
                                                         ) : (
                                                             <span className="text-gray-300">-</span>
                                                         )}
                                                     </td>
-                                                    <td className="px-4 py-3 text-center">
-                                                        {pos.tpHit ? (
-                                                            <span className="px-1.5 py-0.5 rounded text-[10px] bg-green-100 text-green-700 font-bold">YES</span>
-                                                        ) : (
-                                                            <span className="text-gray-300">-</span>
-                                                        )}
+                                                    <td className={`px-4 py-3 text-right font-mono text-[10px] ${pos.trendReversedPnL !== undefined ? (pos.trendReversedPnL >= 0 ? 'text-green-600' : 'text-red-500') : 'text-gray-400'}`}>
+                                                        {pos.trendReversedPnL !== undefined ? formatCurrency(pos.trendReversedPnL) : '-'}
                                                     </td>
                                                     <td className={`px-4 py-3 text-right font-bold font-mono ${pos.realizedPnL > 0 ? 'text-green-600' : pos.realizedPnL < 0 ? 'text-red-600' : 'text-gray-400'
                                                         }`}>
@@ -430,6 +426,8 @@ export function TradeHistoryDialog({ isOpen, onClose }: TradeHistoryDialogProps)
                                                                             <th className="px-3 py-2 text-left">Align (Sys/View)</th>
                                                                             <th className="px-3 py-2 text-left max-w-[100px]">Notes</th>
                                                                             <th className="px-3 py-2 text-center">Img</th>
+                                                                            <th className="px-3 py-2 text-center">Trend Rev</th>
+                                                                            <th className="px-3 py-2 text-right">PnL @ Rev</th>
                                                                             <th className="px-3 py-2 text-right">Realized P&L</th>
                                                                             <th className="px-3 py-2 text-center w-10"></th>
                                                                         </tr>
@@ -511,6 +509,14 @@ export function TradeHistoryDialog({ isOpen, onClose }: TradeHistoryDialogProps)
                                                                                             <LinkIcon size={14} />
                                                                                         </a>
                                                                                     ) : '-'}
+                                                                                </td>
+                                                                                <td className="px-3 py-2 text-center">
+                                                                                    {exec.trendReversed ? (
+                                                                                        <span className="px-1.5 py-0.5 rounded text-[9px] bg-orange-50 text-orange-600 font-bold uppercase">Rev</span>
+                                                                                    ) : '-'}
+                                                                                </td>
+                                                                                <td className={`px-3 py-2 text-right font-mono text-[9px] ${exec.trendReversedPnL !== undefined ? (exec.trendReversedPnL >= 0 ? 'text-green-600' : 'text-red-500') : 'text-gray-400'}`}>
+                                                                                    {exec.trendReversedPnL !== undefined ? formatCurrency(exec.trendReversedPnL) : '-'}
                                                                                 </td>
                                                                                 <td className="px-3 py-2 text-right font-mono text-gray-500 text-[10px]">
                                                                                     {exec.pnl ? formatCurrency(exec.pnl) : '-'}

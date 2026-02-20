@@ -38,6 +38,8 @@ export interface Trade {
   slHit?: boolean;
   tpHit?: boolean;
   hitFirst?: 'SL' | 'TP';
+  trendReversed?: boolean;
+  trendReversedPnL?: number;
   journal?: TradeJournal;
 }
 
@@ -53,6 +55,8 @@ export interface Position {
   slHit?: boolean;
   tpHit?: boolean;
   hitFirst?: 'SL' | 'TP';
+  trendReversed?: boolean;
+  trendReversedPnL?: number;
 }
 
 // API request/response types

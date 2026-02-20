@@ -4,6 +4,8 @@ import { saveTradeSession } from '../utils/tradeStorage';
 import { groupTradesIntoPositions, calculatePerformanceStats, recalculateTradesPnL } from '../utils/tradeAnalysis';
 import { saveSession, loadSession, restoreBackup, saveSnapshot, listSnapshots, listHistory, deleteSnapshot, type SessionState } from '../services/firebaseSessionService';
 import { useNotificationStore } from './notificationStore';
+import { calculatePivotPoints } from '../utils/indicators';
+import { analyzeMarketStructure } from '../utils/pivotAnalysis';
 
 export interface SessionConfig {
   securityId: string;
@@ -68,6 +70,7 @@ interface SessionStore {
   setTradeQuantity: (qty: number) => void;
   setRiskPerTrade: (risk: number) => void;
   setManualLevels: (levels: { sl: number, target: number } | null) => void;
+  checkTrendReversal: (index: number) => void;
 
 
 
@@ -124,6 +127,7 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
     if (direction === 'forward' && currentIndex < candles.length - 1) {
       const nextIndex = currentIndex + 1;
       set({ currentIndex: nextIndex });
+      get().checkTrendReversal(nextIndex);
       get().checkSLTPHits(nextIndex);
     } else if (direction === 'backward' && currentIndex > 0) {
       set({ currentIndex: currentIndex - 1 });
@@ -291,9 +295,11 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
       stopLoss: stopLoss || (isSameDirection ? position?.stopLoss : undefined),
       target: target || (isSameDirection ? position?.target : undefined),
       exitReason: exitReason,
-      slHit: undefined,
-      tpHit: undefined,
-      hitFirst: undefined,
+      slHit: position?.slHit,
+      tpHit: position?.tpHit,
+      hitFirst: position?.hitFirst,
+      trendReversed: position?.trendReversed,
+      trendReversedPnL: position?.trendReversedPnL,
       journal: journal || undefined,
     };
 
@@ -327,6 +333,7 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
     }
 
     trade.pnl = tradePnL;
+    const isFlip = currentQty !== 0 && ((currentQty > 0 && newQty < 0) || (currentQty < 0 && newQty > 0));
 
     const newPositionState: Position = {
       instrument,
@@ -336,9 +343,11 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
       unrealizedPnL: 0,
       stopLoss: trade.stopLoss,
       target: trade.target,
-      slHit: undefined,
-      tpHit: undefined,
-      hitFirst: undefined,
+      slHit: isFlip ? undefined : position?.slHit,
+      tpHit: isFlip ? undefined : position?.tpHit,
+      hitFirst: isFlip ? undefined : position?.hitFirst,
+      trendReversed: isFlip ? undefined : position?.trendReversed,
+      trendReversedPnL: isFlip ? undefined : position?.trendReversedPnL,
     };
 
     set({
@@ -630,11 +639,55 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
     const newIndex = currentIndex + count;
     if (newIndex >= 0 && newIndex < candles.length) {
       set({ currentIndex: newIndex });
+      get().checkTrendReversal(newIndex);
       get().checkSLTPHits(newIndex);
     } else if (newIndex < 0) {
       set({ currentIndex: 0 });
     } else {
       set({ currentIndex: candles.length - 1 });
+    }
+  },
+
+  checkTrendReversal: (index: number) => {
+    const { candles, position, trades } = get();
+    if (!position || position.quantity === 0 || position.trendReversed) return;
+
+    const visibleCandles = candles.slice(0, index + 1);
+    const pivots = calculatePivotPoints(visibleCandles);
+    const { ltMarket } = analyzeMarketStructure(visibleCandles, pivots);
+
+    const direction = position.quantity > 0 ? "LONG" : "SHORT";
+    const isAgainst = (direction === 'LONG' && ltMarket.startsWith('Bear')) ||
+      (direction === 'SHORT' && ltMarket.startsWith('Bull'));
+
+    if (isAgainst) {
+      const currentCandle = candles[index];
+      const unrealizedPnL = (currentCandle.close - position.averagePrice) * position.quantity;
+
+      const updatedPosition = {
+        ...position,
+        trendReversed: true,
+        trendReversedPnL: unrealizedPnL
+      };
+
+      // Patch existing trades immediately so history/CSV reflects it even if we haven't exited
+      const updatedTrades = trades.map(t => {
+        const isEntry = (direction === 'LONG' && t.type === 'BUY') || (direction === 'SHORT' && t.type === 'SELL');
+        if (isEntry && !t.trendReversed) {
+          return { ...t, trendReversed: true, trendReversedPnL: unrealizedPnL };
+        }
+        return t;
+      });
+
+      set({
+        position: updatedPosition,
+        trades: updatedTrades
+      });
+
+      useNotificationStore.getState().notify(
+        `Trend Reversal Detected! P&L at reversal: ${unrealizedPnL.toFixed(2)}`,
+        'warning'
+      );
     }
   },
 

@@ -21,6 +21,8 @@ export interface GroupedPosition {
     slHit?: boolean;
     tpHit?: boolean;
     hitFirst?: 'SL' | 'TP';
+    trendReversed?: boolean;
+    trendReversedPnL?: number;
 }
 
 export interface TradePerformanceSummary {
@@ -69,6 +71,8 @@ export function groupTradesIntoPositions(trades: Trade[]): GroupedPosition[] {
                 slHit: trade.slHit,
                 tpHit: trade.tpHit,
                 hitFirst: trade.hitFirst,
+                trendReversed: trade.trendReversed,
+                trendReversedPnL: trade.trendReversedPnL,
                 executions: [trade],
             };
             // Note: We don't push to 'positions' yet, we keep it in 'currentPos' until closed or loop ends?
@@ -97,6 +101,10 @@ export function groupTradesIntoPositions(trades: Trade[]): GroupedPosition[] {
                 if (trade.slHit) currentPos.slHit = true;
                 if (trade.tpHit) currentPos.tpHit = true;
                 if (trade.hitFirst) currentPos.hitFirst = trade.hitFirst;
+                if (trade.trendReversed) {
+                    currentPos.trendReversed = true;
+                    currentPos.trendReversedPnL = trade.trendReversedPnL;
+                }
 
                 runningQty += tradeQtySigned;
             }
@@ -151,6 +159,10 @@ export function groupTradesIntoPositions(trades: Trade[]): GroupedPosition[] {
                     if (trade.slHit) currentPos.slHit = true;
                     if (trade.tpHit) currentPos.tpHit = true;
                     if (trade.hitFirst) currentPos.hitFirst = trade.hitFirst;
+                    if (trade.trendReversed) {
+                        currentPos.trendReversed = true;
+                        currentPos.trendReversedPnL = trade.trendReversedPnL;
+                    }
 
                     positions.push(currentPos);
 
@@ -184,6 +196,10 @@ export function groupTradesIntoPositions(trades: Trade[]): GroupedPosition[] {
                         if (trade.slHit) currentPos.slHit = true;
                         if (trade.tpHit) currentPos.tpHit = true;
                         if (trade.hitFirst) currentPos.hitFirst = trade.hitFirst;
+                        if (trade.trendReversed) {
+                            currentPos.trendReversed = true;
+                            currentPos.trendReversedPnL = trade.trendReversedPnL;
+                        }
                         positions.push(currentPos);
                         currentPos = null;
                     }

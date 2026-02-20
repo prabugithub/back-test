@@ -1,8 +1,6 @@
 import { useState, useRef, useEffect } from 'react';
 import { useSessionStore } from '../stores/sessionStore';
 import { formatCurrency } from '../utils/formatters';
-import { calculatePivotPoints } from '../utils/indicators';
-import { analyzeMarketStructure } from '../utils/pivotAnalysis';
 import { AlertCircle } from 'lucide-react';
 
 
@@ -75,13 +73,7 @@ export function PositionOverlay({ onOpenDetail }: { onOpenDetail?: () => void })
     const direction = position.quantity > 0 ? "LONG" : "SHORT";
     const absQty = Math.abs(position.quantity);
 
-    // Calculate Market Structure Alignment (Trading Timeframe)
-    const visibleCandles = candles.slice(0, currentIndex + 1);
-    const pivots = calculatePivotPoints(visibleCandles);
-    const { ltMarket } = analyzeMarketStructure(visibleCandles, pivots);
-
-    const isAgainst = (direction === 'LONG' && ltMarket.startsWith('Bear')) ||
-        (direction === 'SHORT' && ltMarket.startsWith('Bull'));
+    const isAgainst = position.trendReversed;
 
     // Unrealized P&L logic:
     // Long (Qty > 0): (Current - Entry) * Qty

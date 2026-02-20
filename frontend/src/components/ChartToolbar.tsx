@@ -17,6 +17,10 @@ import {
   Download
 } from 'lucide-react';
 import { useSessionStore } from '../stores/sessionStore';
+import { calculatePivotPoints } from '../utils/indicators';
+import { analyzeMarketStructure } from '../utils/pivotAnalysis';
+import { LayoutGrid } from 'lucide-react';
+
 
 export type DrawingTool = 'none' | 'select' | 'trendline' | 'horizontal' | 'rectangle' | 'fibonacci' | 'riskReward' | 'freehand' | 'text' | 'callout';
 export type Indicator = 'none' | 'sma21' | 'sma60' | 'ema21' | 'ema60' | 'pivotPoints' | 'alBrooks';
@@ -49,6 +53,19 @@ export function ChartToolbar({
   const [showIndicators, setShowIndicators] = useState(false);
   const showMarkers = useSessionStore((s) => s.showMarkers);
   const toggleMarkers = useSessionStore((s) => s.toggleMarkers);
+  const candles = useSessionStore((s) => s.candles);
+  const currentIndex = useSessionStore((s) => s.currentIndex);
+
+  // Calculate market structure for display
+  const visibleCandles = candles.slice(0, currentIndex + 1);
+  const pivots = visibleCandles.length >= 5 ? calculatePivotPoints(visibleCandles) : [];
+  const { ltMarket, htMarket } = visibleCandles.length >= 25 ? analyzeMarketStructure(visibleCandles, pivots) : { ltMarket: 'Initializing...', htMarket: 'Initializing...' };
+
+  const getStructureColor = (market: string) => {
+    if (market.startsWith('Bull')) return 'text-green-600 bg-green-50 border-green-200';
+    if (market.startsWith('Bear')) return 'text-red-600 bg-red-50 border-red-200';
+    return 'text-gray-600 bg-gray-50 border-gray-200';
+  };
 
   const tools: Array<{ id: DrawingTool; icon: any; label: string; shortcut: string }> = [
     { id: 'select', icon: MousePointer, label: 'Select', shortcut: 'V or 1' },
@@ -189,18 +206,34 @@ export function ChartToolbar({
         </div>
       </div>
 
-      {/* Info */}
-      <div className="ml-auto text-xs text-gray-500">
-        {activeTool === 'select' && (
-          <span className="text-blue-600 font-medium">
-            Click on a drawing to select it
-          </span>
-        )}
-        {activeTool !== 'none' && activeTool !== 'select' && (
-          <span className="text-blue-600 font-medium">
-            Click on chart to draw {tools.find(t => t.id === activeTool)?.label}
-          </span>
-        )}
+      {/* Market Structure (Desktop Only) */}
+      <div className="hidden md:flex items-center gap-2 ml-auto">
+        <div className="flex flex-col items-end mr-2 border-r pr-3 border-gray-100">
+          <span className="text-[10px] uppercase text-gray-400 font-bold leading-none mb-1">Market Context</span>
+          <div className="flex gap-1.5">
+            <div className={`px-2 py-0.5 rounded border text-[10px] font-bold flex items-center gap-1 ${getStructureColor(ltMarket)}`}>
+              <Activity size={10} />
+              <span>LT: {ltMarket}</span>
+            </div>
+            <div className={`px-2 py-0.5 rounded border text-[10px] font-bold flex items-center gap-1 ${getStructureColor(htMarket)}`}>
+              <LayoutGrid size={10} />
+              <span>HT: {htMarket}</span>
+            </div>
+          </div>
+        </div>
+
+        <div className="text-xs text-gray-500 min-w-[120px] text-right">
+          {activeTool === 'select' && (
+            <span className="text-blue-600 font-medium">
+              Click on a drawing to select it
+            </span>
+          )}
+          {activeTool !== 'none' && activeTool !== 'select' && (
+            <span className="text-blue-600 font-medium">
+              Click on chart to draw {tools.find(t => t.id === activeTool)?.label}
+            </span>
+          )}
+        </div>
       </div>
     </div>
   );
