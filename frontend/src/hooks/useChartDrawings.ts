@@ -40,6 +40,7 @@ export function useChartDrawings({
 }: UseChartDrawingsProps) {
   const setTradeQuantity = useSessionStore((s) => s.setTradeQuantity);
   const riskPerTrade = useSessionStore((s) => s.riskPerTrade);
+  const setManualLevels = useSessionStore((s) => s.setManualLevels);
 
   const [drawings, setDrawings] = useState<Drawing[]>([]);
   const [currentDrawing, setCurrentDrawing] = useState<Point[]>([]);
@@ -297,6 +298,7 @@ export function useChartDrawings({
     if (!selectedDrawingId) return;
     setDrawings(prev => prev.filter(d => d.id !== selectedDrawingId));
     setSelectedDrawingId(null);
+    setManualLevels(null);
   }, [selectedDrawingId]);
 
   const getDrawingColor = useCallback((tool: DrawingTool): string => {
@@ -370,6 +372,7 @@ export function useChartDrawings({
 
     if (activeToolRef.current === 'select') {
       setSelectedDrawingId(null);
+      setManualLevels(null);
       setIsDragging(false);
       return false;
     }
@@ -435,6 +438,12 @@ export function useChartDrawings({
               if (slDist > 0) {
                 const newQty = Math.floor(riskPerTrade / slDist);
                 setTradeQuantity(newQty);
+
+                // Sync levels
+                const entry = p1Price;
+                const sl = p2Price;
+                const target = entry + (entry - sl) * 2;
+                setManualLevels({ sl, target });
               }
             }
 
@@ -508,9 +517,16 @@ export function useChartDrawings({
         if (slDist > 0) {
           const newQty = Math.floor(riskPerTrade / slDist);
           setTradeQuantity(newQty);
+
+          // Sync levels
+          const entry = p1Price;
+          const sl = p2Price;
+          const target = entry + (entry - sl) * 2;
+          setManualLevels({ sl, target });
         }
       }
     }
+
 
     setCurrentDrawing([]);
     setIsDrawing(false);

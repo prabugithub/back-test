@@ -32,6 +32,8 @@ interface SessionStore {
   pendingTradeRequest: { type: 'BUY' | 'SELL', quantity: number, stopLoss?: number, target?: number } | null;
   tradeQuantity: number;
   riskPerTrade: number;
+  manualLevels: { sl: number, target: number } | null;
+
 
 
   // UI settings
@@ -65,6 +67,8 @@ interface SessionStore {
   toggleMarkers: () => void;
   setTradeQuantity: (qty: number) => void;
   setRiskPerTrade: (risk: number) => void;
+  setManualLevels: (levels: { sl: number, target: number } | null) => void;
+
 
 
   // Computed getters
@@ -94,6 +98,8 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
   showMarkers: true,
   tradeQuantity: 65,
   riskPerTrade: 10000,
+  manualLevels: null,
+
 
 
   // Actions
@@ -642,4 +648,5 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
   toggleMarkers: () => set((state) => ({ showMarkers: !state.showMarkers })),
   setTradeQuantity: (tradeQuantity) => set({ tradeQuantity }),
   setRiskPerTrade: (riskPerTrade) => set({ riskPerTrade }),
+  setManualLevels: (manualLevels) => set({ manualLevels }),
 }));

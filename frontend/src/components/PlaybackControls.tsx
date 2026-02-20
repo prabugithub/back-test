@@ -28,6 +28,7 @@ export function PlaybackControls({ onOpenHistory }: { onOpenHistory?: () => void
     tradeQuantity,
     setTradeQuantity,
     riskPerTrade,
+    manualLevels,
   } = useSessionStore();
 
 
@@ -323,16 +324,22 @@ export function PlaybackControls({ onOpenHistory }: { onOpenHistory?: () => void
     let sl = undefined;
     let target = undefined;
 
-    if (recentPivot) {
+    // Prioritize Manual Levels from Chart Drawings (RR Tool)
+    if (manualLevels) {
+      sl = manualLevels.sl;
+      target = manualLevels.target;
+    }
+    // Fallback to Pivot Points
+    else if (recentPivot) {
       const entryPrice = currentCandle.close;
       const slDist = recentPivot.slDistance;
 
       if (type === 'BUY') {
         sl = entryPrice - slDist;
-        target = entryPrice + (slDist * 2); // Default to 1:2 RR as the "Target"
+        target = entryPrice + (slDist * 2);
       } else {
         sl = entryPrice + slDist;
-        target = entryPrice - (slDist * 2); // Default to 1:2 RR
+        target = entryPrice - (slDist * 2);
       }
     }
 
