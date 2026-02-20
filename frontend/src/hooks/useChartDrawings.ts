@@ -372,7 +372,6 @@ export function useChartDrawings({
 
     if (activeToolRef.current === 'select') {
       setSelectedDrawingId(null);
-      setManualLevels(null);
       setIsDragging(false);
       return false;
     }

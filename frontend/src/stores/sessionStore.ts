@@ -276,7 +276,9 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
     const currentPrice = priceOverride || currentCandle.close;
     const timestamp = currentCandle.timestamp;
 
-    const finalExitReason = exitReason;
+    const tradeSign = type === 'BUY' ? 1 : -1;
+    const currentQty = position ? position.quantity : 0;
+    const isSameDirection = (currentQty >= 0 && tradeSign > 0) || (currentQty <= 0 && tradeSign < 0);
 
     // Create trade
     const trade: Trade = {
@@ -286,27 +288,23 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
       price: currentPrice,
       quantity,
       instrument,
-      stopLoss: stopLoss || position?.stopLoss,
-      target: target || position?.target,
-      exitReason: finalExitReason,
-      slHit: position?.slHit,
-      tpHit: position?.tpHit,
-      hitFirst: position?.hitFirst,
+      stopLoss: stopLoss || (isSameDirection ? position?.stopLoss : undefined),
+      target: target || (isSameDirection ? position?.target : undefined),
+      exitReason: exitReason,
+      slHit: undefined,
+      tpHit: undefined,
+      hitFirst: undefined,
       journal: journal || undefined,
     };
 
-    const currentQty = position ? position.quantity : 0;
     const currentAvgPrice = position ? position.averagePrice : 0;
 
-    const tradeSign = type === 'BUY' ? 1 : -1;
     const tradeQtySigned = quantity * tradeSign;
 
     let newQty = currentQty + tradeQtySigned;
     let newAvgPrice = currentAvgPrice;
     let newRealizedPnL = position ? position.realizedPnL : 0;
     let tradePnL = undefined;
-
-    const isSameDirection = (currentQty >= 0 && tradeSign > 0) || (currentQty <= 0 && tradeSign < 0);
 
     if (currentQty === 0) {
       newAvgPrice = currentPrice;
@@ -336,11 +334,11 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
       averagePrice: newAvgPrice,
       realizedPnL: newRealizedPnL,
       unrealizedPnL: 0,
-      stopLoss: stopLoss || position?.stopLoss,
-      target: target || position?.target,
-      slHit: position?.slHit,
-      tpHit: position?.tpHit,
-      hitFirst: position?.hitFirst,
+      stopLoss: trade.stopLoss,
+      target: trade.target,
+      slHit: undefined,
+      tpHit: undefined,
+      hitFirst: undefined,
     };
 
     set({

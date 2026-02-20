@@ -44,7 +44,7 @@ export function analyzePivotForTrade(
     const recentPivot = pivots[pivots.length - 1];
 
     // Determine LLHH-Pivot based on the pivot type and trend labels
-    result.llhhPivot = determineLLHHPivot(pivots, recentPivot);
+    result.llhhPivot = determineLLHHPivot(pivots);
 
     // Determine PivotPosition based on MA relationship
     result.pivotPosition = determinePivotPosition(visibleCandles, recentPivot, tradeType);
@@ -60,7 +60,7 @@ export function analyzePivotForTrade(
 /**
  * Automatically identifies market structure (Trend, Range, Reversal)
  */
-function analyzeMarketStructure(candles: Candle[], pivots: PivotPoint[]): { ltMarket: string, htMarket: string } {
+export function analyzeMarketStructure(candles: Candle[], pivots: PivotPoint[]): { ltMarket: string, htMarket: string } {
     if (candles.length < 25) return { ltMarket: 'Range', htMarket: 'Range' };
 
     const ema21 = calculateEMA(candles, 21);
@@ -127,7 +127,7 @@ function analyzeMarketStructure(candles: Candle[], pivots: PivotPoint[]): { ltMa
 /**
  * Determines the LLHH-Pivot pattern based on recent pivot points
  */
-function determineLLHHPivot(pivots: PivotPoint[], recentPivot: PivotPoint): 'HH-HL' | 'HH-LL' | 'LH-HL' | 'LH-LL' | '' {
+function determineLLHHPivot(pivots: PivotPoint[]): 'HH-HL' | 'HH-LL' | 'LH-HL' | 'LH-LL' | '' {
     // Find the last bullish and bearish pivots
     let lastBullishPivot: PivotPoint | null = null;
     let lastBearishPivot: PivotPoint | null = null;

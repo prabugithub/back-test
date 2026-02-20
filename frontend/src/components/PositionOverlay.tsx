@@ -1,6 +1,10 @@
 import { useState, useRef, useEffect } from 'react';
 import { useSessionStore } from '../stores/sessionStore';
 import { formatCurrency } from '../utils/formatters';
+import { calculatePivotPoints } from '../utils/indicators';
+import { analyzeMarketStructure } from '../utils/pivotAnalysis';
+import { AlertCircle } from 'lucide-react';
+
 
 export function PositionOverlay({ onOpenDetail }: { onOpenDetail?: () => void }) {
     const position = useSessionStore((s) => s.position);
@@ -68,9 +72,16 @@ export function PositionOverlay({ onOpenDetail }: { onOpenDetail?: () => void })
 
     const unrealizedPnL = (currentCandle.close - position.averagePrice) * position.quantity;
 
-    // Direction inference based on Quantity sign
     const direction = position.quantity > 0 ? "LONG" : "SHORT";
     const absQty = Math.abs(position.quantity);
+
+    // Calculate Market Structure Alignment (Trading Timeframe)
+    const visibleCandles = candles.slice(0, currentIndex + 1);
+    const pivots = calculatePivotPoints(visibleCandles);
+    const { ltMarket } = analyzeMarketStructure(visibleCandles, pivots);
+
+    const isAgainst = (direction === 'LONG' && ltMarket.startsWith('Bear')) ||
+        (direction === 'SHORT' && ltMarket.startsWith('Bull'));
 
     // Unrealized P&L logic:
     // Long (Qty > 0): (Current - Entry) * Qty
@@ -115,6 +126,16 @@ export function PositionOverlay({ onOpenDetail }: { onOpenDetail?: () => void })
                             {formatCurrency(unrealizedPnL)}
                         </span>
                     </div>
+
+                    {isAgainst && (
+                        <div className="flex items-center gap-1 bg-red-50 px-2 py-1 rounded border border-red-200 animate-pulse">
+                            <AlertCircle size={14} className="text-red-600" />
+                            <span className="text-[10px] font-bold text-red-700 uppercase">
+                                Trend Reverse
+                            </span>
+                        </div>
+                    )}
+
                     {onOpenDetail && (
                         <button
                             onClick={(e) => { e.stopPropagation(); onOpenDetail(); }}

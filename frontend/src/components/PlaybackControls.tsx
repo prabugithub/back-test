@@ -317,9 +317,14 @@ export function PlaybackControls({ onOpenHistory }: { onOpenHistory?: () => void
   const handleExecuteTrade = (type: 'BUY' | 'SELL') => {
     if (!currentCandle) return;
 
-    // Get recent pivot for SL/Target calculation
+    // Get pivots and find the most recent one that matches the trade direction
     const pivots = calculatePivotPoints(candles.slice(0, currentIndex + 1));
-    const recentPivot = pivots.length > 0 ? pivots[pivots.length - 1] : null;
+    const relevantPivot = pivots
+      .filter(p => type === 'BUY' ? p.type === 'bullish' : p.type === 'bearish')
+      .pop();
+
+    // Fallback to absolute latest pivot if no matching type found
+    const recentPivot = relevantPivot || (pivots.length > 0 ? pivots[pivots.length - 1] : null);
 
     let sl = undefined;
     let target = undefined;
