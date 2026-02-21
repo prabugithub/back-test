@@ -63,7 +63,8 @@ export function TradeJournalDialog() {
 
                 // 2. Al Brooks Signal Analysis
                 const visibleCandles = candles.slice(0, currentIndex + 1);
-                const alBrooksSignals = calculateAlBrooks(visibleCandles, true, 1.0);
+                const useAtrForSignals = useSessionStore.getState().useAtrForSignals;
+                const alBrooksSignals = calculateAlBrooks(visibleCandles, useAtrForSignals, 1.0);
 
                 // Check current and previous bar for signals
                 const currentCandle = candles[currentIndex];

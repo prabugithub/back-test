@@ -40,6 +40,7 @@ interface SessionStore {
 
   // UI settings
   showMarkers: boolean;
+  useAtrForSignals: boolean;
 
   // Actions
   loadCandles: (candles: Candle[], instrument: string, config?: SessionConfig) => void;
@@ -71,6 +72,7 @@ interface SessionStore {
   setRiskPerTrade: (risk: number) => void;
   setManualLevels: (levels: { sl: number, target: number } | null) => void;
   checkTrendReversal: (index: number) => void;
+  toggleAtrForSignals: () => void;
 
 
 
@@ -102,6 +104,7 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
   tradeQuantity: 65,
   riskPerTrade: 10000,
   manualLevels: null,
+  useAtrForSignals: true,
 
 
 
@@ -700,4 +703,5 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
   setTradeQuantity: (tradeQuantity) => set({ tradeQuantity }),
   setRiskPerTrade: (riskPerTrade) => set({ riskPerTrade }),
   setManualLevels: (manualLevels) => set({ manualLevels }),
+  toggleAtrForSignals: () => set((state) => ({ useAtrForSignals: !state.useAtrForSignals })),
 }));

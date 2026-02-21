@@ -55,6 +55,8 @@ export function ChartToolbar({
   const toggleMarkers = useSessionStore((s) => s.toggleMarkers);
   const candles = useSessionStore((s) => s.candles);
   const currentIndex = useSessionStore((s) => s.currentIndex);
+  const useAtrForSignals = useSessionStore((s) => s.useAtrForSignals);
+  const toggleAtrForSignals = useSessionStore((s) => s.toggleAtrForSignals);
 
   // Calculate market structure for display
   const visibleCandles = candles.slice(0, currentIndex + 1);
@@ -201,6 +203,16 @@ export function ChartToolbar({
                   </label>
                 );
               })}
+              <div className="border-t my-1 h-px bg-gray-100" />
+              <label className="flex items-center gap-2 px-2 py-1.5 hover:bg-gray-50 rounded cursor-pointer">
+                <input
+                  type="checkbox"
+                  checked={useAtrForSignals}
+                  onChange={toggleAtrForSignals}
+                  className="rounded text-blue-600"
+                />
+                <span className="text-xs font-semibold text-gray-700">Use ATR Depth</span>
+              </label>
             </div>
           )}
         </div>

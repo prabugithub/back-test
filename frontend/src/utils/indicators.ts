@@ -308,7 +308,8 @@ export function calculateAlBrooks(
   if (!candles || candles.length < 22) return result;
 
   // ── ATR Calculation (14-period) ──────────────────────────
-  const atrValues = usePullbackDepth ? calculateATR(candles, 14) : [];
+  // Always calculate ATR if we want consistent filtering logic or if requested
+  const atrValues = calculateATR(candles, 14);
   const getAtrAt = (timestamp: number) => {
     const found = atrValues.find((a) => a.time === timestamp);
     return found ? found.value : 0;
@@ -347,39 +348,40 @@ export function calculateAlBrooks(
 
     // Bull Candidate (H-signals)
     if (inBullPullback && waitingForBullSignal && c.high > c1.high) {
-      const depthOk = usePullbackDepth
-        ? c.low <= ema21 + getAtrAt(c.timestamp) * atrDepthMultiplier
-        : true;
+      bullLegCount++;
 
-      if (depthOk) {
-        bullLegCount++;
+      const depthOk = c.low <= ema21 + getAtrAt(c.timestamp) * atrDepthMultiplier;
+
+      // If NOT using quality filter, OR if it's quality enough, show it
+      if (!usePullbackDepth || depthOk) {
         const signal = `H${bullLegCount}` as AlBrooksSignal;
         result.push({ time: c.timestamp, signal });
-        waitingForBullSignal = false;
+      }
 
-        if (bullLegCount >= 3) {
-          bullLegCount = 0;
-          inBullPullback = false;
-        }
+      waitingForBullSignal = false;
+
+      if (bullLegCount >= 3) {
+        bullLegCount = 0;
+        inBullPullback = false;
       }
     }
 
     // Bear Candidate (L-signals)
     if (inBearPullback && waitingForBearSignal && c.low < c1.low) {
-      const depthOk = usePullbackDepth
-        ? c.high >= ema21 - getAtrAt(c.timestamp) * atrDepthMultiplier
-        : true;
+      bearLegCount++;
 
-      if (depthOk) {
-        bearLegCount++;
+      const depthOk = c.high >= ema21 - getAtrAt(c.timestamp) * atrDepthMultiplier;
+
+      if (!usePullbackDepth || depthOk) {
         const signal = `L${bearLegCount}` as AlBrooksSignal;
         result.push({ time: c.timestamp, signal });
-        waitingForBearSignal = false;
+      }
 
-        if (bearLegCount >= 3) {
-          bearLegCount = 0;
-          inBearPullback = false;
-        }
+      waitingForBearSignal = false;
+
+      if (bearLegCount >= 3) {
+        bearLegCount = 0;
+        inBearPullback = false;
       }
     }
 

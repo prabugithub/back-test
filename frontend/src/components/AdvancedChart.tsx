@@ -42,6 +42,7 @@ export function AdvancedChart() {
   const saveCurrentSession = useSessionStore((s) => s.saveCurrentSession);
   const saveRemoteSession = useSessionStore((s) => s.saveRemoteSession);
   const showMarkers = useSessionStore((s) => s.showMarkers);
+  const useAtrForSignals = useSessionStore((s) => s.useAtrForSignals);
 
   const visibleCandles = useMemo(() =>
     candles.slice(0, currentIndex + 1),
@@ -430,7 +431,7 @@ export function AdvancedChart() {
 
     // 3. Add Al Brooks Markers if active
     if (showMarkers && activeIndicators.includes('alBrooks')) {
-      const alBrooksSignals = calculateAlBrooks(visibleCandles, true, 1.0);
+      const alBrooksSignals = calculateAlBrooks(visibleCandles, useAtrForSignals, 1.0);
       alBrooksSignals.forEach((s) => {
         let color = '#00BCD4'; // Default aqua
         const signal = s.signal;
@@ -455,7 +456,7 @@ export function AdvancedChart() {
 
     allMarkers.sort((a, b) => (a.time as number) - (b.time as number));
     markersPrimitiveRef.current.setMarkers(allMarkers);
-  }, [activeIndicators, visibleCandles, trades, showMarkers]);
+  }, [activeIndicators, visibleCandles, trades, showMarkers, useAtrForSignals]);
 
   const handleIndicatorToggle = (indicator: Indicator) => {
     setActiveIndicators((prev) =>
