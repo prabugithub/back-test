@@ -283,7 +283,7 @@ export function calculatePivotPoints(candles: Candle[]): PivotPoint[] {
   return result;
 }
 
-export type AlBrooksSignal = 'H1' | 'H2' | 'H3' | 'L1' | 'L2' | 'L3';
+export type AlBrooksSignal = string; // 'H1','H2','H3','H4',... 'L1','L2','L3','L4',...
 
 export interface AlBrooksMarker {
   time: number;
@@ -291,12 +291,28 @@ export interface AlBrooksMarker {
 }
 
 /**
- * Calculate Al Brooks H1/H2/H3 – L1/L2/L3 pullback signals.
+ * Calculate Al Brooks H1/H2/H3/H4… – L1/L2/L3/L4… pullback signals.
  *
- * Core logic:
- *   - Pullback starts when price fails to make a new trend extreme.
- *   - A leg (H/L) fires when price breaks the high/low of a confirmed swing bar.
- *   - States are decoupled so a deep pullback (crossing MA) doesn't reset the count.
+ * Leg-based model with separate H / L counting:
+ *
+ *   H system (bull-context pullback counting):
+ *     - Continuous high breaks without low breaks = bull trend.
+ *     - Low break (c.low < c1.low) ARMS for H and sets
+ *       hSwingHigh = latestHigh (running max high since last H signal).
+ *       This captures the true high of the up-move even through inside bars.
+ *     - High break (c.high > c1.high) while armed → H signal fires.
+ *       Each signal increments hCount (H1, H2, H3…).
+ *     - If price exceeds hSwingHigh → hCount resets to 0, arm cleared.
+ *
+ *   L system (bear-context pullback counting):
+ *     - Continuous low breaks without high breaks = bear trend.
+ *     - High break (c.high > c1.high) ARMS for L and sets
+ *       lSwingLow = latestLow (running min low since last L signal).
+ *     - Low break (c.low < c1.low) while armed → L signal fires.
+ *     - If price drops below lSwingLow → lCount resets to 0, arm cleared.
+ *
+ *   Outside bars (bar breaks both sides):
+ *     - Close direction decides: bullish close → H only, bearish close → L only.
  */
 export function calculateAlBrooks(
   candles: Candle[],
@@ -307,13 +323,11 @@ export function calculateAlBrooks(
 
   if (!candles || candles.length < 22) return result;
 
-  // ── ATR Calculation (14-period) ──────────────────────────
-  // Always calculate ATR if we want consistent filtering logic or if requested
+  // ── ATR (14-period) for optional quality filter ──────────
   const atrValues = calculateATR(candles, 14);
-  const getAtrAt = (timestamp: number) => {
-    const found = atrValues.find((a) => a.time === timestamp);
-    return found ? found.value : 0;
-  };
+  const atrMap = new Map<number, number>();
+  for (const a of atrValues) atrMap.set(a.time, a.value);
+  const getAtr = (ts: number) => atrMap.get(ts) ?? 0;
 
   // ── EMA 21 ───────────────────────────────────────────────
   const ema21Period = 21;
@@ -325,93 +339,108 @@ export function calculateAlBrooks(
     ema21 = seed / ema21Period;
   }
 
-  // ── State (Separated for Bull/Bear) ───────────────────────
-  let highestHigh = NaN;
-  let bullLegCount = 0;
-  let inBullPullback = false;
-  let waitingForBullSignal = false;
+  // ── H System State (bull-context pullback counting) ───────
+  let hCount = 0;
+  let hArmed = false;       // true after a low break (pullback started)
+  let hSwingHigh = -Infinity;   // price level at pullback start; reset threshold
+  let latestHigh = -Infinity;   // running max high since last H signal
 
-  let lowestLow = NaN;
-  let bearLegCount = 0;
-  let inBearPullback = false;
-  let waitingForBearSignal = false;
+  // ── L System State (bear-context pullback counting) ───────
+  let lCount = 0;
+  let lArmed = false;       // true after a high break (pullback started)
+  let lSwingLow = Infinity;    // price level at pullback start; reset threshold
+  let latestLow = Infinity;    // running min low since last L signal
 
   // ── Main loop ─────────────────────────────────────────────
   for (let i = ema21Period; i < candles.length; i++) {
     const c = candles[i];
-    const c1 = candles[i - 1]; // bar[-1]
+    const c1 = candles[i - 1];
 
-    // Update EMA21
     ema21 = (c.close - ema21) * ema21Mult + ema21;
 
-    // ── 1. Check Signals (Fire BEFORE reset/update) ─────────
+    const highBreak = c.high > c1.high;
+    const lowBreak = c.low < c1.low;
 
-    // Bull Candidate (H-signals)
-    if (inBullPullback && waitingForBullSignal && c.high > c1.high) {
-      bullLegCount++;
+    // ── Update running extreme trackers ──────────────────
+    // These accumulate since the last signal of their type,
+    // so swing points capture the true move even through
+    // inside bars.
+    latestHigh = Math.max(latestHigh, c.high);
+    latestLow = Math.min(latestLow, c.low);
 
-      const depthOk = c.low <= ema21 + getAtrAt(c.timestamp) * atrDepthMultiplier;
 
-      // If NOT using quality filter, OR if it's quality enough, show it
+    // ── 2. Capture arm state from BEFORE this bar ────────
+    // Ensures the bar that starts a pullback cannot also fire
+    // the signal on the same bar.
+    const wasHArmed = hArmed;
+    const wasLArmed = lArmed;
+
+    // ── 3. Arm on pullback start ─────────────────────────
+    // H arm: low break starts a pullback in bull context.
+    //        hSwingHigh = latestHigh (the true high of the
+    //        up-move, even if the previous bar was an inside bar).
+    if (lowBreak && !hArmed) {
+      hArmed = true;
+      hSwingHigh = latestHigh;
+    }
+    // L arm: high break starts a pullback in bear context.
+    //        lSwingLow = latestLow (the true low of the
+    //        down-move, even if the previous bar was an inside bar).
+    if (highBreak && !lArmed) {
+      lArmed = true;
+      lSwingLow = latestLow;
+    }
+
+    // ── 4. Signal checks (using previous arm state) ──────
+    let canFireH = highBreak && wasHArmed;
+    let canFireL = lowBreak && wasLArmed;
+
+    // Outside bar: both sides break → close direction decides.
+    if (canFireH && canFireL) {
+      const isBullishClose = c.close >= c.open;
+      canFireH = isBullishClose;
+      canFireL = !isBullishClose;
+    }
+
+    // ── Fire H signal ────────────────────────────────────
+    if (canFireH) {
+      hCount++;
+      hArmed = false;
+      latestHigh = c.high;  // reset tracker for next up-move
+
+      const depthOk = c.low <= ema21 + getAtr(c.timestamp) * atrDepthMultiplier;
       if (!usePullbackDepth || depthOk) {
-        const signal = `H${bullLegCount}` as AlBrooksSignal;
-        result.push({ time: c.timestamp, signal });
-      }
-
-      waitingForBullSignal = false;
-
-      if (bullLegCount >= 3) {
-        bullLegCount = 0;
-        inBullPullback = false;
+        result.push({ time: c.timestamp, signal: `H${hCount}` });
       }
     }
 
-    // Bear Candidate (L-signals)
-    if (inBearPullback && waitingForBearSignal && c.low < c1.low) {
-      bearLegCount++;
+    // ── Fire L signal ────────────────────────────────────
+    if (canFireL) {
+      lCount++;
+      lArmed = false;
+      latestLow = c.low;   // reset tracker for next down-move
 
-      const depthOk = c.high >= ema21 - getAtrAt(c.timestamp) * atrDepthMultiplier;
-
+      const depthOk = c.high >= ema21 - getAtr(c.timestamp) * atrDepthMultiplier;
       if (!usePullbackDepth || depthOk) {
-        const signal = `L${bearLegCount}` as AlBrooksSignal;
-        result.push({ time: c.timestamp, signal });
-      }
-
-      waitingForBearSignal = false;
-
-      if (bearLegCount >= 3) {
-        bearLegCount = 0;
-        inBearPullback = false;
+        result.push({ time: c.timestamp, signal: `L${lCount}` });
       }
     }
 
-    // ── 2. Update Trend State & Reset counts ────────────────
-
-    // Bull Trend Update
-    if (isNaN(highestHigh) || c.high > highestHigh) {
-      highestHigh = c.high;
-      bullLegCount = 0;
-      inBullPullback = false;
-      waitingForBullSignal = false;
-    } else if (c.high < highestHigh) {
-      inBullPullback = true;
-      if (c.high <= c1.high) {
-        waitingForBullSignal = true; // Bar failed to break high -> looking to fire on next break
-      }
+    // ── 1. Reset checks (highest priority) ───────────────
+    // H reset: price exceeds hSwingHigh → trend resumed,
+    //          count resets and current arm is invalidated.
+    if (hSwingHigh !== -Infinity && c.high > hSwingHigh) {
+      hCount = 0;
+      hArmed = false;
+      hSwingHigh = -Infinity;
+    }
+    // L reset: price drops below lSwingLow → bear trend resumed.
+    if (lSwingLow !== Infinity && c.low < lSwingLow) {
+      lCount = 0;
+      lArmed = false;
+      lSwingLow = Infinity;
     }
 
-    // Bear Trend Update
-    if (isNaN(lowestLow) || c.low < lowestLow) {
-      lowestLow = c.low;
-      bearLegCount = 0;
-      inBearPullback = false;
-      waitingForBearSignal = false;
-    } else if (c.low > lowestLow) {
-      inBearPullback = true;
-      if (c.low >= c1.low) {
-        waitingForBearSignal = true; // Bar failed to break low -> looking to fire on next break
-      }
-    }
   }
 
   return result;

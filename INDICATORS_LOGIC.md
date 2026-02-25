@@ -2,7 +2,7 @@
 
 This document details the logic and calculations for the technical indicators and trade performance metrics used in the generic backtesting application.
 
-**Last Updated:** 2026-02-05
+**Last Updated:** 2026-02-24
 
 ---
 
@@ -137,3 +137,40 @@ Logic for grouping individual trade orders into positions and calculating perfor
 - **Average Win:** `Total Profit / Number of Winning Trades`
 - **Average Loss:** `Total Loss / Number of Losing Trades`
 - **Realized PnL:** Calculated using the difference between Entry Price and Exit Price multiplied by the Quantity closed.
+
+---
+
+## 6. Al Brooks H/L Pullback Counting
+
+Identifies pullback buy/sell signals (H1, H2, H3… and L1, L2, L3…) using a **leg-based model with separate H and L counting**.
+
+### Core Concept
+H and L systems are tracked **independently**. Each detects pullback legs within its own trend context (bull for H, bear for L).
+
+### H System (Bull-Context Pullback Counting)
+1. **Continuous high breaks** without low breaks = bull trend.
+2. **Low break** (`c.low < c1.low`) → **arms** for H signal, sets `hSwingHigh = latestHigh` (running max high since last H signal, captures the true high even through inside bars).
+3. **High break** (`c.high > c1.high`) while armed → **H signal fires** (H1, H2, H3…).
+4. **Reset:** If price exceeds `hSwingHigh` → `hCount` resets to 0 and arm is cleared. Next signal restarts from H1.
+
+### L System (Bear-Context Pullback Counting)
+1. **Continuous low breaks** without high breaks = bear trend.
+2. **High break** (`c.high > c1.high`) → **arms** for L signal, sets `lSwingLow = latestLow` (running min low since last L signal).
+3. **Low break** (`c.low < c1.low`) while armed → **L signal fires** (L1, L2, L3…).
+4. **Reset:** If price drops below `lSwingLow` → `lCount` resets to 0 and arm is cleared.
+
+### Inside Bar Handling
+- `latestHigh` / `latestLow` are **running extremes** (not just the previous bar), so swing points capture the true high/low of the preceding move even through clusters of inside bars.
+- `latestHigh` resets when an H signal fires; `latestLow` resets when an L signal fires.
+
+### Outside Bar Resolution
+When a single bar breaks **both** the previous bar's high and low:
+- **Bullish close** (`close >= open`) → fires **H only**
+- **Bearish close** (`close < open`) → fires **L only**
+
+### Same-Bar Guard
+The bar that **starts** a pullback (arms the system) **cannot** also fire the signal on the same bar. The signal uses the arm state from before the current bar.
+
+### Optional Depth Filter
+- When `usePullbackDepth` is enabled, H signals only fire if `c.low <= EMA21 + ATR * multiplier` and L signals only fire if `c.high >= EMA21 - ATR * multiplier`.
+
