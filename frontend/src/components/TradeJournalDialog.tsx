@@ -70,11 +70,18 @@ export function TradeJournalDialog() {
                 const currentCandle = candles[currentIndex];
                 const prevCandle = currentIndex > 0 ? candles[currentIndex - 1] : null;
 
-                const currentSignal = alBrooksSignals.find(s => s.time === currentCandle.timestamp);
-                const prevSignal = prevCandle ? alBrooksSignals.find(s => s.time === prevCandle.timestamp) : null;
+                const currentMarker = alBrooksSignals.find(s => s.time === currentCandle.timestamp);
+                const prevMarker = prevCandle ? alBrooksSignals.find(s => s.time === prevCandle.timestamp) : null;
 
-                // Prioritize current bar, then previous
-                const activeSignal = currentSignal || prevSignal;
+                // Helper to extract a valid entry signal (1-3)
+                const getValidSignal = (marker: any) => {
+                    if (!marker) return null;
+                    const num = parseInt(marker.signal.substring(1));
+                    return (num >= 1 && num <= 3) ? marker : null;
+                };
+
+                // Prioritize valid signal on current bar, then valid signal on previous bar
+                const activeSignal = getValidSignal(currentMarker) || getValidSignal(prevMarker);
 
                 if (activeSignal) {
                     const signalName = activeSignal.signal; // H1, H2, H3, L1, L2, L3
@@ -82,7 +89,7 @@ export function TradeJournalDialog() {
 
                     const isLong = tradeType === 'BUY';
                     const isH = signalName.startsWith('H');
-                    const num = signalName.substring(1); // 1, 2, or 3
+                    const num = signalName.substring(1);
 
                     // Normal trend entries
                     if ((isLong && isH) || (!isLong && !isH)) {

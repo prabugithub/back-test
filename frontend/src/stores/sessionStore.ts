@@ -285,7 +285,41 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
 
     const tradeSign = type === 'BUY' ? 1 : -1;
     const currentQty = position ? position.quantity : 0;
-    const isSameDirection = (currentQty >= 0 && tradeSign > 0) || (currentQty <= 0 && tradeSign < 0);
+    const tradeQtySigned = quantity * tradeSign;
+    const newQty = currentQty + tradeQtySigned;
+
+    const isSameDirection = (currentQty > 0 && tradeSign > 0) || (currentQty < 0 && tradeSign < 0);
+    const isReducing = (currentQty > 0 && tradeSign < 0) || (currentQty < 0 && tradeSign > 0);
+    const isSameSide = (currentQty > 0 && newQty > 0) || (currentQty < 0 && newQty < 0);
+    const isFlip = isReducing && !isSameSide && newQty !== 0;
+
+    // Determine if initial entry/flip is with trend
+    const visibleCandlesForEntry = candles.slice(0, currentIndex + 1);
+    const pivotsForEntry = calculatePivotPoints(visibleCandlesForEntry);
+    const { ltMarket } = analyzeMarketStructure(visibleCandlesForEntry, pivotsForEntry);
+    const isInitialWith = (type === 'BUY' && ltMarket.startsWith('Bull')) || (type === 'SELL' && ltMarket.startsWith('Bear'));
+
+    // Inherit SL/Target from position if not provided, but only if we stay on the same side.
+    // If reducing, we prioritize the existing position's levels over any newly calculated ones 
+    // (which might be for the wrong direction, e.g. a SELL target for a LONG position).
+    let tradeStopLoss = stopLoss;
+    let tradeTarget = target;
+
+    if (isSameSide) {
+      if (isReducing) {
+        // Priority for reduction: Explicit > Old Position (Ignore new levels if they are wrong-way)
+        const isL = newQty > 0;
+        const isTargetWrong = target !== undefined && ((isL && target < currentPrice) || (!isL && target > currentPrice));
+        const isSLWrong = stopLoss !== undefined && ((isL && stopLoss > currentPrice) || (!isL && stopLoss < currentPrice));
+
+        tradeTarget = (target === undefined || isTargetWrong) ? position?.target : target;
+        tradeStopLoss = (stopLoss === undefined || isSLWrong) ? position?.stopLoss : stopLoss;
+      } else if (isSameDirection) {
+        // Priority for add-on: Explicit > Old Position
+        tradeTarget = target ?? position?.target;
+        tradeStopLoss = stopLoss ?? position?.stopLoss;
+      }
+    }
 
     // Create trade
     const trade: Trade = {
@@ -295,22 +329,20 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
       price: currentPrice,
       quantity,
       instrument,
-      stopLoss: stopLoss || (isSameDirection ? position?.stopLoss : undefined),
-      target: target || (isSameDirection ? position?.target : undefined),
+      stopLoss: tradeStopLoss,
+      target: tradeTarget,
       exitReason: exitReason,
       slHit: position?.slHit,
       tpHit: position?.tpHit,
       hitFirst: position?.hitFirst,
       trendReversed: position?.trendReversed,
       trendReversedPnL: position?.trendReversedPnL,
+      withTrendSeen: isSameSide ? (position?.withTrendSeen || isInitialWith) : isInitialWith,
       journal: journal || undefined,
     };
 
     const currentAvgPrice = position ? position.averagePrice : 0;
 
-    const tradeQtySigned = quantity * tradeSign;
-
-    let newQty = currentQty + tradeQtySigned;
     let newAvgPrice = currentAvgPrice;
     let newRealizedPnL = position ? position.realizedPnL : 0;
     let tradePnL = undefined;
@@ -336,7 +368,6 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
     }
 
     trade.pnl = tradePnL;
-    const isFlip = currentQty !== 0 && ((currentQty > 0 && newQty < 0) || (currentQty < 0 && newQty > 0));
 
     const newPositionState: Position = {
       instrument,
@@ -351,6 +382,7 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
       hitFirst: isFlip ? undefined : position?.hitFirst,
       trendReversed: isFlip ? undefined : position?.trendReversed,
       trendReversedPnL: isFlip ? undefined : position?.trendReversedPnL,
+      withTrendSeen: trade.withTrendSeen,
     };
 
     set({
@@ -660,10 +692,25 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
     const { ltMarket } = analyzeMarketStructure(visibleCandles, pivots);
 
     const direction = position.quantity > 0 ? "LONG" : "SHORT";
+
+    // Check if trend is aligned or against the position
     const isAgainst = (direction === 'LONG' && ltMarket.startsWith('Bear')) ||
       (direction === 'SHORT' && ltMarket.startsWith('Bull'));
 
-    if (isAgainst) {
+    const isWith = (direction === 'LONG' && ltMarket.startsWith('Bull')) ||
+      (direction === 'SHORT' && ltMarket.startsWith('Bear'));
+
+    // 1. If we are now aligned with the trend, mark the position as having seen alignment
+    if (isWith && !position.withTrendSeen) {
+      set({
+        position: { ...position, withTrendSeen: true }
+      });
+      return;
+    }
+
+    // 2. If we are against the trend, only trigger notification if we were previously aligned
+    // This prevents notifications for trades intentionally entered counter-trend
+    if (isAgainst && position.withTrendSeen) {
       const currentCandle = candles[index];
       const unrealizedPnL = (currentCandle.close - position.averagePrice) * position.quantity;
 
@@ -673,7 +720,7 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
         trendReversedPnL: unrealizedPnL
       };
 
-      // Patch existing trades immediately so history/CSV reflects it even if we haven't exited
+      // Patch existing trades immediately so history/CSV reflects it
       const updatedTrades = trades.map(t => {
         const isEntry = (direction === 'LONG' && t.type === 'BUY') || (direction === 'SHORT' && t.type === 'SELL');
         if (isEntry && !t.trendReversed) {
