@@ -118,6 +118,9 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
       trades: [],
       position: null,
       isPlaying: false,
+      manualLevels: null,
+      pendingExitRequest: null,
+      pendingTradeRequest: null,
     });
   },
 
@@ -159,18 +162,18 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
 
     // 1. Check Close Hit (Dialog Trigger)
     if (isLong) {
-      if (sl > 0 && close < (sl - eps)) {
+      if (sl > 0 && close < (sl - eps) && !position.slHit) {
         hitType = 'SL';
         hitPrice = sl;
-      } else if (tp > 0 && close > (tp + eps)) {
+      } else if (tp > 0 && close > (tp + eps) && !position.tpHit) {
         hitType = 'TP';
         hitPrice = tp;
       }
     } else {
-      if (sl > 0 && close > (sl + eps)) {
+      if (sl > 0 && close > (sl + eps) && !position.slHit) {
         hitType = 'SL';
         hitPrice = sl;
-      } else if (tp > 0 && close < (tp - eps)) {
+      } else if (tp > 0 && close < (tp - eps) && !position.tpHit) {
         hitType = 'TP';
         hitPrice = tp;
       }
@@ -203,7 +206,8 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
     }
 
     if (hitType) {
-      if ((hitType === 'SL' && position.slHit) || (hitType === 'TP' && position.tpHit)) return;
+      // Only notify if we haven't recorded ANY hit yet for this position
+      if (position.hitFirst) return;
 
       useNotificationStore.getState().notify(
         `${hitType} Hit at ${hitPrice.toFixed(2)} (High/Low movement)!`,
@@ -213,9 +217,9 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
       set({
         position: {
           ...position,
-          slHit: hitType === 'SL' ? true : (position.slHit || false),
-          tpHit: hitType === 'TP' ? true : (position.tpHit || false),
-          hitFirst: position.hitFirst || hitType,
+          // We set hitFirst but NOT slHit/tpHit here. 
+          // slHit/tpHit remain false so that the Close-based dialog can still trigger later.
+          hitFirst: hitType,
         }
       });
     }
@@ -247,9 +251,18 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
         pendingExitRequest.type,
         journal
       );
+      set({ pendingExitRequest: null });
+    } else {
+      // If user cancels, mark as hit so we don't immediately prompt again for the same level
+      set({
+        position: {
+          ...position,
+          slHit: pendingExitRequest.type === 'SL' ? true : position.slHit,
+          tpHit: pendingExitRequest.type === 'TP' ? true : position.tpHit,
+        },
+        pendingExitRequest: null
+      });
     }
-
-    set({ pendingExitRequest: null });
   },
 
   initiateTrade: (type, quantity, stopLoss, target) => {
@@ -312,20 +325,26 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
     let tradeStopLoss = stopLoss;
     let tradeTarget = target;
 
+    // Determine if SL/Target are "wrong-way" for the new quantity
+    const isL = newQty > 0;
+    const isS = newQty < 0;
+    const isTargetWrong = target !== undefined && ((isL && target < currentPrice) || (isS && target > currentPrice));
+    const isSLWrong = stopLoss !== undefined && ((isL && stopLoss > currentPrice) || (isS && stopLoss < currentPrice));
+
     if (isSameSide) {
       if (isReducing) {
         // Priority for reduction: Explicit > Old Position (Ignore new levels if they are wrong-way)
-        const isL = newQty > 0;
-        const isTargetWrong = target !== undefined && ((isL && target < currentPrice) || (!isL && target > currentPrice));
-        const isSLWrong = stopLoss !== undefined && ((isL && stopLoss > currentPrice) || (!isL && stopLoss < currentPrice));
-
         tradeTarget = (target === undefined || isTargetWrong) ? position?.target : target;
         tradeStopLoss = (stopLoss === undefined || isSLWrong) ? position?.stopLoss : stopLoss;
       } else if (isSameDirection) {
-        // Priority for add-on: Explicit > Old Position
-        tradeTarget = target ?? position?.target;
-        tradeStopLoss = stopLoss ?? position?.stopLoss;
+        // Priority for add-on: Explicit > Old Position (ALSO check for wrong-way levels)
+        tradeTarget = (target === undefined || isTargetWrong) ? position?.target : target;
+        tradeStopLoss = (stopLoss === undefined || isSLWrong) ? position?.stopLoss : stopLoss;
       }
+    } else if (newQty !== 0) {
+      // Flip or Fresh Entry: Use passed levels if they are valid, otherwise empty (don't inherit from previous side)
+      tradeTarget = isTargetWrong ? undefined : target;
+      tradeStopLoss = isSLWrong ? undefined : stopLoss;
     }
 
     // Create trade
@@ -384,9 +403,9 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
       unrealizedPnL: 0,
       stopLoss: trade.stopLoss,
       target: trade.target,
-      slHit: isFlip ? undefined : position?.slHit,
-      tpHit: isFlip ? undefined : position?.tpHit,
-      hitFirst: isFlip ? undefined : position?.hitFirst,
+      slHit: (isFlip || trade.stopLoss !== position?.stopLoss) ? undefined : position?.slHit,
+      tpHit: (isFlip || trade.target !== position?.target) ? undefined : position?.tpHit,
+      hitFirst: (isFlip || trade.stopLoss !== position?.stopLoss || trade.target !== position?.target) ? undefined : position?.hitFirst,
       trendReversed: isFlip ? undefined : position?.trendReversed,
       trendReversedPnL: isFlip ? undefined : position?.trendReversedPnL,
       withTrendSeen: trade.withTrendSeen,
@@ -395,6 +414,7 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
     set({
       trades: [...trades, trade],
       position: newQty !== 0 ? newPositionState : null,
+      manualLevels: null, // Clear manual levels after executing a trade
     });
   },
 
@@ -404,6 +424,9 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
       trades: [],
       position: null,
       isPlaying: false,
+      manualLevels: null,
+      pendingExitRequest: null,
+      pendingTradeRequest: null,
     });
   },
 
