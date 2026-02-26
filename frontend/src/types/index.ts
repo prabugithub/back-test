@@ -11,7 +11,7 @@ export interface Candle {
 export interface TradeJournal {
   ltMarket: string;
   htMarket: string;
-  pivotPosition: string;
+  entryPosition: string;
   llhhPivot: string;
   entrySign: string;
   notes: string;

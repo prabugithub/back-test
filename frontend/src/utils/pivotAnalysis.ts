@@ -3,7 +3,7 @@ import { calculatePivotPoints, calculateEMA, type PivotPoint } from './indicator
 
 export interface PivotAnalysisResult {
     llhhPivot: 'HH-HL' | 'HH-LL' | 'LH-HL' | 'LH-LL' | '';
-    pivotPosition: 'gap' | 'on-MA' | 'gap-opposite' | '';
+    entryPosition: 'gap' | 'on-MA' | 'gap-opposite' | '';
     ltMarket: string;
     htMarket: string;
 }
@@ -11,7 +11,7 @@ export interface PivotAnalysisResult {
 /**
  * Analyzes the most recent pivot point and determines:
  * 1. LLHH-Pivot: The trend pattern (HH-HL, HH-LL, LH-HL, LH-LL)
- * 2. PivotPosition: Whether the pivot is on MA, gap (same side as trade), or gap-opposite
+ * 2. EntryPosition: Whether the pivot is on MA, gap (same side as trade), or gap-opposite
  */
 export function analyzePivotForTrade(
     candles: Candle[],
@@ -20,7 +20,7 @@ export function analyzePivotForTrade(
 ): PivotAnalysisResult {
     const result: PivotAnalysisResult = {
         llhhPivot: '',
-        pivotPosition: '',
+        entryPosition: '',
         ltMarket: 'Range',
         htMarket: 'Range',
     };
@@ -46,13 +46,59 @@ export function analyzePivotForTrade(
     // Determine LLHH-Pivot based on the pivot type and trend labels
     result.llhhPivot = determineLLHHPivot(pivots);
 
-    // Determine PivotPosition based on MA relationship
-    result.pivotPosition = determinePivotPosition(visibleCandles, recentPivot, tradeType);
+    // ONLY set entryPosition if the pivot is EXACTLY at the current index (Pivot Entry)
+    // Otherwise, we leave it empty so the caller can fallback to manual analysis
+    const isPivotAtCurrent = recentPivot.time === candles[currentIndex].timestamp;
+    if (isPivotAtCurrent) {
+        result.entryPosition = determinePivotPosition(visibleCandles, recentPivot, tradeType);
+    }
 
     // Analyze Market Structure
     const marketStructure = analyzeMarketStructure(visibleCandles, pivots);
     result.ltMarket = marketStructure.ltMarket;
     result.htMarket = marketStructure.htMarket;
+
+    return result;
+}
+
+/**
+ * Specifically for manual entries:
+ * 1. Checks relationship of the LAST THREE candles with MA
+ * 2. Still finds the RECENT pivot to determine LLHH trend
+ */
+export function analyzeManualEntry(
+    candles: Candle[],
+    currentIndex: number,
+    tradeType: 'BUY' | 'SELL'
+): PivotAnalysisResult {
+    const result: PivotAnalysisResult = {
+        llhhPivot: '',
+        entryPosition: '',
+        ltMarket: 'Range',
+        htMarket: 'Range',
+    };
+
+    if (!candles || candles.length < 5 || currentIndex < 2) {
+        return result;
+    }
+
+    const visibleCandles = candles.slice(0, currentIndex + 1);
+    const pivots = calculatePivotPoints(visibleCandles);
+
+    // 1. LLHH-Pivot from recent pivots
+    if (pivots.length > 0) {
+        result.llhhPivot = determineLLHHPivot(pivots);
+    }
+
+    // 2. entryPosition from LAST THREE candles (currentIndex, currentIndex-1, currentIndex-2)
+    result.entryPosition = calculateMAPosition(candles, currentIndex, tradeType);
+
+    // 3. Market Structure
+    if (pivots.length > 0) {
+        const marketStructure = analyzeMarketStructure(visibleCandles, pivots);
+        result.ltMarket = marketStructure.ltMarket;
+        result.htMarket = marketStructure.htMarket;
+    }
 
     return result;
 }
@@ -164,112 +210,71 @@ function determineLLHHPivot(pivots: PivotPoint[]): 'HH-HL' | 'HH-LL' | 'LH-HL' |
 }
 
 /**
+ * Generic function to calculate MA position for any given 3 candles ending at 'index'
+ */
+function calculateMAPosition(
+    candles: Candle[],
+    index: number,
+    tradeType: 'BUY' | 'SELL'
+): 'gap' | 'on-MA' | 'gap-opposite' | '' {
+    const ema21 = calculateEMA(candles, 21);
+    if (ema21.length === 0 || index < 2) return '';
+
+    const testCandles = [
+        candles[index],
+        candles[index - 1],
+        candles[index - 2],
+    ];
+
+    // Build lookup map for efficiency
+    const maMap = new Map(ema21.map(m => [m.time, m.value]));
+
+    const maValues = testCandles.map(c => maMap.get(c.timestamp) ?? null);
+
+    if (maValues.some(ma => ma === null)) return '';
+
+    // Use a small buffer to avoid floating point precision issues
+    // 0.0001 (0.01%) is usually plenty to distinguish a gap from a touch
+    const bufferMult = 0.0001;
+
+    const allClosesAboveMA = testCandles.every((c, i) => c.close > maValues[i]!);
+    const allClosesBelowMA = testCandles.every((c, i) => c.close < maValues[i]!);
+
+    if (tradeType === 'BUY') {
+        if (allClosesBelowMA) return 'gap-opposite';
+
+        const anyLowTouchesMA = testCandles.some((c, i) => {
+            const ma = maValues[i]!;
+            const buffer = ma * bufferMult;
+            // Touches if: low <= MA <= high (with small buffer room)
+            return c.low <= ma + buffer && c.high >= ma - buffer;
+        });
+
+        if (anyLowTouchesMA) return 'on-MA';
+        return 'gap';
+    } else {
+        if (allClosesAboveMA) return 'gap-opposite';
+
+        const anyHighTouchesMA = testCandles.some((c, i) => {
+            const ma = maValues[i]!;
+            const buffer = ma * bufferMult;
+            return c.low <= ma + buffer && c.high >= ma - buffer;
+        });
+
+        if (anyHighTouchesMA) return 'on-MA';
+        return 'gap';
+    }
+}
+
+/**
  * Determines the pivot position relative to the MA
- * - 'on-MA': Any of the three pivot candles' close is very near MA (within small threshold)
- * - 'gap-opposite': ALL three pivot candles close on opposite side of MA from trade direction
- * - 'gap': Default when not on-MA or gap-opposite
  */
 function determinePivotPosition(
     candles: Candle[],
     pivot: PivotPoint,
     tradeType: 'BUY' | 'SELL'
 ): 'gap' | 'on-MA' | 'gap-opposite' | '' {
-    // Calculate EMA21 (commonly used MA)
-    const ema21 = calculateEMA(candles, 21);
-
-    if (ema21.length === 0) {
-        return '';
-    }
-
-    // Find the pivot candle index
     const pivotIndex = candles.findIndex(c => c.timestamp === pivot.time);
-
-    if (pivotIndex < 2) {
-        return '';
-    }
-
-    // Get the three candles that form the pivot (current and 2 previous)
-    const pivotCandles = [
-        candles[pivotIndex],
-        candles[pivotIndex - 1],
-        candles[pivotIndex - 2],
-    ];
-
-    // Get MA values for all three pivot candles
-    const maValues = pivotCandles.map(candle => {
-        const maAtCandle = ema21.find(ma => ma.time === candle.timestamp);
-        return maAtCandle ? maAtCandle.value : null;
-    });
-
-    // If we can't find MA values for all candles, return empty
-    if (maValues.some(ma => ma === null)) {
-        return '';
-    }
-
-    // Check if ALL three pivot candles' closes are above or below MA
-    const allClosesAboveMA = pivotCandles.every((candle, index) => {
-        const maValue = maValues[index]!;
-        return candle.close > maValue;
-    });
-
-    const allClosesBelowMA = pivotCandles.every((candle, index) => {
-        const maValue = maValues[index]!;
-        return candle.close < maValue;
-    });
-
-    // For LONG trades (BUY):
-    // - gap-opposite: ALL three closes below MA (opposite side - check CLOSE only)
-    // - on-MA: Any candle's LOW touches MA from above (same side - check WICK)
-    // - gap: Default
-
-    // For SHORT trades (SELL):
-    // - gap-opposite: ALL three closes above MA (opposite side - check CLOSE only)
-    // - on-MA: Any candle's HIGH touches MA from below (same side - check WICK)
-    // - gap: Default
-
-    if (tradeType === 'BUY') {
-        // First check gap-opposite (all closes below MA)
-        if (allClosesBelowMA) {
-            return 'gap-opposite';
-        }
-
-        // Then check on-MA (any candle's low touches MA from above)
-        // This means: candle is above MA but wick touches it
-        const anyLowTouchesMA = pivotCandles.some((candle, index) => {
-            const maValue = maValues[index]!;
-            // Candle touches MA if: low <= MA <= high
-            return candle.low <= maValue && candle.high >= maValue;
-        });
-
-        if (anyLowTouchesMA) {
-            return 'on-MA';
-        }
-
-        // Default to gap
-        return 'gap';
-
-    } else {
-        // SHORT trade
-        // First check gap-opposite (all closes above MA)
-        if (allClosesAboveMA) {
-            return 'gap-opposite';
-        }
-
-        // Then check on-MA (any candle's high touches MA from below)
-        // This means: candle is below MA but wick touches it
-        const anyHighTouchesMA = pivotCandles.some((candle, index) => {
-            const maValue = maValues[index]!;
-            // Candle touches MA if: low <= MA <= high
-            return candle.low <= maValue && candle.high >= maValue;
-        });
-
-        if (anyHighTouchesMA) {
-            return 'on-MA';
-        }
-
-        // Default to gap
-        return 'gap';
-    }
+    if (pivotIndex === -1) return '';
+    return calculateMAPosition(candles, pivotIndex, tradeType);
 }
-
-

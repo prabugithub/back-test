@@ -2,7 +2,7 @@ import { useState, useEffect } from 'react';
 import { useSessionStore } from '../stores/sessionStore';
 import { Info, X, Check, Link as LinkIcon } from 'lucide-react';
 import type { TradeJournal } from '../types';
-import { analyzePivotForTrade } from '../utils/pivotAnalysis';
+import { analyzePivotForTrade, analyzeManualEntry } from '../utils/pivotAnalysis';
 import { calculateAlBrooks } from '../utils/indicators';
 
 export function TradeJournalDialog() {
@@ -20,7 +20,7 @@ export function TradeJournalDialog() {
     const [journal, setJournal] = useState<TradeJournal>({
         ltMarket: 'Trend',
         htMarket: 'Trend',
-        pivotPosition: 'gap',
+        entryPosition: 'gap',
         llhhPivot: 'HH-HL',
         entrySign: 'None',
         notes: '',
@@ -37,28 +37,30 @@ export function TradeJournalDialog() {
     // Reset state when a new request comes in
     useEffect(() => {
         if (pendingTradeRequest) {
-            // Automatically analyze pivot and market structure for entry trades
-            let autoPivotPosition = 'gap';
+            let autoEntryPosition = 'gap';
             let autoLlhhPivot = 'HH-HL';
             let autoLtMarket = 'Range';
             let autoHtMarket = 'Range';
 
-            // Automatically analyze Al Brooks signals for entrySign
+            // Automatically analyze signals for entry trades
             let autoEntrySign: string = 'None';
             if (!isExitTrade && candles.length > 0 && currentIndex >= 0) {
                 // 1. Pivot & Market Analysis
                 const pivotAnalysis = analyzePivotForTrade(candles, currentIndex, pendingTradeRequest.type);
-                if (pivotAnalysis.pivotPosition) {
-                    autoPivotPosition = pivotAnalysis.pivotPosition;
-                }
-                if (pivotAnalysis.llhhPivot) {
+
+                // If it's a pivot analysis (found a pivot at this candle)
+                if (pivotAnalysis.entryPosition) {
+                    autoEntryPosition = pivotAnalysis.entryPosition;
                     autoLlhhPivot = pivotAnalysis.llhhPivot;
-                }
-                if (pivotAnalysis.ltMarket) {
                     autoLtMarket = pivotAnalysis.ltMarket;
-                }
-                if (pivotAnalysis.htMarket) {
                     autoHtMarket = pivotAnalysis.htMarket;
+                } else {
+                    // Manual entry analysis (no pivot at current candle)
+                    const manualAnalysis = analyzeManualEntry(candles, currentIndex, pendingTradeRequest.type);
+                    autoEntryPosition = manualAnalysis.entryPosition;
+                    autoLlhhPivot = manualAnalysis.llhhPivot;
+                    autoLtMarket = manualAnalysis.ltMarket;
+                    autoHtMarket = manualAnalysis.htMarket;
                 }
 
                 // 2. Al Brooks Signal Analysis
@@ -105,7 +107,7 @@ export function TradeJournalDialog() {
             setJournal({
                 ltMarket: autoLtMarket,
                 htMarket: autoHtMarket,
-                pivotPosition: autoPivotPosition,
+                entryPosition: autoEntryPosition,
                 llhhPivot: autoLlhhPivot,
                 entrySign: autoEntrySign,
                 notes: '',
@@ -207,11 +209,11 @@ export function TradeJournalDialog() {
                             <div className="grid grid-cols-2 gap-3">
                                 <div>
                                     <label className="block text-[10px] font-bold text-gray-500 uppercase tracking-wider mb-1">
-                                        PivotPosition <span className="text-green-600 text-[8px]">●AUTO</span>
+                                        EntryPosition <span className="text-green-600 text-[8px]">●AUTO</span>
                                     </label>
                                     <select
-                                        name="pivotPosition"
-                                        value={journal.pivotPosition}
+                                        name="entryPosition"
+                                        value={journal.entryPosition}
                                         onChange={handleChange}
                                         disabled
                                         className="w-full bg-gray-100 border border-gray-300 rounded-lg px-3 py-1.5 text-xs outline-none cursor-not-allowed opacity-75"

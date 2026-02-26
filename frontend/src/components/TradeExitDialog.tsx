@@ -40,7 +40,7 @@ export function TradeExitDialog() {
             // Fill other required journal fields with defaults or empty if not applicable to exit
             ltMarket: '',
             htMarket: '',
-            pivotPosition: '',
+            entryPosition: '',
             llhhPivot: '',
             entrySign: '',
             systemEntryAlign: 'No',

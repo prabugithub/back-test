@@ -119,7 +119,7 @@ export function TradeReportDialog({ isOpen, onClose }: TradeReportDialogProps) {
         csvContent += `Profit Factor,${selectedSessionStats.profitFactor.toFixed(2)}\n\n`;
 
         csvContent += "POSITION SUMMARY\n";
-        csvContent += "ID,Direction,Entry Time,Exit Time,Entry Price,Exit Price,Qty,PnL,Duration (min),SL,Target,SL Hit,TP Hit,Hit First,Trend Reversed,PnL at Reversal,Exit Reason,Category,LT Market,HT Market,Pivot Pos,LLHH Pivot,Entry Sign,Align E(S),Align E(V),Align M(S),Align M(V),Notes,Screenshot (E),Screenshot (M)\n";
+        csvContent += "ID,Direction,Entry Time,Exit Time,Entry Price,Exit Price,Qty,PnL,Duration (min),SL,Target,SL Hit,TP Hit,Hit First,Trend Reversed,PnL at Reversal,Exit Reason,Category,LT Market,HT Market,Entry Pos,LLHH Pivot,Entry Sign,Align E(S),Align E(V),Align M(S),Align M(V),Notes,Screenshot (E),Screenshot (M)\n";
         positions.forEach(pos => {
             // 1. Strict Semantic Mapping
             const entryExec = pos.executions.find(e => e.journal?.ltMarket);
@@ -174,13 +174,13 @@ export function TradeReportDialog({ isOpen, onClose }: TradeReportDialogProps) {
                 .filter(note => note && note.length > 0)))
                 .join(" | ");
 
-            csvContent += `${pos.id},${pos.direction},${formatTimestamp(pos.entryTime)},${pos.exitTime ? formatTimestamp(pos.exitTime) : 'OPEN'},${pos.avgEntryPrice},${pos.avgExitPrice || ''},${pos.totalQuantity},${pos.realizedPnL.toFixed(2)},${pos.durationMinutes ? pos.durationMinutes.toFixed(1) : ''},${pos.stopLoss || ''},${pos.target || ''},${pos.slHit ? 'YES' : 'NO'},${pos.tpHit ? 'YES' : 'NO'},${pos.hitFirst || ''},${pos.trendReversed ? 'YES' : 'NO'},${pos.trendReversedPnL?.toFixed(2) || ''},${pos.exitReason || ''},${entryJournal?.tradeCategory || ''},${entryJournal?.ltMarket || ''},${entryJournal?.htMarket || ''},${entryJournal?.pivotPosition || ''},${entryJournal?.llhhPivot || ''},${entryJournal?.entrySign || ''},${entryJournal?.systemEntryAlign || ''},${entryJournal?.myViewEntryAlign || ''},${exitJournal?.systemMoveAlign || ''},${exitJournal?.myViewMoveAlign || ''},"${(combinedNotes || '').replace(/"/g, '""')}",${urlE},${urlM}\n`;
+            csvContent += `${pos.id},${pos.direction},${formatTimestamp(pos.entryTime)},${pos.exitTime ? formatTimestamp(pos.exitTime) : 'OPEN'},${pos.avgEntryPrice},${pos.avgExitPrice || ''},${pos.totalQuantity},${pos.realizedPnL.toFixed(2)},${pos.durationMinutes ? pos.durationMinutes.toFixed(1) : ''},${pos.stopLoss || ''},${pos.target || ''},${pos.slHit ? 'YES' : 'NO'},${pos.tpHit ? 'YES' : 'NO'},${pos.hitFirst || ''},${pos.trendReversed ? 'YES' : 'NO'},${pos.trendReversedPnL?.toFixed(2) || ''},${pos.exitReason || ''},${entryJournal?.tradeCategory || ''},${entryJournal?.ltMarket || ''},${entryJournal?.htMarket || ''},${entryJournal?.entryPosition || ''},${entryJournal?.llhhPivot || ''},${entryJournal?.entrySign || ''},${entryJournal?.systemEntryAlign || ''},${entryJournal?.myViewEntryAlign || ''},${exitJournal?.systemMoveAlign || ''},${exitJournal?.myViewMoveAlign || ''},"${(combinedNotes || '').replace(/"/g, '""')}",${urlE},${urlM}\n`;
         });
 
         csvContent += "\nRAW TRADE EXECUTIONS\n";
-        csvContent += "Timestamp,Type,Price,Quantity,Instrument,P&L,SL,Target,SL Hit,TP Hit,Hit First,Trend Reversed,PnL at Reversal,Exit Reason,Category,LT Market,HT Market,Pivot Position,LLHH Pivot,Entry Sign,Align-Entry(Sys),Align-Entry(View),Align-Move(Sys),Align-Move(View),Notes,Screenshot\n";
+        csvContent += "Timestamp,Type,Price,Quantity,Instrument,P&L,SL,Target,SL Hit,TP Hit,Hit First,Trend Reversed,PnL at Reversal,Exit Reason,Category,LT Market,HT Market,Entry Position,LLHH Pivot,Entry Sign,Align-Entry(Sys),Align-Entry(View),Align-Move(Sys),Align-Move(View),Notes,Screenshot\n";
         selectedSession.trades.forEach(trade => {
-            csvContent += `${new Date(trade.timestamp).toISOString()},${trade.type},${trade.price},${trade.quantity},${trade.instrument},${(trade.pnl || 0).toFixed(2)},${trade.stopLoss || ''},${trade.target || ''},${trade.slHit ? 'YES' : 'NO'},${trade.tpHit ? 'YES' : 'NO'},${trade.hitFirst || ''},${trade.trendReversed ? 'YES' : 'NO'},${trade.trendReversedPnL?.toFixed(2) || ''},${trade.exitReason || ''},${trade.journal?.tradeCategory || ''},${trade.journal?.ltMarket || ''},${trade.journal?.htMarket || ''},${trade.journal?.pivotPosition || ''},${trade.journal?.llhhPivot || ''},${trade.journal?.entrySign || ''},${trade.journal?.systemEntryAlign || ''},${trade.journal?.myViewEntryAlign || ''},${trade.journal?.systemMoveAlign || ''},${trade.journal?.myViewMoveAlign || ''},"${(trade.journal?.notes || '').replace(/"/g, '""')}",${trade.journal?.screenshotUrl || ''}\n`;
+            csvContent += `${new Date(trade.timestamp).toISOString()},${trade.type},${trade.price},${trade.quantity},${trade.instrument},${(trade.pnl || 0).toFixed(2)},${trade.stopLoss || ''},${trade.target || ''},${trade.slHit ? 'YES' : 'NO'},${trade.tpHit ? 'YES' : 'NO'},${trade.hitFirst || ''},${trade.trendReversed ? 'YES' : 'NO'},${trade.trendReversedPnL?.toFixed(2) || ''},${trade.exitReason || ''},${trade.journal?.tradeCategory || ''},${trade.journal?.ltMarket || ''},${trade.journal?.htMarket || ''},${trade.journal?.entryPosition || ''},${trade.journal?.llhhPivot || ''},${trade.journal?.entrySign || ''},${trade.journal?.systemEntryAlign || ''},${trade.journal?.myViewEntryAlign || ''},${trade.journal?.systemMoveAlign || ''},${trade.journal?.myViewMoveAlign || ''},"${(trade.journal?.notes || '').replace(/"/g, '""')}",${trade.journal?.screenshotUrl || ''}\n`;
         });
 
         const blob = new Blob([csvContent], { type: 'text/csv' });
@@ -543,7 +543,7 @@ export function TradeReportDialog({ isOpen, onClose }: TradeReportDialogProps) {
                                                         <th className="text-right p-3 font-semibold text-gray-700">Info</th>
                                                         <th className="text-left p-3 font-semibold text-gray-700">Category</th>
                                                         <th className="text-left p-3 font-semibold text-gray-700">LT/HT Market</th>
-                                                        <th className="text-left p-3 font-semibold text-gray-700">Pivot Pos/LLHH</th>
+                                                        <th className="text-left p-3 font-semibold text-gray-700">Entry Pos/LLHH</th>
                                                         <th className="text-left p-3 font-semibold text-gray-700">Entry Sign</th>
                                                         <th className="text-left p-3 font-semibold text-gray-700">Align (Sys/View)</th>
                                                         <th className="text-left p-3 font-semibold text-gray-700 max-w-[100px]">Notes</th>
@@ -609,7 +609,7 @@ export function TradeReportDialog({ isOpen, onClose }: TradeReportDialogProps) {
                                                             <td className="p-3 text-left text-[10px] text-gray-500">
                                                                 {trade.journal ? (
                                                                     <div>
-                                                                        <div className="font-semibold text-gray-700">{trade.journal.pivotPosition}</div>
+                                                                        <div className="font-semibold text-gray-700">{trade.journal.entryPosition}</div>
                                                                         <div className="text-gray-400 text-[9px]">{trade.journal.llhhPivot}</div>
                                                                     </div>
                                                                 ) : '-'}
