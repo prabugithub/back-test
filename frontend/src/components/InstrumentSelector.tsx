@@ -17,6 +17,7 @@ export function InstrumentSelector() {
   const [interval, setInterval] = useState('5');
   const [fromDate, setFromDate] = useState('2021-01-01');
   const [toDate, setToDate] = useState('2026-01-20');
+  const [jumpToDate, setJumpToDate] = useState('');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -28,6 +29,7 @@ export function InstrumentSelector() {
   const dropdownRef = useRef<HTMLDivElement>(null);
 
   const loadCandles = useSessionStore((s) => s.loadCandles);
+  const setCurrentIndex = useSessionStore((s) => s.setCurrentIndex);
   const loadRemoteSession = useSessionStore((s) => s.loadRemoteSession);
   const restoreSessionState = useSessionStore((s) => s.restoreSessionState);
 
@@ -59,6 +61,16 @@ export function InstrumentSelector() {
     setSearchQuery('');
   };
 
+  // Helper to find index by date
+  const findIndexByDate = (candles: any[], dateStr: string) => {
+    if (!dateStr) return 0;
+    const targetTs = new Date(dateStr).getTime() / 1000;
+    for (let i = 0; i < candles.length; i++) {
+      if (candles[i].timestamp >= targetTs) return i;
+    }
+    return 0;
+  };
+
   const handleFetch = async (overrideConfig?: any) => {
     setLoading(true);
     setError(null);
@@ -87,6 +99,12 @@ export function InstrumentSelector() {
 
         if (response.success && response.data.length > 0) {
           loadCandles(response.data, `${cfg.securityId}-${cfg.exchangeSegment}`, cfg);
+
+          // Apply initial jump if requested
+          if (!overrideConfig && jumpToDate) {
+            const index = findIndexByDate(response.data, jumpToDate);
+            if (index > 0) setCurrentIndex(index);
+          }
         } else {
           setError('No data received from API');
         }
@@ -131,6 +149,12 @@ export function InstrumentSelector() {
           if (resampledCandles.length > 0) {
             console.log(`Loaded ${resampledCandles.length} candles (Resampled: ${intv})`);
             loadCandles(resampledCandles, `NIFTY 50 (Local ${intv})`, cfg);
+
+            // Apply initial jump if requested
+            if (!overrideConfig && jumpToDate) {
+              const index = findIndexByDate(resampledCandles, jumpToDate);
+              if (index > 0) setCurrentIndex(index);
+            }
           } else {
             setError('No candles generated from local data');
           }
@@ -390,6 +414,18 @@ export function InstrumentSelector() {
                 className="w-full px-3 py-2 border rounded focus:outline-none focus:ring-2 focus:ring-blue-500"
               />
             </div>
+
+            <div>
+              <label className="block text-sm font-medium text-blue-700 mb-1 font-bold">
+                Jump to Date
+              </label>
+              <input
+                type="date"
+                value={jumpToDate}
+                onChange={(e) => setJumpToDate(e.target.value)}
+                className="w-full px-3 py-2 border border-blue-300 rounded focus:outline-none focus:ring-2 focus:ring-blue-500 bg-blue-50"
+              />
+            </div>
           </div>
         </>
       ) : (
@@ -431,7 +467,7 @@ export function InstrumentSelector() {
             </p>
           </div>
 
-          <div className="grid grid-cols-2 gap-4">
+          <div className="grid grid-cols-3 gap-4">
             <div>
               <label className="block text-sm font-medium text-gray-700 mb-1">
                 From Date
@@ -453,6 +489,18 @@ export function InstrumentSelector() {
                 value={toDate}
                 onChange={(e) => setToDate(e.target.value)}
                 className="w-full px-3 py-2 border rounded focus:outline-none focus:ring-2 focus:ring-blue-500"
+              />
+            </div>
+
+            <div>
+              <label className="block text-sm font-medium text-blue-700 mb-1 font-bold">
+                Jump to Date
+              </label>
+              <input
+                type="date"
+                value={jumpToDate}
+                onChange={(e) => setJumpToDate(e.target.value)}
+                className="w-full px-3 py-2 border border-blue-300 rounded focus:outline-none focus:ring-2 focus:ring-blue-500 bg-blue-50"
               />
             </div>
           </div>
