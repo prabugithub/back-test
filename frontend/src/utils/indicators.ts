@@ -206,8 +206,8 @@ export function calculatePivotPoints(candles: Candle[]): PivotPoint[] {
     const bullishPivot = (condition1_bull_or || condition1_bull) && condition3_bull;
 
     if (bullishPivot) {
-      // Logic for Long SL Distance: abs(min(low[0], low[1]) - close[0]) + 2
-      const minLow = Math.min(current.low, prev.low);
+      // Logic for Long SL Distance: abs(min(low[0-4]) - close[0]) + 2
+      const minLow = Math.min(current.low, prev.low, prev2.low);
       const slDistance = Math.ceil(Math.abs(current.close - minLow) + 2);
 
       let label: 'HL' | 'LL' | undefined = undefined;
@@ -260,8 +260,8 @@ export function calculatePivotPoints(candles: Candle[]): PivotPoint[] {
     const bearishPivot = condition1_bear_or || (condition1_bear && condition3_bear);
 
     if (bearishPivot) {
-      // Logic for Short SL Distance: abs(max(high[0], high[1]) - close[0]) + 2
-      const maxHigh = Math.max(current.high, prev.high);
+      // Logic for Short SL Distance: abs(max(high[0-4]) - close[0]) + 2
+      const maxHigh = Math.max(current.high, prev.high, prev2.high);
       const slDistance = Math.ceil(Math.abs(current.close - maxHigh) + 2);
 
       let label: 'HH' | 'LH' | undefined = undefined;

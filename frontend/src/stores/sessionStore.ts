@@ -147,51 +147,58 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
     const { stopLoss, target, quantity } = position;
     const isLong = quantity > 0;
 
+    const sl = Number(stopLoss);
+    const tp = Number(target);
+    const close = Number(candle.close);
+    const low = Number(candle.low);
+    const high = Number(candle.high);
+    const eps = 0.01; // Slightly larger epsilon to ensure it's "truly" hit
+
     let hitType: 'SL' | 'TP' | null = null;
     let hitPrice: number = 0;
 
     // 1. Check Close Hit (Dialog Trigger)
     if (isLong) {
-      if (stopLoss && candle.close <= stopLoss) {
+      if (sl > 0 && close < (sl - eps)) {
         hitType = 'SL';
-        hitPrice = stopLoss;
-      } else if (target && candle.close >= target) {
+        hitPrice = sl;
+      } else if (tp > 0 && close > (tp + eps)) {
         hitType = 'TP';
-        hitPrice = target;
+        hitPrice = tp;
       }
     } else {
-      if (stopLoss && candle.close >= stopLoss) {
+      if (sl > 0 && close > (sl + eps)) {
         hitType = 'SL';
-        hitPrice = stopLoss;
-      } else if (target && candle.close <= target) {
+        hitPrice = sl;
+      } else if (tp > 0 && close < (tp - eps)) {
         hitType = 'TP';
-        hitPrice = target;
+        hitPrice = tp;
       }
     }
 
     if (hitType) {
       // Pause playback and show dialog
-      set({ isPlaying: false, pendingExitRequest: { type: hitType, price: hitPrice, spotPrice: candle.close } });
+      set({ isPlaying: false, pendingExitRequest: { type: hitType, price: hitPrice, spotPrice: close } });
       return;
     }
 
-    // 2. Check Wick Hit (Advanced Tracking)
+    // 2. Check Wick Hit (Advanced Tracking - only notify if close hasn't hit)
     hitType = null;
     if (isLong) {
-      if (stopLoss && candle.low <= stopLoss && candle.close > stopLoss) {
+      if (sl > 0 && low < (sl - eps) && close >= (sl - eps)) {
         hitType = 'SL';
-        hitPrice = stopLoss;
-      } else if (target && candle.high >= target && candle.close < target) {
+        hitPrice = sl;
+      } else if (tp > 0 && high > (tp + eps) && close <= (tp + eps)) {
         hitType = 'TP';
-        hitPrice = target;
+        hitPrice = tp;
       }
     } else {
-      if (stopLoss && candle.high >= stopLoss && candle.close < stopLoss) {
+      if (sl > 0 && high > (sl + eps) && close <= (sl + eps)) {
         hitType = 'SL';
-        hitPrice = stopLoss;
-      } else if (target && candle.low <= target && candle.close > target) {
+        hitPrice = sl;
+      } else if (tp > 0 && low < (tp - eps) && close >= (tp - eps)) {
         hitType = 'TP';
-        hitPrice = target;
+        hitPrice = tp;
       }
     }
 
