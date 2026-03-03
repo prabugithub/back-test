@@ -149,79 +149,88 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
 
     const { stopLoss, target, quantity } = position;
     const isLong = quantity > 0;
-
     const sl = Number(stopLoss);
     const tp = Number(target);
-    const close = Number(candle.close);
-    const low = Number(candle.low);
-    const high = Number(candle.high);
-    const eps = 0.01; // Slightly larger epsilon to ensure it's "truly" hit
+    const { high, low, close } = candle;
 
-    let hitType: 'SL' | 'TP' | null = null;
-    let hitPrice: number = 0;
+    // Track current state to see if update is needed
+    let nextSlHit = !!position.slHit;
+    let nextTpHit = !!position.tpHit;
+    let nextHitFirst = position.hitFirst;
+    let nextSlDialogShown = !!position.slDialogShown;
+    let nextTpDialogShown = !!position.tpDialogShown;
 
-    // 1. Check Close Hit (Dialog Trigger)
+    // 1. Check for ANY touch (Independent Flags)
     if (isLong) {
-      if (sl > 0 && close < (sl - eps) && !position.slHit) {
-        hitType = 'SL';
-        hitPrice = sl;
-      } else if (tp > 0 && close > (tp + eps) && !position.tpHit) {
-        hitType = 'TP';
-        hitPrice = tp;
+      if (sl > 0 && low <= sl) nextSlHit = true;
+      if (tp > 0 && high >= tp) nextTpHit = true;
+    } else {
+      if (sl > 0 && high >= sl) nextSlHit = true;
+      if (tp > 0 && low <= tp) nextTpHit = true;
+    }
+
+    // 2. Determine first hit for notification
+    if (!nextHitFirst) {
+      const hitThisBar = isLong
+        ? (sl > 0 && low <= sl ? 'SL' : (tp > 0 && high >= tp ? 'TP' : null))
+        : (sl > 0 && high >= sl ? 'SL' : (tp > 0 && low <= tp ? 'TP' : null));
+
+      if (hitThisBar) {
+        nextHitFirst = hitThisBar;
+        useNotificationStore.getState().notify(
+          `${hitThisBar} Hit at ${(hitThisBar === 'SL' ? sl : tp).toFixed(2)} (High/Low movement)!`,
+          hitThisBar === 'TP' ? 'success' : 'warning'
+        );
+      }
+    }
+
+    // 3. Check for Close-based Trigger (Dialog)
+    let dialogToTrigger: 'SL' | 'TP' | null = null;
+    if (isLong) {
+      if (sl > 0 && close <= sl && !nextSlDialogShown) {
+        dialogToTrigger = 'SL';
+        nextSlDialogShown = true;
+      } else if (tp > 0 && close >= tp && !nextTpDialogShown) {
+        dialogToTrigger = 'TP';
+        nextTpDialogShown = true;
       }
     } else {
-      if (sl > 0 && close > (sl + eps) && !position.slHit) {
-        hitType = 'SL';
-        hitPrice = sl;
-      } else if (tp > 0 && close < (tp - eps) && !position.tpHit) {
-        hitType = 'TP';
-        hitPrice = tp;
+      if (sl > 0 && close >= sl && !nextSlDialogShown) {
+        dialogToTrigger = 'SL';
+        nextSlDialogShown = true;
+      } else if (tp > 0 && close <= tp && !nextTpDialogShown) {
+        dialogToTrigger = 'TP';
+        nextTpDialogShown = true;
       }
     }
 
-    if (hitType) {
-      // Pause playback and show dialog
-      set({ isPlaying: false, pendingExitRequest: { type: hitType, price: hitPrice, spotPrice: close } });
-      return;
-    }
+    // Sync state if any change occurred
+    const hasChanged =
+      nextSlHit !== position.slHit ||
+      nextTpHit !== position.tpHit ||
+      nextHitFirst !== position.hitFirst ||
+      nextSlDialogShown !== position.slDialogShown ||
+      nextTpDialogShown !== position.tpDialogShown;
 
-    // 2. Check Wick Hit (Advanced Tracking - only notify if close hasn't hit)
-    hitType = null;
-    if (isLong) {
-      if (sl > 0 && low < (sl - eps) && close >= (sl - eps)) {
-        hitType = 'SL';
-        hitPrice = sl;
-      } else if (tp > 0 && high > (tp + eps) && close <= (tp + eps)) {
-        hitType = 'TP';
-        hitPrice = tp;
+    if (hasChanged || dialogToTrigger) {
+      const updatedPosition = {
+        ...position,
+        slHit: nextSlHit,
+        tpHit: nextTpHit,
+        hitFirst: nextHitFirst,
+        slDialogShown: nextSlDialogShown,
+        tpDialogShown: nextTpDialogShown,
+      };
+
+      if (dialogToTrigger) {
+        set({
+          isPlaying: false,
+          pendingExitRequest: { type: dialogToTrigger, price: dialogToTrigger === 'SL' ? sl : tp, spotPrice: close },
+          position: updatedPosition
+        });
+      } else {
+        set({ position: updatedPosition });
       }
-    } else {
-      if (sl > 0 && high > (sl + eps) && close <= (sl + eps)) {
-        hitType = 'SL';
-        hitPrice = sl;
-      } else if (tp > 0 && low < (tp - eps) && close >= (tp - eps)) {
-        hitType = 'TP';
-        hitPrice = tp;
-      }
-    }
-
-    if (hitType) {
-      // Only notify if we haven't recorded ANY hit yet for this position
-      if (position.hitFirst) return;
-
-      useNotificationStore.getState().notify(
-        `${hitType} Hit at ${hitPrice.toFixed(2)} (High/Low movement)!`,
-        hitType === 'TP' ? 'success' : 'warning'
-      );
-
-      set({
-        position: {
-          ...position,
-          // We set hitFirst but NOT slHit/tpHit here. 
-          // slHit/tpHit remain false so that the Close-based dialog can still trigger later.
-          hitFirst: hitType,
-        }
-      });
     }
   },
 
@@ -257,8 +266,8 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
       set({
         position: {
           ...position,
-          slHit: pendingExitRequest.type === 'SL' ? true : position.slHit,
-          tpHit: pendingExitRequest.type === 'TP' ? true : position.tpHit,
+          slDialogShown: pendingExitRequest.type === 'SL' ? true : position.slDialogShown,
+          tpDialogShown: pendingExitRequest.type === 'TP' ? true : position.tpDialogShown,
         },
         pendingExitRequest: null
       });
@@ -358,9 +367,11 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
       stopLoss: tradeStopLoss,
       target: tradeTarget,
       exitReason: exitReason,
-      slHit: position?.slHit,
-      tpHit: position?.tpHit,
-      hitFirst: position?.hitFirst,
+      slHit: position?.slHit || exitReason === 'SL',
+      tpHit: position?.tpHit || exitReason === 'TP',
+      slDialogShown: position?.slDialogShown || exitReason === 'SL',
+      tpDialogShown: position?.tpDialogShown || exitReason === 'TP',
+      hitFirst: position?.hitFirst || (exitReason === 'SL' || exitReason === 'TP' ? exitReason : undefined),
       trendReversed: position?.trendReversed,
       trendReversedPnL: position?.trendReversedPnL,
       withTrendSeen: isSameSide ? (position?.withTrendSeen || isInitialWith) : isInitialWith,
@@ -403,9 +414,11 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
       unrealizedPnL: 0,
       stopLoss: trade.stopLoss,
       target: trade.target,
-      slHit: (isFlip || trade.stopLoss !== position?.stopLoss) ? undefined : position?.slHit,
-      tpHit: (isFlip || trade.target !== position?.target) ? undefined : position?.tpHit,
-      hitFirst: (isFlip || trade.stopLoss !== position?.stopLoss || trade.target !== position?.target) ? undefined : position?.hitFirst,
+      slHit: (isFlip || trade.stopLoss !== position?.stopLoss) ? (exitReason === 'SL' ? true : undefined) : (position?.slHit || exitReason === 'SL'),
+      tpHit: (isFlip || trade.target !== position?.target) ? (exitReason === 'TP' ? true : undefined) : (position?.tpHit || exitReason === 'TP'),
+      slDialogShown: (isFlip || trade.stopLoss !== position?.stopLoss) ? (exitReason === 'SL' ? true : undefined) : (position?.slDialogShown || exitReason === 'SL'),
+      tpDialogShown: (isFlip || trade.target !== position?.target) ? (exitReason === 'TP' ? true : undefined) : (position?.tpDialogShown || exitReason === 'TP'),
+      hitFirst: (isFlip || trade.stopLoss !== position?.stopLoss || trade.target !== position?.target) ? (exitReason === 'SL' || exitReason === 'TP' ? exitReason : undefined) : (position?.hitFirst || (exitReason === 'SL' || exitReason === 'TP' ? exitReason : undefined)),
       trendReversed: isFlip ? undefined : position?.trendReversed,
       trendReversedPnL: isFlip ? undefined : position?.trendReversedPnL,
       withTrendSeen: trade.withTrendSeen,

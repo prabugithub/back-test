@@ -123,8 +123,8 @@ export function analyzeMarketStructure(candles: Candle[], pivots: PivotPoint[]):
     const htSlope = getSlope(ema60, 20);
 
     const lastPrice = candles[candles.length - 1].close;
-    const currentEma21 = ema21[ema21.length - 1].value;
-    const currentEma60 = ema60[ema60.length - 1].value;
+    const currentEma21 = ema21.length > 0 ? ema21[ema21.length - 1].value : lastPrice;
+    const currentEma60 = ema60.length > 0 ? ema60[ema60.length - 1].value : lastPrice;
 
     // Check bar overlap (Range vs Trend)
     let overlapCount = 0;

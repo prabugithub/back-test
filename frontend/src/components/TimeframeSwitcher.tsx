@@ -94,24 +94,19 @@ export function TimeframeSwitcher() {
                                 // If no candle found on the same day, use the first candle
                                 newIndex = 0;
                             }
-                            console.log('[TimeframeSwitcher] Timestamp before first candle, found same-day index:', newIndex);
                         } else {
                             // Normal case: find the candle that is closest to or just before the current timestamp
                             newIndex = resampledCandles.findIndex(c => c.timestamp >= currentTimestamp);
-                            console.log('[TimeframeSwitcher] Found index (>=):', newIndex);
 
                             if (newIndex === -1) {
                                 // If no candle found after current time, use the last candle
                                 newIndex = resampledCandles.length - 1;
-                                console.log('[TimeframeSwitcher] No candle found, using last:', newIndex);
                             } else if (newIndex > 0) {
                                 // Check if we found an exact match or a later candle
                                 const foundCandle = resampledCandles[newIndex];
-                                console.log('[TimeframeSwitcher] Found candle timestamp:', foundCandle.timestamp, 'Target:', currentTimestamp, 'Match:', foundCandle.timestamp === currentTimestamp);
 
                                 if (foundCandle.timestamp === currentTimestamp) {
                                     // Exact match - use this candle
-                                    console.log('[TimeframeSwitcher] Exact timestamp match, using found candle:', newIndex);
                                 } else {
                                     // Found a later candle - check if target is a daily candle (00:00:00)
                                     const targetDate = new Date(currentTimestamp * 1000);
@@ -140,22 +135,17 @@ export function TimeframeSwitcher() {
 
                                         if (sameDayIndex !== -1) {
                                             newIndex = sameDayIndex;
-                                            console.log('[TimeframeSwitcher] Daily/market-open candle detected, using first candle of same day:', newIndex);
                                         } else {
                                             // Fallback to previous candle
                                             newIndex = Math.max(0, newIndex - 1);
-                                            console.log('[TimeframeSwitcher] No same-day candle found, using previous:', newIndex);
                                         }
                                     } else {
                                         // Normal case: use the previous candle
                                         newIndex = Math.max(0, newIndex - 1);
-                                        console.log('[TimeframeSwitcher] Adjusted to previous candle:', newIndex);
                                     }
                                 }
                             }
                         }
-
-                        console.log('[TimeframeSwitcher] Final newIndex:', newIndex, 'Candle timestamp:', resampledCandles[newIndex]?.timestamp, new Date(resampledCandles[newIndex]?.timestamp * 1000).toISOString());
                     }
 
                     // Load candles (this will reset state)
@@ -163,7 +153,6 @@ export function TimeframeSwitcher() {
 
                     // Immediately restore the session state (synchronously)
                     // Use the saved variables, not fetching from store again
-                    console.log('[TimeframeSwitcher] Restoring state - Trades:', savedTrades.length, 'Position:', savedPosition, 'Index:', newIndex);
                     useSessionStore.getState().restoreSessionState(savedTrades, savedPosition, newIndex);
                 }
             } else {

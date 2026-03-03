@@ -37,6 +37,8 @@ export interface Trade {
   exitReason?: 'SL' | 'TP' | 'MANUAL' | 'TIME_OVER';
   slHit?: boolean;
   tpHit?: boolean;
+  slDialogShown?: boolean;
+  tpDialogShown?: boolean;
   hitFirst?: 'SL' | 'TP';
   trendReversed?: boolean;
   trendReversedPnL?: number;
@@ -55,6 +57,8 @@ export interface Position {
   target?: number;
   slHit?: boolean;
   tpHit?: boolean;
+  slDialogShown?: boolean;
+  tpDialogShown?: boolean;
   hitFirst?: 'SL' | 'TP';
   trendReversed?: boolean;
   trendReversedPnL?: number;
