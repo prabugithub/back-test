@@ -43,6 +43,7 @@ export function AdvancedChart() {
   const saveRemoteSession = useSessionStore((s) => s.saveRemoteSession);
   const showMarkers = useSessionStore((s) => s.showMarkers);
   const useAtrForSignals = useSessionStore((s) => s.useAtrForSignals);
+  const showPivotRR = useSessionStore((s) => s.showPivotRR);
 
   const visibleCandles = useMemo(() =>
     candles.slice(0, currentIndex + 1),
@@ -67,7 +68,7 @@ export function AdvancedChart() {
   // Callback to render pivot risk-reward lines
   const handleCustomRender = useCallback((ctx: CanvasRenderingContext2D) => {
     if (!chart || !series || visibleCandles.length === 0) return;
-    if (!activeIndicators.includes('pivotPoints') || !showMarkers) return;
+    if (!activeIndicators.includes('pivotPoints') || !showMarkers || !showPivotRR) return;
 
     // Calculate pivots
     const allPivots = calculatePivotPoints(visibleCandles);
@@ -159,7 +160,7 @@ export function AdvancedChart() {
 
     // Reset context
     ctx.textAlign = 'start';
-  }, [chart, series, visibleCandles, activeIndicators, showMarkers]);
+  }, [chart, series, visibleCandles, activeIndicators, showMarkers, showPivotRR]);
 
   const {
     clearDrawings,

@@ -29,6 +29,7 @@ export function PlaybackControls({ onOpenHistory }: { onOpenHistory?: () => void
     setTradeQuantity,
     riskPerTrade,
     manualLevels,
+    showPivotRR,
   } = useSessionStore();
 
 
@@ -474,7 +475,7 @@ export function PlaybackControls({ onOpenHistory }: { onOpenHistory?: () => void
 
               return (
                 <>
-                  {recentPivot && (
+                  {showPivotRR && recentPivot && (
                     <button
                       onClick={() => setTradeQuantity(calcQty)}
                       className="flex items-center gap-1 px-1.5 py-0.5 bg-yellow-50 border border-yellow-200 hover:bg-yellow-100 hover:border-yellow-300 rounded text-[10px] text-yellow-800 whitespace-nowrap transition-colors cursor-pointer group"

@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useRef, useEffect } from 'react';
 import {
   TrendingUp,
   Minus,
@@ -51,12 +51,30 @@ export function ChartToolbar({
   hasSelection,
 }: ChartToolbarProps) {
   const [showIndicators, setShowIndicators] = useState(false);
+  const dropdownRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    function handleClickOutside(event: MouseEvent) {
+      if (dropdownRef.current && !dropdownRef.current.contains(event.target as Node)) {
+        setShowIndicators(false);
+      }
+    }
+    if (showIndicators) {
+      document.addEventListener('mousedown', handleClickOutside);
+    }
+    return () => {
+      document.removeEventListener('mousedown', handleClickOutside);
+    };
+  }, [showIndicators]);
+
   const showMarkers = useSessionStore((s) => s.showMarkers);
   const toggleMarkers = useSessionStore((s) => s.toggleMarkers);
   const candles = useSessionStore((s) => s.candles);
   const currentIndex = useSessionStore((s) => s.currentIndex);
   const useAtrForSignals = useSessionStore((s) => s.useAtrForSignals);
   const toggleAtrForSignals = useSessionStore((s) => s.toggleAtrForSignals);
+  const showPivotRR = useSessionStore((s) => s.showPivotRR);
+  const togglePivotRR = useSessionStore((s) => s.togglePivotRR);
 
   // Calculate market structure for display
   const visibleCandles = candles.slice(0, currentIndex + 1);
@@ -166,7 +184,7 @@ export function ChartToolbar({
       {/* Indicators */}
       <div className="flex items-center gap-2">
         <span className="text-xs font-medium text-gray-600">Indicators:</span>
-        <div className="relative">
+        <div className="relative" ref={dropdownRef}>
           <button
             onClick={() => setShowIndicators(!showIndicators)}
             className="flex items-center gap-1 px-3 py-1.5 bg-gray-100 rounded hover:bg-gray-200 text-sm"
@@ -212,6 +230,15 @@ export function ChartToolbar({
                   className="rounded text-blue-600"
                 />
                 <span className="text-xs font-semibold text-gray-700">Use ATR Depth</span>
+              </label>
+              <label className="flex items-center gap-2 px-2 py-1.5 hover:bg-gray-50 rounded cursor-pointer">
+                <input
+                  type="checkbox"
+                  checked={showPivotRR}
+                  onChange={togglePivotRR}
+                  className="rounded text-blue-600"
+                />
+                <span className="text-xs font-semibold text-gray-700">Auto Pivot RR</span>
               </label>
             </div>
           )}
