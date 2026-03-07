@@ -1,13 +1,14 @@
 import { useState, useRef, useEffect } from 'react';
 import { useSessionStore } from '../stores/sessionStore';
 import { formatCurrency } from '../utils/formatters';
-import { AlertCircle } from 'lucide-react';
+import { AlertCircle, X } from 'lucide-react';
 
 
 export function PositionOverlay({ onOpenDetail }: { onOpenDetail?: () => void }) {
     const position = useSessionStore((s) => s.position);
     const candles = useSessionStore((s) => s.candles);
     const currentIndex = useSessionStore((s) => s.currentIndex);
+    const initiateTrade = useSessionStore((s) => s.initiateTrade);
 
     // State for dragging
     // We use offset to store the X/Y translation from the top-right corner or absolute position
@@ -62,6 +63,12 @@ export function PositionOverlay({ onOpenDetail }: { onOpenDetail?: () => void })
         };
     }, []);
 
+    const handleExit = (e: React.MouseEvent) => {
+        e.stopPropagation();
+        if (!position) return;
+        const type = position.quantity > 0 ? 'SELL' : 'BUY';
+        initiateTrade(type, Math.abs(position.quantity));
+    };
 
     if (!position || position.quantity === 0) return null;
 
@@ -128,14 +135,24 @@ export function PositionOverlay({ onOpenDetail }: { onOpenDetail?: () => void })
                         </div>
                     )}
 
-                    {onOpenDetail && (
+                    <div className="flex gap-1.5 items-end">
+                        {onOpenDetail && (
+                            <button
+                                onClick={(e) => { e.stopPropagation(); onOpenDetail(); }}
+                                className="text-[10px] px-2 py-1 bg-blue-500 text-white rounded hover:bg-blue-600 font-semibold"
+                            >
+                                Analysis
+                            </button>
+                        )}
                         <button
-                            onClick={(e) => { e.stopPropagation(); onOpenDetail(); }}
-                            className="text-[10px] px-2 py-1 bg-blue-500 text-white rounded hover:bg-blue-600 font-semibold"
+                            onClick={handleExit}
+                            className="text-[10px] px-2 py-1 bg-red-600 text-white rounded hover:bg-red-700 font-bold flex items-center gap-1 shadow-sm transition-colors"
+                            title="Exit Entire Position"
                         >
-                            Analysis
+                            <X size={12} />
+                            Exit
                         </button>
-                    )}
+                    </div>
                 </div>
             </div>
         </div>
