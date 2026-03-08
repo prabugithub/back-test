@@ -178,6 +178,7 @@ export function AdvancedChart({ isSecondary = false }: { isSecondary?: boolean }
     handleMouseDown,
     handleMouseMove,
     handleMouseUp,
+    renderCanvas,
   } = useChartDrawings({
     canvasRef,
     activeTool,
@@ -279,22 +280,28 @@ export function AdvancedChart({ isSecondary = false }: { isSecondary?: boolean }
     setVolumeSeries(volumeSeries);
     markersPrimitiveRef.current = markersPrimitive;
 
-    const handleResize = () => {
-      if (chartContainerRef.current && chart) {
-        chart.applyOptions({
-          width: chartContainerRef.current.clientWidth,
-          height: chartContainerRef.current.clientHeight,
-        });
+    // Use ResizeObserver for more reliable resizing than window.resize
+    const resizeObserver = new ResizeObserver((entries) => {
+      for (const entry of entries) {
+        const { width, height } = entry.contentRect;
+        if (chart) {
+          chart.applyOptions({ width, height });
+        }
       }
-    };
+    });
 
-    window.addEventListener('resize', handleResize);
+    if (chartContainerRef.current) {
+      resizeObserver.observe(chartContainerRef.current);
+    }
 
     return () => {
-      window.removeEventListener('resize', handleResize);
+      resizeObserver.disconnect();
       chart.remove();
+      // Clear all handles associated with this chart instance
+      indicatorSeriesRef.current.clear();
+      markersPrimitiveRef.current = null;
     };
-  }, []);
+  }, []); // Only run once on mount
 
   // Update candle data
   useEffect(() => {
@@ -339,13 +346,23 @@ export function AdvancedChart({ isSecondary = false }: { isSecondary?: boolean }
 
   // Update indicator line series
   useEffect(() => {
-    if (!chart || visibleCandles.length === 0) return;
+    if (!chart) return;
 
     // Clear old indicator series (LineSeries only)
+    // We always clear them before re-adding to avoid duplication or stale series
     indicatorSeriesRef.current.forEach((s) => {
-      chart.removeSeries(s);
+      if (s) {
+        try {
+          chart.removeSeries(s);
+        } catch (e) {
+          // If series was already removed or chart state is weird, ignore
+          console.debug('Skip removing internal series:', e);
+        }
+      }
     });
     indicatorSeriesRef.current.clear();
+
+    if (visibleCandles.length === 0) return;
 
     // Add active line-based indicators
     activeIndicators.forEach((indicator) => {
@@ -597,16 +614,26 @@ export function AdvancedChart({ isSecondary = false }: { isSecondary?: boolean }
     const canvas = canvasRef.current;
     const container = chartContainerRef.current;
 
-    const resizeCanvas = () => {
-      const rect = container.getBoundingClientRect();
-      canvas.width = rect.width;
-      canvas.height = rect.height;
-    };
+    const resizeCanvasObserver = new ResizeObserver((entries) => {
+      for (const entry of entries) {
+        const { width, height } = entry.contentRect;
+        const dpr = window.devicePixelRatio || 1;
+        canvas.width = width * dpr;
+        canvas.height = height * dpr;
+        canvas.style.width = `${width}px`;
+        canvas.style.height = `${height}px`;
+        const ctx = canvas.getContext('2d');
+        if (ctx) {
+          ctx.scale(dpr, dpr);
+        }
+        // Force re-render after size change
+        renderCanvas();
+      }
+    });
 
-    setTimeout(resizeCanvas, 100);
-    window.addEventListener('resize', resizeCanvas);
-    return () => window.removeEventListener('resize', resizeCanvas);
-  }, []);
+    resizeCanvasObserver.observe(container);
+    return () => resizeCanvasObserver.disconnect();
+  }, [renderCanvas]);
 
   // Keyboard shortcuts
   useEffect(() => {

@@ -796,5 +796,6 @@ export function useChartDrawings({
     handleMouseDown,
     handleMouseMove,
     handleMouseUp,
+    renderCanvas,
   };
 }

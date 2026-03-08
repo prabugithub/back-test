@@ -109,7 +109,7 @@ export function ChartToolbar({
   ];
 
   return (
-    <div className="bg-white border-b p-3 flex items-center gap-2 flex-wrap">
+    <div className="bg-white border-b px-3 py-1.5 flex items-center gap-2 flex-nowrap overflow-x-auto no-scrollbar">
       {/* Drawing Tools */}
       <div className="flex items-center gap-1 border-r pr-3">
         <span className="text-xs font-medium text-gray-600 mr-2">Drawing Tools:</span>
@@ -245,28 +245,18 @@ export function ChartToolbar({
         </div>
       </div>
 
-      {/* Market Structure (Desktop Only) */}
-      <div className="hidden md:flex items-center gap-2 ml-auto">
-        <div className="flex flex-col items-end mr-2 border-r pr-3 border-gray-100">
-          <span className="text-[10px] uppercase text-gray-400 font-bold leading-none mb-1">Market Context</span>
-          <div className="flex gap-1.5">
-            <div className={`px-2 py-0.5 rounded border text-[10px] font-bold flex items-center gap-1 ${getStructureColor(ltMarket)}`}>
-              <Activity size={10} />
-              <span>LT: {ltMarket}</span>
-            </div>
-            <div className={`px-2 py-0.5 rounded border text-[10px] font-bold flex items-center gap-1 ${getStructureColor(htMarket)}`}>
-              <LayoutGrid size={10} />
-              <span>HT: {htMarket}</span>
-            </div>
-          </div>
+      {/* Market Structure (Bubbles Only) */}
+      <div className="hidden md:flex items-center gap-1.5 ml-auto border-l pl-3 border-gray-100 h-8">
+        <div className={`px-2 py-0.5 rounded border text-[10px] font-bold flex items-center gap-1 ${getStructureColor(ltMarket)}`} title="LT Structure">
+          <Activity size={10} />
+          <span>LT: {ltMarket}</span>
+        </div>
+        <div className={`px-2 py-0.5 rounded border text-[10px] font-bold flex items-center gap-1 ${getStructureColor(htMarket)}`} title="HT Structure">
+          <LayoutGrid size={10} />
+          <span>HT: {htMarket}</span>
         </div>
 
         <div className="text-xs text-gray-500 min-w-[120px] text-right">
-          {activeTool === 'select' && (
-            <span className="text-blue-600 font-medium">
-              Click on a drawing to select it
-            </span>
-          )}
           {activeTool !== 'none' && activeTool !== 'select' && (
             <span className="text-blue-600 font-medium">
               Click on chart to draw {tools.find(t => t.id === activeTool)?.label}
