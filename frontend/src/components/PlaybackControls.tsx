@@ -30,6 +30,10 @@ export function PlaybackControls({ onOpenHistory }: { onOpenHistory?: () => void
     riskPerTrade,
     manualLevels,
     showPivotRR,
+    showSecondaryChart,
+    secondaryTimeframe,
+    toggleSecondaryChart,
+    setSecondaryTimeframe,
   } = useSessionStore();
 
 
@@ -632,10 +636,46 @@ export function PlaybackControls({ onOpenHistory }: { onOpenHistory?: () => void
             <button
               onClick={handleReloadData}
               disabled={isReloading}
-              className="w-full px-3 py-2 bg-blue-600 text-white rounded font-medium text-sm hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed"
+              className="w-full px-3 py-2 bg-blue-600 text-white rounded font-medium text-sm hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed mb-2"
             >
               {isReloading ? 'Loading...' : 'Apply Changes'}
             </button>
+
+            {/* Secondary Timeframe */}
+            <div className="pt-2 border-t mt-2 bg-blue-50/50 p-2 rounded-lg border border-blue-100">
+              <label className="flex items-center gap-2 mb-2 cursor-pointer group">
+                <input
+                  type="checkbox"
+                  checked={showSecondaryChart}
+                  onChange={() => toggleSecondaryChart()}
+                  className="w-4 h-4 rounded border-gray-300 text-blue-600 focus:ring-blue-500"
+                />
+                <span className="text-xs font-bold text-gray-700 group-hover:text-blue-700 transition-colors">Show Parallel Timeframe</span>
+              </label>
+
+              {showSecondaryChart && (
+                <div className="animate-in slide-in-from-left-2 duration-200">
+                  <label className="block text-[10px] font-medium text-gray-500 mb-1 ml-6 uppercase">
+                    Select Second TF
+                  </label>
+                  <div className="pl-6">
+                    <select
+                      value={secondaryTimeframe || ''}
+                      onChange={(e) => setSecondaryTimeframe(e.target.value)}
+                      className="w-full px-2 py-1.5 text-xs border border-gray-300 rounded focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white"
+                    >
+                      <option value="" disabled>Select Timeframe...</option>
+                      <option value="15">15 Minutes</option>
+                      <option value="30">30 Minutes</option>
+                      <option value="60">1 Hour</option>
+                      <option value="120">2 Hours</option>
+                      <option value="240">4 Hours</option>
+                      <option value="1440">1 Day</option>
+                    </select>
+                  </div>
+                </div>
+              )}
+            </div>
           </div>
         </div>
       )}

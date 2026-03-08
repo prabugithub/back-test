@@ -42,6 +42,9 @@ interface SessionStore {
   showMarkers: boolean;
   useAtrForSignals: boolean;
   showPivotRR: boolean;
+  showSecondaryChart: boolean;
+  secondaryTimeframe: string | null;
+  secondaryCandles: Candle[];
 
   // Actions
   loadCandles: (candles: Candle[], instrument: string, config?: SessionConfig) => void;
@@ -75,6 +78,8 @@ interface SessionStore {
   checkTrendReversal: (index: number) => void;
   toggleAtrForSignals: () => void;
   togglePivotRR: () => void;
+  setSecondaryTimeframe: (timeframe: string | null) => void;
+  toggleSecondaryChart: () => void;
 
 
 
@@ -108,6 +113,9 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
   manualLevels: null,
   useAtrForSignals: false,
   showPivotRR: false,
+  showSecondaryChart: false,
+  secondaryTimeframe: null,
+  secondaryCandles: [],
 
 
 
@@ -798,4 +806,19 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
   setManualLevels: (manualLevels) => set({ manualLevels }),
   toggleAtrForSignals: () => set((state) => ({ useAtrForSignals: !state.useAtrForSignals })),
   togglePivotRR: () => set((state) => ({ showPivotRR: !state.showPivotRR })),
+
+  setSecondaryTimeframe: (timeframe) => {
+    const { candles } = get();
+    if (!timeframe || candles.length === 0) {
+      set({ secondaryTimeframe: timeframe, secondaryCandles: [] });
+      return;
+    }
+
+    // Try to resample from primary candles if possible
+    // Note: This assumes primary is lower timeframe. 
+    // If not, we'd need to fetch more data, which we'll handle in the UI components
+    set({ secondaryTimeframe: timeframe });
+  },
+
+  toggleSecondaryChart: () => set((state) => ({ showSecondaryChart: !state.showSecondaryChart })),
 }));

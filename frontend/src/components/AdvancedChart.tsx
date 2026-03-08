@@ -12,6 +12,7 @@ import { ChartToolbar } from './ChartToolbar';
 import type { DrawingTool } from './ChartToolbar';
 import type { Indicator } from './ChartToolbar';
 import { calculateSMA, calculateEMA, calculatePivotPoints, calculateAlBrooks } from '../utils/indicators';
+import { resampleCandles } from '../utils/resampler';
 import { useChartDrawings } from '../hooks/useChartDrawings';
 import type { Point } from '../hooks/useChartDrawings';
 import { format } from 'date-fns';
@@ -20,7 +21,7 @@ import { uploadScreenshot } from '../services/api';
 import { useNotificationStore } from '../stores/notificationStore';
 import { ScreenshotSaveDialog } from './ScreenshotSaveDialog';
 
-export function AdvancedChart() {
+export function AdvancedChart({ isSecondary = false }: { isSecondary?: boolean }) {
   const chartContainerRef = useRef<HTMLDivElement>(null);
   const [chart, setChart] = useState<any>(null);
   const [series, setSeries] = useState<any>(null);
@@ -44,11 +45,16 @@ export function AdvancedChart() {
   const showMarkers = useSessionStore((s) => s.showMarkers);
   const useAtrForSignals = useSessionStore((s) => s.useAtrForSignals);
   const showPivotRR = useSessionStore((s) => s.showPivotRR);
+  const secondaryTimeframe = useSessionStore((s) => s.secondaryTimeframe);
 
-  const visibleCandles = useMemo(() =>
-    candles.slice(0, currentIndex + 1),
-    [candles, currentIndex]
-  );
+  const visibleCandles = useMemo(() => {
+    const primaryVisible = candles.slice(0, currentIndex + 1);
+    if (isSecondary && secondaryTimeframe) {
+      // Return HTF candles formed by the primary candles up to current LTF index
+      return resampleCandles(primaryVisible, parseInt(secondaryTimeframe));
+    }
+    return primaryVisible;
+  }, [candles, currentIndex, isSecondary, secondaryTimeframe]);
 
   const isFirstLoadRef = useRef(true);
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
@@ -385,7 +391,13 @@ export function AdvancedChart() {
     // 1. Add Trade Markers
     if (showMarkers) {
       trades.forEach((trade) => {
-        if (trade.timestamp <= visibleCandles[visibleCandles.length - 1].timestamp) {
+        let markerTime = trade.timestamp;
+        if (isSecondary && secondaryTimeframe) {
+          const tfSeconds = parseInt(secondaryTimeframe) * 60;
+          markerTime = Math.floor(trade.timestamp / tfSeconds) * tfSeconds;
+        }
+
+        if (markerTime <= visibleCandles[visibleCandles.length - 1].timestamp) {
           const isMs = trade.timestamp > 1e11;
           const date = new Date(isMs ? trade.timestamp : trade.timestamp * 1000);
 
@@ -400,7 +412,7 @@ export function AdvancedChart() {
             : `${hours.toString().padStart(2, '0')}:${minutes.toString().padStart(2, '0')}`;
 
           allMarkers.push({
-            time: trade.timestamp as any,
+            time: markerTime as any,
             position: trade.type === 'BUY' ? 'belowBar' : 'aboveBar',
             color: trade.type === 'BUY' ? '#26a69a' : '#ef5350',
             shape: trade.type === 'BUY' ? 'arrowUp' : 'arrowDown',
@@ -647,18 +659,27 @@ export function AdvancedChart() {
         setActiveTool('select');
       }}
     >
-      <ChartToolbar
-        activeTool={activeTool}
-        onToolChange={setActiveTool}
-        activeIndicators={activeIndicators}
-        onIndicatorToggle={handleIndicatorToggle}
-        onClearDrawings={handleClearDrawings}
-        onDeleteSelected={deleteSelectedDrawing}
-        onTakeScreenshot={handleTakeScreenshot}
-        onDownloadScreenshot={handleDownloadScreenshot}
-        isUploadingScreenshot={isUploadingScreenshot}
-        hasSelection={!!selectedDrawingId}
-      />
+      {!isSecondary && (
+        <ChartToolbar
+          activeTool={activeTool}
+          onToolChange={setActiveTool}
+          activeIndicators={activeIndicators}
+          onIndicatorToggle={handleIndicatorToggle}
+          onClearDrawings={handleClearDrawings}
+          onDeleteSelected={deleteSelectedDrawing}
+          onTakeScreenshot={handleTakeScreenshot}
+          onDownloadScreenshot={handleDownloadScreenshot}
+          isUploadingScreenshot={isUploadingScreenshot}
+          hasSelection={!!selectedDrawingId}
+        />
+      )}
+
+      {isSecondary && (
+        <div className="absolute top-2 left-4 z-10 bg-white/80 backdrop-blur-sm px-3 py-1.5 rounded-lg border shadow-sm flex items-center gap-2">
+          <span className="text-sm font-bold text-gray-700">HTF Chart: {secondaryTimeframe}m</span>
+          <div className="w-1.5 h-1.5 rounded-full bg-blue-500 animate-pulse"></div>
+        </div>
+      )}
 
       <TextInputDialog
         isOpen={isTextDialogOpen}

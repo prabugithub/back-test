@@ -23,6 +23,7 @@ function App() {
   const [isTradeHistoryOpen, setIsTradeHistoryOpen] = useState(false);
   const [isBackupHistoryOpen, setIsBackupHistoryOpen] = useState(false);
   const [isSnapshotPromptOpen, setIsSnapshotPromptOpen] = useState(false);
+  const showSecondaryChart = useSessionStore((s: any) => s.showSecondaryChart);
 
   const hasData = candles.length > 0;
 
@@ -69,9 +70,20 @@ function App() {
           ) : (
             <div className="flex-1 flex flex-col relative h-full">
               {/* Chart Area */}
-              <div className="flex-1 relative min-h-0">
-                <AdvancedChart />
-                <PositionOverlay onOpenDetail={() => setIsTradeHistoryOpen(true)} />
+              <div className={`flex-1 relative min-h-0 flex ${showSecondaryChart ? 'flex-row' : 'flex-col'}`}>
+                <div className="flex-1 relative min-w-0">
+                  <AdvancedChart />
+                  {!showSecondaryChart && (
+                    <PositionOverlay onOpenDetail={() => setIsTradeHistoryOpen(true)} />
+                  )}
+                </div>
+
+                {showSecondaryChart && (
+                  <div className="w-[40%] relative min-w-0 border-l-2 border-gray-300">
+                    <AdvancedChart isSecondary />
+                    <PositionOverlay onOpenDetail={() => setIsTradeHistoryOpen(true)} />
+                  </div>
+                )}
               </div>
 
               {isTradeHistoryOpen && (
