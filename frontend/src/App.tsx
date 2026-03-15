@@ -1,7 +1,10 @@
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { InstrumentSelector } from './components/InstrumentSelector';
 import { AdvancedChart } from './components/AdvancedChart';
+import type { ChartCallbacks } from './components/AdvancedChart';
 import { PlaybackControls } from './components/PlaybackControls';
+import { ChartToolbar } from './components/ChartToolbar';
+import type { DrawingTool, Indicator } from './components/ChartToolbar';
 
 // import { SessionStats } from './components/SessionStats'; // Now in dialog
 import { TradeHistoryDialog } from './components/TradeHistoryDialog';
@@ -25,10 +28,24 @@ function App() {
   const [isSnapshotPromptOpen, setIsSnapshotPromptOpen] = useState(false);
   const showSecondaryChart = useSessionStore((s: any) => s.showSecondaryChart);
 
+  // Shared toolbar state from store
+  const sharedActiveTool = useSessionStore((s: any) => s.sharedActiveTool) as DrawingTool;
+  const setSharedActiveTool = useSessionStore((s: any) => s.setSharedActiveTool);
+  const sharedActiveIndicators = useSessionStore((s: any) => s.sharedActiveIndicators) as Indicator[];
+  const toggleSharedIndicator = useSessionStore((s: any) => s.toggleSharedIndicator);
+
+  // Callbacks from the currently-active chart (the focused chart registers these)
+  const [chartCallbacks, setChartCallbacks] = useState<ChartCallbacks>({});
+
   const hasData = candles.length > 0;
 
   const handleSaveSnapshot = (name: string) => {
     useSessionStore.getState().saveRemoteSnapshot(name);
+  };
+
+  /** Called by each chart when it becomes active — merges callbacks */
+  const handleRegisterCallbacks = (cbs: ChartCallbacks) => {
+    setChartCallbacks(cbs);
   };
 
   return (
@@ -69,10 +86,27 @@ function App() {
             </div>
           ) : (
             <div className="flex-1 flex flex-col relative h-full">
+
+              {/* ── Shared Chart Toolbar (applies to the active/focused chart) ── */}
+              <ChartToolbar
+                activeTool={sharedActiveTool}
+                onToolChange={(tool) => setSharedActiveTool(tool)}
+                activeIndicators={sharedActiveIndicators}
+                onIndicatorToggle={(ind) => toggleSharedIndicator(ind as string)}
+                onClearDrawings={() => chartCallbacks.clearDrawings?.()}
+                onDeleteSelected={() => chartCallbacks.deleteSelected?.()}
+                onTakeScreenshot={() => chartCallbacks.takeScreenshot?.()}
+                onDownloadScreenshot={() => chartCallbacks.downloadScreenshot?.()}
+                isUploadingScreenshot={chartCallbacks.isUploadingScreenshot ?? false}
+                hasSelection={chartCallbacks.hasSelection ?? false}
+              />
+
               {/* Chart Area */}
               <div className={`flex-1 relative min-h-0 flex ${showSecondaryChart ? 'flex-row' : 'flex-col'}`}>
                 <div className="flex-1 relative min-w-0">
-                  <AdvancedChart />
+                  <AdvancedChart
+                    onRegisterCallbacks={handleRegisterCallbacks}
+                  />
                   {!showSecondaryChart && (
                     <PositionOverlay onOpenDetail={() => setIsTradeHistoryOpen(true)} />
                   )}
@@ -80,7 +114,10 @@ function App() {
 
                 {showSecondaryChart && (
                   <div className="w-[40%] relative min-w-0 border-l-2 border-gray-300">
-                    <AdvancedChart isSecondary />
+                    <AdvancedChart
+                      isSecondary
+                      onRegisterCallbacks={handleRegisterCallbacks}
+                    />
                     <PositionOverlay onOpenDetail={() => setIsTradeHistoryOpen(true)} />
                   </div>
                 )}

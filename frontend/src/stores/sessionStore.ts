@@ -46,6 +46,11 @@ interface SessionStore {
   secondaryTimeframe: string | null;
   secondaryCandles: Candle[];
 
+  // Shared chart tool/indicator state (applies to the active/focused chart)
+  activeChartId: 'primary' | 'secondary';
+  sharedActiveTool: string;
+  sharedActiveIndicators: string[];
+
   // Actions
   loadCandles: (candles: Candle[], instrument: string, config?: SessionConfig) => void;
   play: () => void;
@@ -80,6 +85,10 @@ interface SessionStore {
   togglePivotRR: () => void;
   setSecondaryTimeframe: (timeframe: string | null) => void;
   toggleSecondaryChart: () => void;
+  setActiveChartId: (id: 'primary' | 'secondary') => void;
+  setSharedActiveTool: (tool: string) => void;
+  setSharedActiveIndicators: (indicators: string[]) => void;
+  toggleSharedIndicator: (indicator: string) => void;
 
 
 
@@ -116,6 +125,9 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
   showSecondaryChart: false,
   secondaryTimeframe: null,
   secondaryCandles: [],
+  activeChartId: 'primary',
+  sharedActiveTool: 'none',
+  sharedActiveIndicators: ['ema21', 'pivotPoints', 'alBrooks'],
 
 
 
@@ -821,4 +833,13 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
   },
 
   toggleSecondaryChart: () => set((state) => ({ showSecondaryChart: !state.showSecondaryChart })),
+
+  setActiveChartId: (activeChartId) => set({ activeChartId }),
+  setSharedActiveTool: (sharedActiveTool) => set({ sharedActiveTool }),
+  setSharedActiveIndicators: (sharedActiveIndicators) => set({ sharedActiveIndicators }),
+  toggleSharedIndicator: (indicator) => set((state) => ({
+    sharedActiveIndicators: state.sharedActiveIndicators.includes(indicator)
+      ? state.sharedActiveIndicators.filter((i) => i !== indicator)
+      : [...state.sharedActiveIndicators, indicator],
+  })),
 }));

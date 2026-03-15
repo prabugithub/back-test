@@ -8,7 +8,6 @@ import {
   createSeriesMarkers,
 } from 'lightweight-charts';
 import { useSessionStore } from '../stores/sessionStore';
-import { ChartToolbar } from './ChartToolbar';
 import type { DrawingTool } from './ChartToolbar';
 import type { Indicator } from './ChartToolbar';
 import { calculateSMA, calculateEMA, calculatePivotPoints, calculateAlBrooks } from '../utils/indicators';
@@ -21,7 +20,23 @@ import { uploadScreenshot } from '../services/api';
 import { useNotificationStore } from '../stores/notificationStore';
 import { ScreenshotSaveDialog } from './ScreenshotSaveDialog';
 
-export function AdvancedChart({ isSecondary = false }: { isSecondary?: boolean }) {
+export interface ChartCallbacks {
+  clearDrawings?: () => void;
+  deleteSelected?: () => void;
+  takeScreenshot?: () => void;
+  downloadScreenshot?: () => void;
+  hasSelection?: boolean;
+  isUploadingScreenshot?: boolean;
+}
+
+export function AdvancedChart({
+  isSecondary = false,
+  onRegisterCallbacks,
+}: {
+  isSecondary?: boolean;
+  onRegisterCallbacks?: (cbs: ChartCallbacks) => void;
+}) {
+  const chartId = isSecondary ? 'secondary' : 'primary';
   const chartContainerRef = useRef<HTMLDivElement>(null);
   const [chart, setChart] = useState<any>(null);
   const [series, setSeries] = useState<any>(null);
@@ -29,8 +44,24 @@ export function AdvancedChart({ isSecondary = false }: { isSecondary?: boolean }
   const markersPrimitiveRef = useRef<any>(null);
   const indicatorSeriesRef = useRef<Map<string, any>>(new Map());
 
-  const [activeTool, setActiveTool] = useState<DrawingTool>('none');
-  const [activeIndicators, setActiveIndicators] = useState<Indicator[]>(['ema21', 'pivotPoints', 'alBrooks']);
+  // Shared state from store
+  const activeChartId = useSessionStore((s) => s.activeChartId);
+  const setActiveChartId = useSessionStore((s) => s.setActiveChartId);
+  const sharedActiveTool = useSessionStore((s) => s.sharedActiveTool) as DrawingTool;
+  const setSharedActiveTool = useSessionStore((s) => s.setSharedActiveTool);
+  const sharedActiveIndicators = useSessionStore((s) => s.sharedActiveIndicators) as Indicator[];
+  const showSecondaryChart = useSessionStore((s) => s.showSecondaryChart);
+
+  // The chart is "active" if it's currently selected (or in single-chart mode, always active)
+  const isActiveChart = !showSecondaryChart || activeChartId === chartId;
+
+  // Local alias for the active tool (so existing code that uses activeTool still works)
+  const activeTool = isActiveChart ? sharedActiveTool : 'none' as DrawingTool;
+  const activeIndicators = sharedActiveIndicators;
+  const setActiveTool = (tool: DrawingTool) => {
+    setActiveChartId(chartId);
+    setSharedActiveTool(tool);
+  };
 
   const [isTextDialogOpen, setIsTextDialogOpen] = useState(false);
   const [pendingTextPoint, setPendingTextPoint] = useState<Point | null>(null);
@@ -488,18 +519,11 @@ export function AdvancedChart({ isSecondary = false }: { isSecondary?: boolean }
     markersPrimitiveRef.current.setMarkers(allMarkers);
   }, [activeIndicators, visibleCandles, trades, showMarkers, useAtrForSignals]);
 
-  const handleIndicatorToggle = (indicator: Indicator) => {
-    setActiveIndicators((prev) =>
-      prev.includes(indicator)
-        ? prev.filter((i) => i !== indicator)
-        : [...prev, indicator]
-    );
-  };
-
-  const handleClearDrawings = () => {
+  const handleClearDrawings = useCallback(() => {
     clearDrawings();
-    setActiveTool('none');
-  };
+    setSharedActiveTool('none');
+  }, [clearDrawings, setSharedActiveTool]);
+
 
   const [isScreenshotDialogOpen, setIsScreenshotDialogOpen] = useState(false);
   const [screenshotDefaultName, setScreenshotDefaultName] = useState('');
@@ -566,6 +590,21 @@ export function AdvancedChart({ isSecondary = false }: { isSecondary?: boolean }
     link.click();
     notify('Screenshot downloaded locally', 'success');
   };
+
+  // Register this chart's callbacks with the parent whenever active state changes
+  // (placed after all handler definitions to avoid "used before declaration" errors)
+  useEffect(() => {
+    if (!isActiveChart || !onRegisterCallbacks) return;
+    onRegisterCallbacks({
+      clearDrawings: handleClearDrawings,
+      deleteSelected: deleteSelectedDrawing,
+      takeScreenshot: handleTakeScreenshot,
+      downloadScreenshot: handleDownloadScreenshot,
+      hasSelection: !!selectedDrawingId,
+      isUploadingScreenshot,
+    });
+  }, [isActiveChart, onRegisterCallbacks, handleClearDrawings, deleteSelectedDrawing,
+    handleTakeScreenshot, handleDownloadScreenshot, selectedDrawingId, isUploadingScreenshot]);
 
   const handleScreenshotSubmit = (name: string) => {
     if (!pendingScreenshotData) return;
@@ -635,8 +674,9 @@ export function AdvancedChart({ isSecondary = false }: { isSecondary?: boolean }
     return () => resizeCanvasObserver.disconnect();
   }, [renderCanvas]);
 
-  // Keyboard shortcuts
+  // Keyboard shortcuts — only registered by the primary chart to avoid double-binding
   useEffect(() => {
+    if (isSecondary) return; // Secondary chart doesn't own global keyboard shortcuts
     const handleKeyDown = (e: KeyboardEvent) => {
       const target = e.target as HTMLElement;
       if (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA') return;
@@ -670,41 +710,52 @@ export function AdvancedChart({ isSecondary = false }: { isSecondary?: boolean }
       if (toolMap[key]) {
         e.preventDefault();
         const newTool = toolMap[key];
-        setActiveTool(activeTool === newTool ? 'none' : newTool);
+        setSharedActiveTool(activeTool === newTool ? 'none' : newTool);
       }
     };
 
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [selectedDrawingId, activeTool, deleteSelectedDrawing]);
+  }, [isSecondary, selectedDrawingId, activeTool, deleteSelectedDrawing]);
 
   return (
     <div
       className="w-full h-full flex flex-col relative"
+      onMouseDownCapture={() => {
+        // When clicking on this chart, make it the active chart
+        if (showSecondaryChart && activeChartId !== chartId) {
+          setActiveChartId(chartId);
+        }
+      }}
       onContextMenu={(e) => {
         e.preventDefault();
         setActiveTool('select');
       }}
     >
-      {!isSecondary && (
-        <ChartToolbar
-          activeTool={activeTool}
-          onToolChange={setActiveTool}
-          activeIndicators={activeIndicators}
-          onIndicatorToggle={handleIndicatorToggle}
-          onClearDrawings={handleClearDrawings}
-          onDeleteSelected={deleteSelectedDrawing}
-          onTakeScreenshot={handleTakeScreenshot}
-          onDownloadScreenshot={handleDownloadScreenshot}
-          isUploadingScreenshot={isUploadingScreenshot}
-          hasSelection={!!selectedDrawingId}
+      {/* Chart focus indicator in dual mode */}
+      {showSecondaryChart && (
+        <div
+          className={`absolute inset-0 pointer-events-none z-50 rounded-sm transition-all duration-150 ${
+            isActiveChart
+              ? 'ring-2 ring-inset ring-blue-500'
+              : 'ring-1 ring-inset ring-transparent'
+          }`}
         />
       )}
 
-      {isSecondary && (
-        <div className="absolute top-2 left-4 z-10 bg-white/80 backdrop-blur-sm px-3 py-1.5 rounded-lg border shadow-sm flex items-center gap-2">
-          <span className="text-sm font-bold text-gray-700">HTF Chart: {secondaryTimeframe}m</span>
-          <div className="w-1.5 h-1.5 rounded-full bg-blue-500 animate-pulse"></div>
+      {/* Active chart label in dual mode */}
+      {showSecondaryChart && (
+        <div className={`absolute top-2 left-4 z-10 px-3 py-1.5 rounded-lg border shadow-sm flex items-center gap-2 transition-all duration-150 ${
+          isActiveChart
+            ? 'bg-blue-600 text-white border-blue-700'
+            : 'bg-white/80 backdrop-blur-sm text-gray-700 border-gray-200'
+        }`}>
+          <span className="text-xs font-bold">
+            {isSecondary ? `HTF: ${secondaryTimeframe}m` : 'LTF Chart'}
+          </span>
+          {isActiveChart && (
+            <div className="w-1.5 h-1.5 rounded-full bg-white animate-pulse" />
+          )}
         </div>
       )}
 
@@ -738,11 +789,11 @@ export function AdvancedChart({ isSecondary = false }: { isSecondary?: boolean }
           }
         }}
         onMouseMove={(e) => {
-          if (activeTool === 'none') return;
+          if (!isActiveChart || activeTool === 'none') return;
           handleMouseMove(e.nativeEvent);
         }}
         onMouseUp={() => {
-          if (activeTool === 'none') return;
+          if (!isActiveChart || activeTool === 'none') return;
           handleMouseUp();
         }}
       >
