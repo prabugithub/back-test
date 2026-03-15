@@ -109,7 +109,7 @@ export function ChartToolbar({
   ];
 
   return (
-    <div className="bg-white border-b px-3 py-1.5 flex items-center gap-2 flex-nowrap overflow-x-auto no-scrollbar">
+    <div className="bg-white border-b px-3 py-1.5 flex items-center gap-2 flex-nowrap min-w-max">
       {/* Drawing Tools */}
       <div className="flex items-center gap-1 border-r pr-3">
         <span className="text-xs font-medium text-gray-600 mr-2">Drawing Tools:</span>
@@ -199,7 +199,7 @@ export function ChartToolbar({
           </button>
 
           {showIndicators && (
-            <div className="absolute top-full left-0 mt-1 bg-white border rounded-lg shadow-lg p-2 z-10 min-w-[150px]">
+            <div className="absolute top-full left-0 mt-1 bg-white border rounded-lg shadow-lg p-2 z-[100] min-w-[150px]">
               {indicators.map((indicator) => {
                 const isActive = activeIndicators.includes(indicator.id);
                 return (

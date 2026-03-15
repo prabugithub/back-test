@@ -88,18 +88,20 @@ function App() {
             <div className="flex-1 flex flex-col relative h-full">
 
               {/* ── Shared Chart Toolbar (applies to the active/focused chart) ── */}
-              <ChartToolbar
-                activeTool={sharedActiveTool}
-                onToolChange={(tool) => setSharedActiveTool(tool)}
-                activeIndicators={sharedActiveIndicators}
-                onIndicatorToggle={(ind) => toggleSharedIndicator(ind as string)}
-                onClearDrawings={() => chartCallbacks.clearDrawings?.()}
-                onDeleteSelected={() => chartCallbacks.deleteSelected?.()}
-                onTakeScreenshot={() => chartCallbacks.takeScreenshot?.()}
-                onDownloadScreenshot={() => chartCallbacks.downloadScreenshot?.()}
-                isUploadingScreenshot={chartCallbacks.isUploadingScreenshot ?? false}
-                hasSelection={chartCallbacks.hasSelection ?? false}
-              />
+              <div className="relative z-[100]">
+                <ChartToolbar
+                  activeTool={sharedActiveTool}
+                  onToolChange={(tool) => setSharedActiveTool(tool)}
+                  activeIndicators={sharedActiveIndicators}
+                  onIndicatorToggle={(ind) => toggleSharedIndicator(ind as string)}
+                  onClearDrawings={() => chartCallbacks.clearDrawings?.()}
+                  onDeleteSelected={() => chartCallbacks.deleteSelected?.()}
+                  onTakeScreenshot={() => chartCallbacks.takeScreenshot?.()}
+                  onDownloadScreenshot={() => chartCallbacks.downloadScreenshot?.()}
+                  isUploadingScreenshot={chartCallbacks.isUploadingScreenshot ?? false}
+                  hasSelection={chartCallbacks.hasSelection ?? false}
+                />
+              </div>
 
               {/* Chart Area */}
               <div className={`flex-1 relative min-h-0 flex ${showSecondaryChart ? 'flex-row' : 'flex-col'}`}>
