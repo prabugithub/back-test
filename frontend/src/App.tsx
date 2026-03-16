@@ -29,10 +29,14 @@ function App() {
   const showSecondaryChart = useSessionStore((s: any) => s.showSecondaryChart);
 
   // Shared toolbar state from store
+  const activeChartId = useSessionStore((s: any) => s.activeChartId);
+  const primaryIndicators = useSessionStore((s: any) => s.primaryIndicators) as Indicator[];
+  const secondaryIndicators = useSessionStore((s: any) => s.secondaryIndicators) as Indicator[];
+  const sharedActiveIndicators = activeChartId === 'primary' ? primaryIndicators : secondaryIndicators;
+  const toggleSharedIndicator = useSessionStore((s: any) => s.toggleSharedIndicator);
+
   const sharedActiveTool = useSessionStore((s: any) => s.sharedActiveTool) as DrawingTool;
   const setSharedActiveTool = useSessionStore((s: any) => s.setSharedActiveTool);
-  const sharedActiveIndicators = useSessionStore((s: any) => s.sharedActiveIndicators) as Indicator[];
-  const toggleSharedIndicator = useSessionStore((s: any) => s.toggleSharedIndicator);
 
   // Callbacks from the currently-active chart (the focused chart registers these)
   const [chartCallbacks, setChartCallbacks] = useState<ChartCallbacks>({});

@@ -67,7 +67,10 @@ export function ChartToolbar({
     };
   }, [showIndicators]);
 
-  const showMarkers = useSessionStore((s) => s.showMarkers);
+  const activeChartId = useSessionStore((s) => s.activeChartId);
+  const primaryShowMarkers = useSessionStore((s) => s.primaryShowMarkers);
+  const secondaryShowMarkers = useSessionStore((s) => s.secondaryShowMarkers);
+  const showMarkers = activeChartId === 'primary' ? primaryShowMarkers : secondaryShowMarkers;
   const toggleMarkers = useSessionStore((s) => s.toggleMarkers);
   const candles = useSessionStore((s) => s.candles);
   const currentIndex = useSessionStore((s) => s.currentIndex);
@@ -172,7 +175,7 @@ export function ChartToolbar({
       {/* Visibility Toggle */}
       <div className="flex items-center gap-1 border-r pr-3">
         <button
-          onClick={toggleMarkers}
+          onClick={() => toggleMarkers()}
           className={`p-2 rounded hover:bg-gray-100 transition-colors ${showMarkers ? 'text-blue-600 bg-blue-50' : 'text-gray-400'
             }`}
           title={showMarkers ? 'Hide Trading Activity Markers' : 'Show Trading Activity Markers'}

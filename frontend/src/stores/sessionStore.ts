@@ -39,7 +39,8 @@ interface SessionStore {
 
 
   // UI settings
-  showMarkers: boolean;
+  primaryShowMarkers: boolean;
+  secondaryShowMarkers: boolean;
   useAtrForSignals: boolean;
   showPivotRR: boolean;
   showSecondaryChart: boolean;
@@ -49,7 +50,8 @@ interface SessionStore {
   // Shared chart tool/indicator state (applies to the active/focused chart)
   activeChartId: 'primary' | 'secondary';
   sharedActiveTool: string;
-  sharedActiveIndicators: string[];
+  primaryIndicators: string[];
+  secondaryIndicators: string[];
 
   // Actions
   loadCandles: (candles: Candle[], instrument: string, config?: SessionConfig) => void;
@@ -76,7 +78,7 @@ interface SessionStore {
   deleteRemoteSnapshot: (id: string) => Promise<void>;
   getRemoteSnapshots: () => Promise<SessionState[]>;
   getRemoteHistory: () => Promise<SessionState[]>;
-  toggleMarkers: () => void;
+  toggleMarkers: (chartId?: 'primary' | 'secondary') => void;
   setTradeQuantity: (qty: number) => void;
   setRiskPerTrade: (risk: number) => void;
   setManualLevels: (levels: { sl: number, target: number } | null) => void;
@@ -88,7 +90,7 @@ interface SessionStore {
   setActiveChartId: (id: 'primary' | 'secondary') => void;
   setSharedActiveTool: (tool: string) => void;
   setSharedActiveIndicators: (indicators: string[]) => void;
-  toggleSharedIndicator: (indicator: string) => void;
+  toggleSharedIndicator: (indicator: string, chartId?: 'primary' | 'secondary') => void;
 
 
 
@@ -116,7 +118,8 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
   isLoading: false,
   pendingExitRequest: null,
   pendingTradeRequest: null,
-  showMarkers: true,
+  primaryShowMarkers: true,
+  secondaryShowMarkers: true,
   tradeQuantity: 65,
   riskPerTrade: 10000,
   manualLevels: null,
@@ -127,7 +130,8 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
   secondaryCandles: [],
   activeChartId: 'primary',
   sharedActiveTool: 'none',
-  sharedActiveIndicators: ['ema21', 'pivotPoints', 'alBrooks'],
+  primaryIndicators: ['ema21', 'pivotPoints', 'alBrooks'],
+  secondaryIndicators: ['ema21', 'pivotPoints', 'alBrooks'],
 
 
 
@@ -812,7 +816,14 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
     return position?.realizedPnL || 0;
   },
 
-  toggleMarkers: () => set((state) => ({ showMarkers: !state.showMarkers })),
+  toggleMarkers: (chartId) => {
+    const id = chartId || get().activeChartId;
+    if (id === 'primary') {
+      set((state) => ({ primaryShowMarkers: !state.primaryShowMarkers }));
+    } else {
+      set((state) => ({ secondaryShowMarkers: !state.secondaryShowMarkers }));
+    }
+  },
   setTradeQuantity: (tradeQuantity) => set({ tradeQuantity }),
   setRiskPerTrade: (riskPerTrade) => set({ riskPerTrade }),
   setManualLevels: (manualLevels) => set({ manualLevels }),
@@ -825,10 +836,6 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
       set({ secondaryTimeframe: timeframe, secondaryCandles: [] });
       return;
     }
-
-    // Try to resample from primary candles if possible
-    // Note: This assumes primary is lower timeframe. 
-    // If not, we'd need to fetch more data, which we'll handle in the UI components
     set({ secondaryTimeframe: timeframe });
   },
 
@@ -836,10 +843,25 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
 
   setActiveChartId: (activeChartId) => set({ activeChartId }),
   setSharedActiveTool: (sharedActiveTool) => set({ sharedActiveTool }),
-  setSharedActiveIndicators: (sharedActiveIndicators) => set({ sharedActiveIndicators }),
-  toggleSharedIndicator: (indicator) => set((state) => ({
-    sharedActiveIndicators: state.sharedActiveIndicators.includes(indicator)
-      ? state.sharedActiveIndicators.filter((i) => i !== indicator)
-      : [...state.sharedActiveIndicators, indicator],
-  })),
+  setSharedActiveIndicators: (indicators) => {
+    const { activeChartId } = get();
+    if (activeChartId === 'primary') set({ primaryIndicators: indicators });
+    else set({ secondaryIndicators: indicators });
+  },
+  toggleSharedIndicator: (indicator, chartId) => {
+    const id = chartId || get().activeChartId;
+    if (id === 'primary') {
+      set((state) => ({
+        primaryIndicators: state.primaryIndicators.includes(indicator)
+          ? state.primaryIndicators.filter((i) => i !== indicator)
+          : [...state.primaryIndicators, indicator],
+      }));
+    } else {
+      set((state) => ({
+        secondaryIndicators: state.secondaryIndicators.includes(indicator)
+          ? state.secondaryIndicators.filter((i) => i !== indicator)
+          : [...state.secondaryIndicators, indicator],
+      }));
+    }
+  },
 }));

@@ -49,7 +49,8 @@ export function AdvancedChart({
   const setActiveChartId = useSessionStore((s) => s.setActiveChartId);
   const sharedActiveTool = useSessionStore((s) => s.sharedActiveTool) as DrawingTool;
   const setSharedActiveTool = useSessionStore((s) => s.setSharedActiveTool);
-  const sharedActiveIndicators = useSessionStore((s) => s.sharedActiveIndicators) as Indicator[];
+  const primaryIndicators = useSessionStore((s) => s.primaryIndicators) as Indicator[];
+  const secondaryIndicators = useSessionStore((s) => s.secondaryIndicators) as Indicator[];
   const showSecondaryChart = useSessionStore((s) => s.showSecondaryChart);
 
   // The chart is "active" if it's currently selected (or in single-chart mode, always active)
@@ -57,7 +58,7 @@ export function AdvancedChart({
 
   // Local alias for the active tool (so existing code that uses activeTool still works)
   const activeTool = isActiveChart ? sharedActiveTool : 'none' as DrawingTool;
-  const activeIndicators = sharedActiveIndicators;
+  const activeIndicators = isSecondary ? secondaryIndicators : primaryIndicators;
   const setActiveTool = (tool: DrawingTool) => {
     setActiveChartId(chartId);
     setSharedActiveTool(tool);
@@ -73,7 +74,9 @@ export function AdvancedChart({
   const trades = useSessionStore((s) => s.trades);
   const saveCurrentSession = useSessionStore((s) => s.saveCurrentSession);
   const saveRemoteSession = useSessionStore((s) => s.saveRemoteSession);
-  const showMarkers = useSessionStore((s) => s.showMarkers);
+  const primaryShowMarkers = useSessionStore((s) => s.primaryShowMarkers);
+  const secondaryShowMarkers = useSessionStore((s) => s.secondaryShowMarkers);
+  const showMarkers = isSecondary ? secondaryShowMarkers : primaryShowMarkers;
   const useAtrForSignals = useSessionStore((s) => s.useAtrForSignals);
   const showPivotRR = useSessionStore((s) => s.showPivotRR);
   const secondaryTimeframe = useSessionStore((s) => s.secondaryTimeframe);
@@ -81,8 +84,12 @@ export function AdvancedChart({
   const visibleCandles = useMemo(() => {
     const primaryVisible = candles.slice(0, currentIndex + 1);
     if (isSecondary && secondaryTimeframe) {
+      // Map interval string to minutes for resampling
+      let tfMinutes = parseInt(secondaryTimeframe);
+      if (secondaryTimeframe === '1D') tfMinutes = 1440;
+      
       // Return HTF candles formed by the primary candles up to current LTF index
-      return resampleCandles(primaryVisible, parseInt(secondaryTimeframe));
+      return resampleCandles(primaryVisible, tfMinutes);
     }
     return primaryVisible;
   }, [candles, currentIndex, isSecondary, secondaryTimeframe]);

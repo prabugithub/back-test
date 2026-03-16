@@ -15,9 +15,14 @@ const loadNiftyData = () => import('../assets/market-data/nifty5min_data.json');
 export function TimeframeSwitcher() {
     const sessionConfig = useSessionStore((s) => s.sessionConfig);
     const loadCandles = useSessionStore((s) => s.loadCandles);
+    const activeChartId = useSessionStore((s) => s.activeChartId);
+    const secondaryTimeframe = useSessionStore((s) => s.secondaryTimeframe);
+    const setSecondaryTimeframe = useSessionStore((s) => s.setSecondaryTimeframe);
     const [isLoading, setIsLoading] = useState(false);
 
-    const currentInterval = sessionConfig?.interval || '5';
+    const currentInterval = activeChartId === 'primary' 
+        ? (sessionConfig?.interval || '5')
+        : (secondaryTimeframe || '60'); // Default secondary to 1h if not set
 
     const handleTimeframeChange = async (newInterval: string) => {
         if (!sessionConfig) {
@@ -26,6 +31,11 @@ export function TimeframeSwitcher() {
         }
 
         if (newInterval === currentInterval) return;
+
+        if (activeChartId === 'secondary') {
+            setSecondaryTimeframe(newInterval);
+            return;
+        }
 
         setIsLoading(true);
 
