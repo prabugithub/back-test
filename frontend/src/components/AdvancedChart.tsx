@@ -59,10 +59,10 @@ export function AdvancedChart({
   // Local alias for the active tool (so existing code that uses activeTool still works)
   const activeTool = isActiveChart ? sharedActiveTool : 'none' as DrawingTool;
   const activeIndicators = isSecondary ? secondaryIndicators : primaryIndicators;
-  const setActiveTool = (tool: DrawingTool) => {
+  const setActiveTool = useCallback((tool: DrawingTool) => {
     setActiveChartId(chartId);
     setSharedActiveTool(tool);
-  };
+  }, [setActiveChartId, chartId, setSharedActiveTool]);
 
   const [isTextDialogOpen, setIsTextDialogOpen] = useState(false);
   const [pendingTextPoint, setPendingTextPoint] = useState<Point | null>(null);
@@ -681,9 +681,9 @@ export function AdvancedChart({
     return () => resizeCanvasObserver.disconnect();
   }, [renderCanvas]);
 
-  // Keyboard shortcuts — only registered by the primary chart to avoid double-binding
+  // Keyboard shortcuts — only registered by the active chart to avoid double-binding
   useEffect(() => {
-    if (isSecondary) return; // Secondary chart doesn't own global keyboard shortcuts
+    if (!isActiveChart) return;
     const handleKeyDown = (e: KeyboardEvent) => {
       const target = e.target as HTMLElement;
       if (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA') return;
@@ -723,7 +723,7 @@ export function AdvancedChart({
 
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [isSecondary, selectedDrawingId, activeTool, deleteSelectedDrawing]);
+  }, [isActiveChart, selectedDrawingId, activeTool, deleteSelectedDrawing, setActiveTool, setSharedActiveTool]);
 
   return (
     <div
