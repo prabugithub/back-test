@@ -63,69 +63,38 @@ export function useChartDrawings({
   const resizeHandleIndexRef = useRef(resizeHandleIndex);
 
   // Keep refs in sync with state
-  useEffect(() => {
-    activeToolRef.current = activeTool;
-  }, [activeTool]);
-
-  useEffect(() => {
-    isDrawingRef.current = isDrawing;
-  }, [isDrawing]);
-
-  useEffect(() => {
-    currentDrawingRef.current = currentDrawing;
-  }, [currentDrawing]);
-
-  useEffect(() => {
-    isDraggingRef.current = isDragging;
-  }, [isDragging]);
-
-  useEffect(() => {
-    dragOffsetRef.current = dragOffset;
-  }, [dragOffset]);
-
-  useEffect(() => {
-    selectedDrawingIdRef.current = selectedDrawingId;
-  }, [selectedDrawingId]);
-
-  useEffect(() => {
-    isResizingRef.current = isResizing;
-  }, [isResizing]);
-
-  useEffect(() => {
-    resizeHandleIndexRef.current = resizeHandleIndex;
-  }, [resizeHandleIndex]);
+  useEffect(() => { activeToolRef.current = activeTool; }, [activeTool]);
+  useEffect(() => { isDrawingRef.current = isDrawing; }, [isDrawing]);
+  useEffect(() => { currentDrawingRef.current = currentDrawing; }, [currentDrawing]);
+  useEffect(() => { isDraggingRef.current = isDragging; }, [isDragging]);
+  useEffect(() => { dragOffsetRef.current = dragOffset; }, [dragOffset]);
+  useEffect(() => { selectedDrawingIdRef.current = selectedDrawingId; }, [selectedDrawingId]);
+  useEffect(() => { isResizingRef.current = isResizing; }, [isResizing]);
+  useEffect(() => { resizeHandleIndexRef.current = resizeHandleIndex; }, [resizeHandleIndex]);
 
   const getChartCoordinates = useCallback((event: MouseEvent, canvas: HTMLCanvasElement): Point => {
     const rect = canvas.getBoundingClientRect();
     const x = event.clientX - rect.left;
     const y = event.clientY - rect.top;
-
     const point: Point = { x, y };
-
     if (chartApi && seriesApi) {
       const timeScale = chartApi.timeScale();
       const logical = timeScale.coordinateToLogical(x);
       const price = seriesApi.coordinateToPrice(y);
-
       if (logical !== null) point.time = logical;
       if (price !== null) point.price = price;
     }
-
     return point;
   }, [chartApi, seriesApi]);
 
   const convertLogicalToPixel = useCallback((point: Point): Point => {
     if (!chartApi || !seriesApi) return point;
-
     const timeScale = chartApi.timeScale();
-
-    // Convert time to X coordinate
     let x = point.x;
     if (point.time !== undefined) {
       const coord = timeScale.logicalToCoordinate(point.time as any);
-      if (coord !== null) {
-        x = coord;
-      } else {
+      if (coord !== null) x = coord;
+      else {
         const visibleRange = timeScale.getVisibleLogicalRange();
         if (visibleRange) {
           if (point.time < visibleRange.from) x = -10000;
@@ -133,124 +102,62 @@ export function useChartDrawings({
         }
       }
     }
-
-    // Convert price to Y coordinate
     let y = point.y;
     if (point.price !== undefined) {
       const coord = seriesApi.priceToCoordinate(point.price as any);
-      if (coord !== null) {
-        y = coord;
-      }
+      if (coord !== null) y = coord;
     }
-
     return { ...point, x, y };
   }, [chartApi, seriesApi]);
 
-  const HANDLE_SIZE = 8; // half-size of square handle in px
+  const HANDLE_SIZE = 8;
 
-  // Returns the index of the resize handle at `point` for the given drawing, or -1
   const getResizeHandleAtPoint = (point: Point, drawing: Drawing): number => {
     const points = drawing.points.map(p => convertLogicalToPixel(p));
     for (let i = 0; i < points.length; i++) {
       const hp = points[i];
-      if (
-        point.x >= hp.x - HANDLE_SIZE && point.x <= hp.x + HANDLE_SIZE &&
-        point.y >= hp.y - HANDLE_SIZE && point.y <= hp.y + HANDLE_SIZE
-      ) {
-        return i;
-      }
+      if (point.x >= hp.x - HANDLE_SIZE && point.x <= hp.x + HANDLE_SIZE &&
+          point.y >= hp.y - HANDLE_SIZE && point.y <= hp.y + HANDLE_SIZE) return i;
     }
     return -1;
   };
 
-  // Hit detection helper functions
   const isPointNearLine = (point: Point, p1: Point, p2: Point, threshold = 8): boolean => {
     const dx = p2.x - p1.x;
     const dy = p2.y - p1.y;
     const lengthSquared = dx * dx + dy * dy;
-
     if (lengthSquared === 0) return Math.hypot(point.x - p1.x, point.y - p1.y) <= threshold;
-
     let t = ((point.x - p1.x) * dx + (point.y - p1.y) * dy) / lengthSquared;
     t = Math.max(0, Math.min(1, t));
-
-    const projX = p1.x + t * dx;
-    const projY = p1.y + t * dy;
-
-    const distance = Math.hypot(point.x - projX, point.y - projY);
-    return distance <= threshold;
+    return Math.hypot(point.x - (p1.x + t * dx), point.y - (p1.y + t * dy)) <= threshold;
   };
 
-  const isPointNearHorizontalLine = (point: Point, linePoint: Point, threshold = 8): boolean => {
-    return Math.abs(point.y - linePoint.y) <= threshold;
-  };
+  const isPointNearHorizontalLine = (point: Point, linePoint: Point, threshold = 8): boolean => Math.abs(point.y - linePoint.y) <= threshold;
 
   const isPointInRectangle = (point: Point, p1: Point, p2: Point, threshold = 8): boolean => {
-    const minX = Math.min(p1.x, p2.x);
-    const maxX = Math.max(p1.x, p2.x);
-    const minY = Math.min(p1.y, p2.y);
-    const maxY = Math.max(p1.y, p2.y);
-
-    if (point.x >= minX && point.x <= maxX && point.y >= minY && point.y <= maxY) {
-      return true;
-    }
-
-    const nearLeft = Math.abs(point.x - minX) <= threshold && point.y >= minY && point.y <= maxY;
-    const nearRight = Math.abs(point.x - maxX) <= threshold && point.y >= minY && point.y <= maxY;
-    const nearTop = Math.abs(point.y - minY) <= threshold && point.x >= minX && point.x <= maxX;
-    const nearBottom = Math.abs(point.y - maxY) <= threshold && point.x >= minX && point.x <= maxX;
-
-    return nearLeft || nearRight || nearTop || nearBottom;
+    const minX = Math.min(p1.x, p2.x), maxX = Math.max(p1.x, p2.x), minY = Math.min(p1.y, p2.y), maxY = Math.max(p1.y, p2.y);
+    if (point.x >= minX && point.x <= maxX && point.y >= minY && point.y <= maxY) return true;
+    return (Math.abs(point.x - minX) <= threshold && point.y >= minY && point.y <= maxY) ||
+           (Math.abs(point.x - maxX) <= threshold && point.y >= minY && point.y <= maxY) ||
+           (Math.abs(point.y - minY) <= threshold && point.x >= minX && point.x <= maxX) ||
+           (Math.abs(point.y - maxY) <= threshold && point.x >= minX && point.x <= maxX);
   };
 
   const isPointOnFibonacci = (point: Point, p1: Point, p2: Point, threshold = 8): boolean => {
     const levels = [0, 0.236, 0.382, 0.5, 0.618, 0.786, 1];
-    const minX = Math.min(p1.x, p2.x);
-    const maxX = Math.max(p1.x, p2.x);
-
-    if (point.x < minX || point.x > maxX) return false;
-
-    for (const level of levels) {
-      const y = p1.y + (p2.y - p1.y) * level;
-      if (Math.abs(point.y - y) <= threshold) {
-        return true;
-      }
-    }
-
-    return false;
+    if (point.x < Math.min(p1.x, p2.x) || point.x > Math.max(p1.x, p2.x)) return false;
+    return levels.some(l => Math.abs(point.y - (p1.y + (p2.y - p1.y) * l)) <= threshold);
   };
 
   const isPointOnRiskReward = (point: Point, p1: Point, p2: Point, threshold = 8): boolean => {
-    const entryY = p1.y;
-    const riskY_base = p2.y;
-    const dy = riskY_base - entryY;
-
-    const minX = Math.min(p1.x, p2.x);
-    const maxX = Math.max(p1.x, p2.x);
-
+    const entryY = p1.y, riskY = p2.y, dy = riskY - entryY, minX = Math.min(p1.x, p2.x), maxX = Math.max(p1.x, p2.x);
     if (point.x < minX - threshold || point.x > maxX + threshold) return false;
-
-    // Check entry line
-    if (Math.abs(point.y - entryY) <= threshold) return true;
-
-    // Check risk line (Stop Loss)
-    if (Math.abs(point.y - riskY_base) <= threshold) return true;
-
-    const ratios = [1, 2, 3];
-    for (const ratio of ratios) {
-      const rewardY = entryY - (dy * ratio);
-      if (Math.abs(point.y - rewardY) <= threshold) return true;
-    }
-
-    return false;
+    if (Math.abs(point.y - entryY) <= threshold || Math.abs(point.y - riskY) <= threshold) return true;
+    return [1, 2, 3].some(r => Math.abs(point.y - (entryY - dy * r)) <= threshold);
   };
 
   const isPointOnFreehand = (point: Point, points: Point[], threshold = 8): boolean => {
-    for (let i = 0; i < points.length - 1; i++) {
-      if (isPointNearLine(point, points[i], points[i + 1], threshold)) {
-        return true;
-      }
-    }
+    for (let i = 0; i < points.length - 1; i++) if (isPointNearLine(point, points[i], points[i + 1], threshold)) return true;
     return false;
   };
 
@@ -259,14 +166,10 @@ export function useChartDrawings({
     if (!canvas) return false;
     const ctx = canvas.getContext('2d');
     if (!ctx) return false;
-
     ctx.font = 'bold 14px Inter, system-ui, sans-serif';
     const metrics = ctx.measureText(text);
-    const width = metrics.width + 10;
-    const height = 24;
-
-    return point.x >= p1.x - 5 && point.x <= p1.x + width &&
-      point.y >= p1.y - height + 5 && point.y <= p1.y + 5;
+    return point.x >= p1.x - 5 && point.x <= p1.x + metrics.width + 5 &&
+           point.y >= p1.y - 19 && point.y <= p1.y + 5;
   };
 
   const isPointOnCallout = (point: Point, p1: Point, p2: Point, text: string, threshold = 8): boolean => {
@@ -277,49 +180,46 @@ export function useChartDrawings({
     if (!ctx) return false;
     ctx.font = 'bold 12px Inter, system-ui, sans-serif';
     const metrics = ctx.measureText(text || 'Note');
-    const width = metrics.width + 16;
-    const height = 24;
-    return point.x >= p2.x - width / 2 && point.x <= p2.x + width / 2 &&
-      point.y >= p2.y - height / 2 && point.y <= p2.y + height / 2;
+    const w = metrics.width + 16, h = 24;
+    return point.x >= p2.x - w / 2 && point.x <= p2.x + w / 2 &&
+           point.y >= p2.y - h / 2 && point.y <= p2.y + h / 2;
+  };
+
+  const isPointOnChannel = (point: Point, points: Point[], threshold = 8): boolean => {
+    if (points.length < 2) return false;
+    const p1 = points[0], p2 = points[1], p3 = points[2] || p1;
+    if (isPointNearLine(point, p1, p2, threshold)) return true;
+    const dx = p2.x - p1.x, dy = p2.y - p1.y, m2 = dx * dx + dy * dy;
+    if (m2 === 0) return false;
+    const t = ((p3.x - p1.x) * dx + (p3.y - p1.y) * dy) / m2;
+    const ox = (p3.x - p1.x) - t * dx, oy = (p3.y - p1.y) - t * dy;
+    const p1b = { x: p1.x + ox, y: p1.y + oy }, p2b = { x: p2.x + ox, y: p2.y + oy };
+    if (isPointNearLine(point, p1b, p2b, threshold)) return true;
+    const p1m = { x: p1.x + ox / 2, y: p1.y + oy / 2 }, p2m = { x: p2.x + ox / 2, y: p2.y + oy / 2 };
+    return isPointNearLine(point, p1m, p2m, threshold);
   };
 
   const isPointOnDrawing = (point: Point, drawing: Drawing): boolean => {
     if (drawing.points.length === 0) return false;
     if (drawing.type !== 'text' && drawing.points.length < 2) return false;
-
-    // Convert anchored points to pixels for hit detection
-    const points = drawing.points.map(p => convertLogicalToPixel(p));
-    const p1 = points[0];
-    const p2 = points[1] || p1;
-
+    const pts = drawing.points.map(p => convertLogicalToPixel(p));
+    const p1 = pts[0], p2 = pts[1] || p1;
     switch (drawing.type) {
-      case 'trendline':
-        return isPointNearLine(point, p1, p2);
-      case 'horizontal':
-        return isPointNearHorizontalLine(point, p1);
-      case 'rectangle':
-        return isPointInRectangle(point, p1, p2);
-      case 'fibonacci':
-        return isPointOnFibonacci(point, p1, p2);
-      case 'riskReward':
-        return isPointOnRiskReward(point, p1, p2);
-      case 'freehand':
-        return isPointOnFreehand(point, points);
-      case 'text':
-        return isPointOnText(point, p1, drawing.text || '');
-      case 'callout':
-        return isPointOnCallout(point, p1, p2, drawing.text || '');
-      default:
-        return false;
+      case 'trendline': return isPointNearLine(point, p1, p2);
+      case 'horizontal': return isPointNearHorizontalLine(point, p1);
+      case 'rectangle': return isPointInRectangle(point, p1, p2);
+      case 'fibonacci': return isPointOnFibonacci(point, p1, p2);
+      case 'riskReward': return isPointOnRiskReward(point, p1, p2);
+      case 'freehand': return isPointOnFreehand(point, pts);
+      case 'text': return isPointOnText(point, p1, drawing.text || '');
+      case 'callout': return isPointOnCallout(point, p1, p2, drawing.text || '');
+      case 'channel': return isPointOnChannel(point, pts);
+      default: return false;
     }
   };
 
   const findDrawingAtPoint = (point: Point, drawings: Drawing[]): Drawing | null => {
-    for (let i = drawings.length - 1; i >= 0; i--) {
-      if (isPointOnDrawing(point, drawings[i])) {
-        return drawings[i];
-      }
-    }
+    for (let i = drawings.length - 1; i >= 0; i--) if (isPointOnDrawing(point, drawings[i])) return drawings[i];
     return null;
   };
 
@@ -340,34 +240,21 @@ export function useChartDrawings({
       case 'riskReward': return '#F44336';
       case 'text': return '#212121';
       case 'callout': return '#673AB7';
+      case 'channel': return '#4CAF50';
       default: return '#000000';
     }
   }, []);
 
   const addTextDrawing = useCallback((point: Point, text: string) => {
-    const newId = `drawing-${Date.now()}-${Math.random()}`;
-    const newDrawing: Drawing = {
-      id: newId,
-      type: 'text',
-      points: [point],
-      text: text,
-      color: getDrawingColor('text'),
-    };
-    setDrawings((prev) => [...prev, newDrawing]);
+    const newId = `drawing-${Date.now()}`;
+    setDrawings(p => [...p, { id: newId, type: 'text', points: [point], text, color: getDrawingColor('text') }]);
     setSelectedDrawingId(newId);
     onToolComplete?.();
   }, [getDrawingColor, onToolComplete]);
 
   const addCalloutDrawing = useCallback((p1: Point, p2: Point, text: string) => {
-    const newId = `drawing-${Date.now()}-${Math.random()}`;
-    const newDrawing: Drawing = {
-      id: newId,
-      type: 'callout',
-      points: [p1, p2],
-      text: text,
-      color: getDrawingColor('callout'),
-    };
-    setDrawings((prev) => [...prev, newDrawing]);
+    const newId = `drawing-${Date.now()}`;
+    setDrawings(p => [...p, { id: newId, type: 'callout', points: [p1, p2], text, color: getDrawingColor('callout') }]);
     setSelectedDrawingId(newId);
     onToolComplete?.();
   }, [getDrawingColor, onToolComplete]);
@@ -375,429 +262,236 @@ export function useChartDrawings({
   const handleMouseDown = useCallback((event: MouseEvent) => {
     if (!canvasRef.current || event.button !== 0) return false;
     const point = getChartCoordinates(event, canvasRef.current);
-
     if (activeToolRef.current === 'none') return false;
 
-    // Check resize handle first (only when a drawing is already selected in select mode)
+    // Handle 3rd point of channel
+    if (activeToolRef.current === 'channel' && isDrawingRef.current && currentDrawingRef.current.length >= 2) {
+      const newId = `drawing-${Date.now()}`;
+      setDrawings(p => [...p, { id: newId, type: 'channel', points: [currentDrawingRef.current[0], currentDrawingRef.current[1], point], color: getDrawingColor('channel') }]);
+      setSelectedDrawingId(newId);
+      setCurrentDrawing([]);
+      setIsDrawing(false);
+      onToolComplete?.();
+      return true;
+    }
+
+    // Check resize handle
     if (activeToolRef.current === 'select' && selectedDrawingIdRef.current) {
-      const selectedDrawing = drawings.find(d => d.id === selectedDrawingIdRef.current);
-      if (selectedDrawing) {
-        const handleIdx = getResizeHandleAtPoint(point, selectedDrawing);
-        if (handleIdx !== -1) {
-          setIsResizing(true);
-          setResizeHandleIndex(handleIdx);
-          return true;
-        }
+      const drawing = drawings.find(d => d.id === selectedDrawingIdRef.current);
+      if (drawing) {
+        const hIdx = getResizeHandleAtPoint(point, drawing);
+        if (hIdx !== -1) { setIsResizing(true); setResizeHandleIndex(hIdx); return true; }
       }
     }
 
-    const foundDrawing = findDrawingAtPoint(point, drawings);
-
-    if (foundDrawing) {
-      if (foundDrawing.id === selectedDrawingIdRef.current) {
-        if (activeToolRef.current === 'select') {
-          const points = foundDrawing.points.map(p => convertLogicalToPixel(p));
-          const firstPoint = points[0];
-          setDragOffset({
-            x: point.x - firstPoint.x,
-            y: point.y - firstPoint.y,
-          });
-          setIsDragging(true);
-        }
-      } else {
-        setSelectedDrawingId(foundDrawing.id);
-        setIsDragging(false);
-        setIsResizing(false);
-        setResizeHandleIndex(-1);
-      }
-      // If we clicked a drawing in ANY tool mode, we consider it handled (selected)
+    const found = findDrawingAtPoint(point, drawings);
+    if (found && activeToolRef.current === 'select') {
+      setSelectedDrawingId(found.id);
+      const pts = found.points.map(p => convertLogicalToPixel(p));
+      setDragOffset({ x: point.x - pts[0].x, y: point.y - pts[0].y });
+      setIsDragging(true);
       return true;
     }
 
     if (activeToolRef.current === 'select') {
-      setSelectedDrawingId(null);
-      setIsDragging(false);
-      setIsResizing(false);
-      setResizeHandleIndex(-1);
-      return false;
+      setSelectedDrawingId(null); setIsDragging(false); setIsResizing(false); return false;
     }
 
-    // Handle Text tool
     if (activeToolRef.current === 'text') {
-      if (onTextToolTrigger) {
-        onTextToolTrigger(point);
-      } else {
-        // Fallback if no trigger provided
-        const text = prompt('Enter text:');
-        if (text) {
-          addTextDrawing(point, text);
-        }
-      }
+      if (onTextToolTrigger) onTextToolTrigger(point);
+      else { const t = prompt('Text:'); if (t) addTextDrawing(point, t); }
       return true;
     }
 
-    setSelectedDrawingId(null);
-    setIsDragging(false);
-
+    setSelectedDrawingId(null); setIsDragging(false);
     setCurrentDrawing([point]);
     setIsDrawing(true);
     return true;
-  }, [drawings, getChartCoordinates, convertLogicalToPixel, onTextToolTrigger, addTextDrawing]);
+  }, [drawings, getChartCoordinates, convertLogicalToPixel, onTextToolTrigger, addTextDrawing, getDrawingColor, onToolComplete]);
 
   const handleMouseMove = useCallback((event: MouseEvent) => {
     if (!canvasRef.current || !chartApi || !seriesApi) return;
-
     const point = getChartCoordinates(event, canvasRef.current);
 
-    // Resize: move only the specific handle point
-    if (isResizingRef.current && activeToolRef.current === 'select' && selectedDrawingIdRef.current) {
-      const handleIdx = resizeHandleIndexRef.current;
-      setDrawings((prevDrawings) =>
-        prevDrawings.map((drawing) => {
-          if (drawing.id !== selectedDrawingIdRef.current) return drawing;
-          const newPoints = drawing.points.map((p, i) => {
-            if (i !== handleIdx) return p;
-            const timeScale = chartApi.timeScale();
-            const logical = timeScale.coordinateToLogical(point.x);
-            const price = seriesApi.coordinateToPrice(point.y);
-            return {
-              ...p,
-              x: point.x,
-              y: point.y,
-              time: logical !== null ? logical : p.time,
-              price: price !== null ? price : p.price,
-            };
-          });
-
-          // Auto-update quantity if RR tool is resized
-          if (drawing.type === 'riskReward' && newPoints[0].price && newPoints[1]?.price) {
-            const p1Price = newPoints[0].price!;
-            const p2Price = newPoints[1].price!;
-            const slDist = Math.abs(p1Price - p2Price);
-            if (slDist > 0) {
-              const newQty = Math.floor(riskPerTrade / slDist);
-              setTradeQuantity(newQty);
-              const entry = p1Price;
-              const sl = p2Price;
-              const target = entry + (entry - sl) * 2;
-              setManualLevels({ sl, target });
-            }
-          }
-
-          return { ...drawing, points: newPoints };
-        })
-      );
-
-      // Update cursor
-      canvasRef.current!.style.cursor = 'crosshair';
-      return;
-    }
-
-    if (isDraggingRef.current && activeToolRef.current === 'select' && selectedDrawingIdRef.current) {
-      setDrawings((prevDrawings) => {
-        return prevDrawings.map((drawing) => {
-          if (drawing.id === selectedDrawingIdRef.current) {
-            const currentPoints = drawing.points.map(p => convertLogicalToPixel(p));
-            const newFirstPointPixel = {
-              x: point.x - dragOffsetRef.current.x,
-              y: point.y - dragOffsetRef.current.y,
-            };
-
-            const deltaX = newFirstPointPixel.x - currentPoints[0].x;
-            const deltaY = newFirstPointPixel.y - currentPoints[0].y;
-
-            const newPoints = currentPoints.map((p) => {
-              const movedPixel = { x: p.x + deltaX, y: p.y + deltaY };
-              const timeScale = chartApi.timeScale();
-              const logical = timeScale.coordinateToLogical(movedPixel.x);
-              const price = seriesApi.coordinateToPrice(movedPixel.y);
-
-              return {
-                ...movedPixel,
-                time: logical !== null ? logical : p.time,
-                price: price !== null ? price : p.price,
-              };
-            });
-
-            // Auto-update quantity if RR tool is moved
-            if (drawing.type === 'riskReward' && newPoints[0].price && newPoints[1].price) {
-              const p1Price = newPoints[0].price;
-              const p2Price = newPoints[1].price;
-              const slDist = Math.abs(p1Price - p2Price);
-              if (slDist > 0) {
-                const newQty = Math.floor(riskPerTrade / slDist);
-                setTradeQuantity(newQty);
-
-                // Sync levels
-                const entry = p1Price;
-                const sl = p2Price;
-                const target = entry + (entry - sl) * 2;
-                setManualLevels({ sl, target });
-              }
-            }
-
-            return { ...drawing, points: newPoints };
-          }
-          return drawing;
-        });
-      });
-      return;
-    }
-
-    if (activeToolRef.current === 'select' && selectedDrawingIdRef.current && !isDraggingRef.current && !isResizingRef.current) {
-      const selectedDrawing = drawings.find(d => d.id === selectedDrawingIdRef.current);
-      if (selectedDrawing) {
-        const handleIdx = getResizeHandleAtPoint(point, selectedDrawing);
-        if (handleIdx !== -1) {
-          canvasRef.current!.style.cursor = 'crosshair';
-          setIsHoveringSelected(false);
-        } else if (isPointOnDrawing(point, selectedDrawing)) {
-          canvasRef.current!.style.cursor = 'move';
-          setIsHoveringSelected(true);
-        } else {
-          canvasRef.current!.style.cursor = 'default';
-          setIsHoveringSelected(false);
+    if (isResizingRef.current && selectedDrawingIdRef.current) {
+      const hIdx = resizeHandleIndexRef.current;
+      setDrawings(prev => prev.map(d => {
+        if (d.id !== selectedDrawingIdRef.current) return d;
+        const ts = chartApi.timeScale();
+        const logical = ts.coordinateToLogical(point.x);
+        const price = seriesApi.coordinateToPrice(point.y);
+        const newPoints = d.points.map((p, i) => i === hIdx ? { ...p, x: point.x, y: point.y, time: logical ?? p.time, price: price ?? p.price } : p);
+        if (d.type === 'riskReward') {
+           const p1 = newPoints[0].price, p2 = newPoints[1]?.price;
+           if (p1 && p2 && Math.abs(p1 - p2) > 0) {
+             const dist = Math.abs(p1 - p2);
+             setTradeQuantity(Math.floor(riskPerTrade / dist));
+             setManualLevels({ sl: p2, target: p1 + (p1 - p2) * 2 });
+           }
         }
-      }
+        return { ...d, points: newPoints };
+      }));
+      canvasRef.current.style.cursor = 'crosshair';
+      return;
     }
 
-    if (!isDrawingRef.current || activeToolRef.current === 'none') return;
+    if (isDraggingRef.current && selectedDrawingIdRef.current) {
+      setDrawings(prev => prev.map(d => {
+        if (d.id !== selectedDrawingIdRef.current) return d;
+        const pts = d.points.map(p => convertLogicalToPixel(p));
+        const dx = (point.x - dragOffsetRef.current.x) - pts[0].x;
+        const dy = (point.y - dragOffsetRef.current.y) - pts[0].y;
+        const newPoints = pts.map(p => {
+          const nx = p.x + dx, ny = p.y + dy;
+          const ts = chartApi.timeScale(), logical = ts.coordinateToLogical(nx), pr = seriesApi.coordinateToPrice(ny);
+          return { ...p, x: nx, y: ny, time: logical ?? p.time, price: pr ?? p.price };
+        });
+        if (d.type === 'riskReward') {
+          const p1 = newPoints[0].price, p2 = newPoints[1]?.price;
+          if (p1 && p2 && Math.abs(p1 - p2) > 0) {
+            setTradeQuantity(Math.floor(riskPerTrade / Math.abs(p1 - p2)));
+            setManualLevels({ sl: p2, target: p1 + (p1 - p2) * 2 });
+          }
+        }
+        return { ...d, points: newPoints };
+      }));
+      return;
+    }
 
-    setCurrentDrawing((prev) => {
+    if (!isDrawingRef.current || activeToolRef.current === 'none') {
+      const found = findDrawingAtPoint(point, drawings);
+      if (canvasRef.current) canvasRef.current.style.cursor = found ? (activeToolRef.current === 'select' ? 'pointer' : 'crosshair') : 'default';
+      return;
+    }
+
+    setCurrentDrawing(prev => {
       if (prev.length === 0) return [point];
       if (activeToolRef.current === 'freehand') return [...prev, point];
-      if (['trendline', 'horizontal', 'rectangle', 'fibonacci', 'riskReward', 'callout'].includes(activeToolRef.current)) {
-        return [prev[0], point];
+      if (activeToolRef.current === 'channel') {
+        if (prev.length === 1) return [prev[0], point];
+        return [prev[0], prev[1], point];
       }
-      return [...prev, point];
+      return [prev[0], point];
     });
-  }, [drawings, getChartCoordinates, convertLogicalToPixel, chartApi, seriesApi]);
+  }, [drawings, getChartCoordinates, convertLogicalToPixel, chartApi, seriesApi, riskPerTrade, setTradeQuantity, setManualLevels]);
 
   const handleMouseUp = useCallback(() => {
-    if (isResizingRef.current) {
-      setIsResizing(false);
-      setResizeHandleIndex(-1);
-      if (canvasRef.current) canvasRef.current.style.cursor = 'default';
-      return;
-    }
-
-    if (isDraggingRef.current) {
-      setIsDragging(false);
-      if (canvasRef.current) canvasRef.current.style.cursor = 'default';
-      return;
-    }
-
+    if (isResizingRef.current) { setIsResizing(false); setResizeHandleIndex(-1); return; }
+    if (isDraggingRef.current) { setIsDragging(false); return; }
     if (!isDrawingRef.current || activeToolRef.current === 'none') return;
 
-    if (currentDrawingRef.current.length >= 2) {
+    const pts = currentDrawingRef.current;
+    if (activeToolRef.current === 'channel' && isDrawingRef.current) return;
+
+    if (pts.length >= 2) {
       if (activeToolRef.current === 'callout') {
-        const p1 = currentDrawingRef.current[0];
-        const p2 = currentDrawingRef.current[1];
-        if (onCalloutTrigger) {
-          onCalloutTrigger(p1, p2);
-        } else {
-          const text = prompt('Enter text:');
-          if (text) addCalloutDrawing(p1, p2, text);
-        }
-        setCurrentDrawing([]);
-        setIsDrawing(false);
-        return;
+        if (onCalloutTrigger) onCalloutTrigger(pts[0], pts[1]);
+        else { const t = prompt('Text:'); if (t) addCalloutDrawing(pts[0], pts[1], t); }
+        setCurrentDrawing([]); setIsDrawing(false); return;
       }
-
-      const newId = `drawing-${Date.now()}-${Math.random()}`;
-      const newDrawing: Drawing = {
-        id: newId,
-        type: activeToolRef.current,
-        points: currentDrawingRef.current,
-        color: getDrawingColor(activeToolRef.current),
-      };
-      setDrawings((prev) => [...prev, newDrawing]);
+      const newId = `drawing-${Date.now()}`;
+      setDrawings(prev => [...prev, { id: newId, type: activeToolRef.current, points: pts, color: getDrawingColor(activeToolRef.current) }]);
       setSelectedDrawingId(newId);
-
-      // Auto-update quantity when RR tool is first placed
-      if (activeToolRef.current === 'riskReward' && currentDrawingRef.current[0].price && currentDrawingRef.current[1].price) {
-        const p1Price = currentDrawingRef.current[0].price;
-        const p2Price = currentDrawingRef.current[1].price;
-        const slDist = Math.abs(p1Price - p2Price);
-        if (slDist > 0) {
-          const newQty = Math.floor(riskPerTrade / slDist);
-          setTradeQuantity(newQty);
-
-          // Sync levels
-          const entry = p1Price;
-          const sl = p2Price;
-          const target = entry + (entry - sl) * 2;
-          setManualLevels({ sl, target });
+      if (activeToolRef.current === 'riskReward' && pts[0].price && pts[1].price) {
+        const dist = Math.abs(pts[0].price - pts[1].price);
+        if (dist > 0) {
+          setTradeQuantity(Math.floor(riskPerTrade / dist));
+          setManualLevels({ sl: pts[1].price, target: pts[0].price + (pts[0].price - pts[1].price) * 2 });
         }
       }
     }
+    if (activeToolRef.current !== 'freehand') { setCurrentDrawing([]); setIsDrawing(false); onToolComplete?.(); }
+  }, [onToolComplete, getDrawingColor, riskPerTrade, setTradeQuantity, setManualLevels, onCalloutTrigger, addCalloutDrawing]);
 
-
-    setCurrentDrawing([]);
-    setIsDrawing(false);
-
-    if (activeToolRef.current !== 'freehand') {
-      onToolComplete?.();
-    }
-  }, [onToolComplete, getDrawingColor]);
-
-  const drawLine = (ctx: CanvasRenderingContext2D, p1: Point, p2: Point, color: string, width = 2) => {
-    ctx.strokeStyle = color;
-    ctx.lineWidth = width;
-    ctx.beginPath();
-    ctx.moveTo(p1.x, p1.y);
-    ctx.lineTo(p2.x, p2.y);
-    ctx.stroke();
+  const drawLine = (ctx: CanvasRenderingContext2D, p1: Point, p2: Point, color: string, w = 2) => {
+    ctx.strokeStyle = color; ctx.lineWidth = w; ctx.beginPath(); ctx.moveTo(p1.x, p1.y); ctx.lineTo(p2.x, p2.y); ctx.stroke();
   };
 
   const drawRectangle = (ctx: CanvasRenderingContext2D, p1: Point, p2: Point, color: string) => {
-    ctx.fillStyle = color;
-    ctx.strokeStyle = color.replace('40', '');
-    ctx.lineWidth = 2;
-    const width = p2.x - p1.x;
-    const height = p2.y - p1.y;
-    ctx.fillRect(p1.x, p1.y, width, height);
-    ctx.strokeRect(p1.x, p1.y, width, height);
+    ctx.fillStyle = color; ctx.strokeStyle = color.replace('40', ''); ctx.lineWidth = 2;
+    ctx.fillRect(p1.x, p1.y, p2.x - p1.x, p2.y - p1.y); ctx.strokeRect(p1.x, p1.y, p2.x - p1.x, p2.y - p1.y);
   };
 
   const drawFibonacci = (ctx: CanvasRenderingContext2D, p1: Point, p2: Point, color: string) => {
-    const levels = [0, 0.236, 0.382, 0.5, 0.618, 0.786, 1];
-    const labels = ['0%', '23.6%', '38.2%', '50%', '61.8%', '78.6%', '100%'];
-    ctx.font = '12px sans-serif';
-    ctx.fillStyle = color;
-    levels.forEach((level, i) => {
-      const y = p1.y + (p2.y - p1.y) * level;
-      ctx.strokeStyle = color;
-      ctx.lineWidth = 1;
-      ctx.setLineDash([5, 5]);
-      ctx.beginPath();
-      ctx.moveTo(p1.x, y);
-      ctx.lineTo(p2.x, y);
-      ctx.stroke();
-      ctx.setLineDash([]);
-      ctx.fillText(labels[i], p2.x + 5, y + 4);
+    const lvls = [0, 0.236, 0.382, 0.5, 0.618, 0.786, 1];
+    ctx.font = '12px sans-serif'; ctx.fillStyle = color;
+    lvls.forEach(l => {
+      const y = p1.y + (p2.y - p1.y) * l;
+      ctx.setLineDash([5, 5]); ctx.beginPath(); ctx.moveTo(p1.x, y); ctx.lineTo(p2.x, y); ctx.stroke(); ctx.setLineDash([]);
+      ctx.fillText(`${(l * 100).toFixed(1)}%`, p2.x + 5, y + 4);
     });
   };
 
-  const drawRiskReward = (ctx: CanvasRenderingContext2D, p1: Point, p2: Point, _color: string) => {
-    const entryY = p1.y;
-    const riskY_base = p2.y;
-    const dy = riskY_base - entryY;
-    const minX = Math.min(p1.x, p2.x);
-    const maxX = Math.max(p1.x, p2.x);
-
-    // Draw Entry Line
-    ctx.strokeStyle = '#FFC107'; // Golden/Yellow for Entry
-    ctx.lineWidth = 2;
-    ctx.setLineDash([]);
-    ctx.beginPath();
-    ctx.moveTo(minX, entryY);
-    ctx.lineTo(maxX, entryY);
-    ctx.stroke();
-
-    ctx.font = 'bold 12px Inter, sans-serif';
-    ctx.fillStyle = '#FFC107';
-    ctx.textAlign = 'left';
-    ctx.fillText('ENTRY', maxX + 5, entryY + 4);
-
-    // Draw Risk (Stop Loss) Line
-    ctx.strokeStyle = '#F44336'; // Red for Risk
-    ctx.lineWidth = 2;
-    ctx.beginPath();
-    ctx.moveTo(minX, riskY_base);
-    ctx.lineTo(maxX, riskY_base);
-    ctx.stroke();
-    ctx.fillStyle = '#F44336';
-    ctx.fillText('STOP', maxX + 5, riskY_base + 4);
-
-    const ratios = [
-      { ratio: 1, color: '#4CAF50', label: '1:1' },
-      { ratio: 2, color: '#4CAF50', label: '1:2' },
-      { ratio: 3, color: '#2E7D32', label: '1:3' }
-    ];
-
-    ratios.forEach(({ ratio, color, label }) => {
-      const rewardY = entryY - (dy * ratio);
-      ctx.strokeStyle = color;
-      ctx.lineWidth = 1.5;
-      ctx.setLineDash([5, 5]);
-      ctx.beginPath();
-      ctx.moveTo(minX, rewardY);
-      ctx.lineTo(maxX, rewardY);
-      ctx.stroke();
-      ctx.setLineDash([]);
-      ctx.fillStyle = color;
-      ctx.fillText(`TP ${label}`, maxX + 5, rewardY + 4);
+  const drawRiskReward = (ctx: CanvasRenderingContext2D, p1: Point, p2: Point) => {
+    const eY = p1.y, rY = p2.y, dy = rY - eY, minX = Math.min(p1.x, p2.x), maxX = Math.max(p1.x, p2.x);
+    ctx.strokeStyle = '#FFC107'; ctx.lineWidth = 2; ctx.beginPath(); ctx.moveTo(minX, eY); ctx.lineTo(maxX, eY); ctx.stroke();
+    ctx.font = 'bold 12px Inter, sans-serif'; ctx.fillStyle = '#FFC107'; ctx.fillText('ENTRY', maxX + 5, eY + 4);
+    ctx.strokeStyle = '#F44336'; ctx.beginPath(); ctx.moveTo(minX, rY); ctx.lineTo(maxX, rY); ctx.stroke();
+    ctx.fillStyle = '#F44336'; ctx.fillText('STOP', maxX + 5, rY + 4);
+    [{ r: 1, c: '#4CAF50' }, { r: 2, c: '#4CAF50' }, { r: 3, c: '#2E7D32' }].forEach(o => {
+      const y = eY - dy * o.r; ctx.strokeStyle = o.c; ctx.setLineDash([5, 5]); ctx.beginPath(); ctx.moveTo(minX, y); ctx.lineTo(maxX, y); ctx.stroke(); ctx.setLineDash([]);
+      ctx.fillStyle = o.c; ctx.fillText(`TP 1:${o.r}`, maxX + 5, y + 4);
     });
-
-    // Draw Quantity Info
-    if (p1.price && p2.price) {
-      const slDist = Math.abs(p1.price - p2.price);
-      if (slDist > 0) {
-        const qty = Math.floor(riskPerTrade / slDist);
-        ctx.font = 'bold 13px Inter, sans-serif';
-        ctx.fillStyle = '#000000';
-        ctx.textAlign = 'right';
-        ctx.fillText(`Risk: ₹${riskPerTrade.toLocaleString()} | Qty: ${qty}`, maxX - 5, entryY - 8);
-      }
-    }
-
-    ctx.textAlign = 'start'; // Reset
   };
 
-  const drawFreehand = (ctx: CanvasRenderingContext2D, points: Point[], color: string, width = 2) => {
-    if (points.length < 2) return;
-    ctx.strokeStyle = color;
-    ctx.lineWidth = width;
-    ctx.lineCap = 'round';
-    ctx.lineJoin = 'round';
-    ctx.beginPath();
-    ctx.moveTo(points[0].x, points[0].y);
-    for (let i = 1; i < points.length; i++) {
-      ctx.lineTo(points[i].x, points[i].y);
-    }
-    ctx.stroke();
+  const drawChannel = (ctx: CanvasRenderingContext2D, pts: Point[], color: string, isSelected: boolean) => {
+    if (pts.length < 2) return;
+    const p1 = pts[0], p2 = pts[1], p3 = pts[2] || p2;
+    const dx = p2.x - p1.x, dy = p2.y - p1.y, m2 = dx * dx + dy * dy;
+    if (m2 === 0) return;
+    const t = ((p3.x - p1.x) * dx + (p3.y - p1.y) * dy) / m2;
+    const ox = (p3.x - p1.x) - t * dx, oy = (p3.y - p1.y) - t * dy;
+    ctx.strokeStyle = color; ctx.lineWidth = isSelected ? 3 : 2;
+    ctx.beginPath(); ctx.moveTo(p1.x, p1.y); ctx.lineTo(p2.x, p2.y); ctx.stroke();
+    ctx.beginPath(); ctx.moveTo(p1.x + ox, p1.y + oy); ctx.lineTo(p2.x + ox, p2.y + oy); ctx.stroke();
+    ctx.setLineDash([5, 5]); ctx.beginPath(); ctx.moveTo(p1.x + ox / 2, p1.y + oy / 2); ctx.lineTo(p2.x + ox / 2, p2.y + oy / 2); ctx.stroke(); ctx.setLineDash([]);
+    ctx.fillStyle = color + '15'; ctx.beginPath(); ctx.moveTo(p1.x, p1.y); ctx.lineTo(p2.x, p2.y); ctx.lineTo(p2.x + ox, p2.y + oy); ctx.lineTo(p1.x + ox, p1.y + oy); ctx.closePath(); ctx.fill();
   };
 
   const drawText = (ctx: CanvasRenderingContext2D, p1: Point, text: string, color: string, isSelected: boolean) => {
     ctx.font = 'bold 14px Inter, system-ui, sans-serif';
     const metrics = ctx.measureText(text);
     const width = metrics.width;
-
     if (isSelected) {
-      ctx.fillStyle = '#2196F320';
-      ctx.fillRect(p1.x - 5, p1.y - 20, width + 10, 25);
+      ctx.fillStyle = '#2196F315';
+      ctx.fillRect(p1.x - 5, p1.y - 18, width + 10, 24);
       ctx.strokeStyle = '#2196F3';
       ctx.lineWidth = 1;
-      ctx.strokeRect(p1.x - 5, p1.y - 20, width + 10, 25);
+      ctx.strokeRect(p1.x - 5, p1.y - 18, width + 10, 24);
     }
-
     ctx.fillStyle = color;
-    ctx.fillText(text, p1.x, p1.y);
+    ctx.textBaseline = 'middle';
+    ctx.fillText(text, p1.x, p1.y - 6);
+    ctx.textBaseline = 'alphabetic';
   };
 
   const drawCallout = (ctx: CanvasRenderingContext2D, p1: Point, p2: Point, text: string, color: string, isSelected: boolean) => {
     ctx.strokeStyle = isSelected ? '#2196F3' : color;
-    ctx.lineWidth = 1.5;
+    ctx.lineWidth = 2;
     ctx.beginPath();
     ctx.moveTo(p1.x, p1.y);
     ctx.lineTo(p2.x, p2.y);
     ctx.stroke();
+    
     ctx.fillStyle = ctx.strokeStyle;
     ctx.beginPath();
     ctx.arc(p1.x, p1.y, 4, 0, Math.PI * 2);
     ctx.fill();
+
     ctx.font = 'bold 12px Inter, system-ui, sans-serif';
     const metrics = ctx.measureText(text || 'Note');
     const padding = 8;
     const width = metrics.width + padding * 2;
     const height = 24;
-    ctx.fillStyle = isSelected ? '#2196F3' : color;
     const x = p2.x - width / 2;
     const y = p2.y - height / 2;
+
+    ctx.fillStyle = isSelected ? '#2196F3' : color;
     ctx.beginPath();
-    ctx.roundRect(x, y, width, height, 4);
+    if (ctx.roundRect) ctx.roundRect(x, y, width, height, 4);
+    else ctx.fillRect(x, y, width, height);
     ctx.fill();
+
     ctx.fillStyle = '#FFFFFF';
     ctx.textAlign = 'center';
     ctx.textBaseline = 'middle';
@@ -806,105 +500,57 @@ export function useChartDrawings({
     ctx.textBaseline = 'alphabetic';
   };
 
-  const drawSelectionHandles = (ctx: CanvasRenderingContext2D, points: Point[]) => {
-    const hs = HANDLE_SIZE; // half-size
-    points.forEach(point => {
-      if (point.x < 0 || point.x > ctx.canvas.width || point.y < 0 || point.y > ctx.canvas.height) return;
-      // White fill with blue border – clear resize affordance
-      ctx.fillStyle = '#FFFFFF';
-      ctx.strokeStyle = '#2196F3';
-      ctx.lineWidth = 2;
-      ctx.fillRect(point.x - hs, point.y - hs, hs * 2, hs * 2);
-      ctx.strokeRect(point.x - hs, point.y - hs, hs * 2, hs * 2);
-    });
-  };
-
-  const renderDrawing = useCallback((ctx: CanvasRenderingContext2D, drawing: Drawing, isSelected: boolean = false) => {
-    if (drawing.points.length === 0) return;
-    const points = drawing.points.map(p => convertLogicalToPixel(p));
-    const p1 = points[0];
-    const p2 = points[1] || p1;
-    const color = drawing.color || '#000000';
-    const lineWidth = isSelected ? 4 : 2;
-
-    switch (drawing.type) {
-      case 'freehand': drawFreehand(ctx, points, color, lineWidth); break;
-      case 'trendline': drawLine(ctx, p1, p2, color, lineWidth); break;
-      case 'horizontal': drawLine(ctx, { ...p1, x: 0 }, { ...p1, x: ctx.canvas.width }, color, lineWidth); break;
-      case 'rectangle': drawRectangle(ctx, p1, p2, color); break;
-      case 'fibonacci': drawFibonacci(ctx, p1, p2, color); break;
-      case 'riskReward': drawRiskReward(ctx, p1, p2, color); break;
-      case 'text': drawText(ctx, p1, drawing.text || '', color, isSelected); break;
-      case 'callout': drawCallout(ctx, p1, p2, drawing.text || '', color, isSelected); break;
-    }
-
-    if (isSelected && drawing.type !== 'text') {
-      drawSelectionHandles(ctx, points);
-    }
-  }, [convertLogicalToPixel]);
-
   const renderCanvas = useCallback(() => {
     if (!canvasRef.current || !chartApi || !seriesApi) return;
-    const canvas = canvasRef.current;
-    const ctx = canvas.getContext('2d');
+    const ctx = canvasRef.current.getContext('2d');
     if (!ctx) return;
-    ctx.clearRect(0, 0, canvas.width, canvas.height);
-    const currentIndex = useSessionStore.getState().currentIndex;
-
-    drawings.forEach((drawing) => {
-      // Filter drawings by time to create the "Time Travel" effect
-      // If a drawing point has time, only show it if it's <= current index
-      if (drawing.points.length > 0 && drawing.points[0].time !== undefined) {
-        if (drawing.points[0].time > currentIndex) return;
+    ctx.clearRect(0, 0, canvasRef.current.width, canvasRef.current.height);
+    const cIdx = useSessionStore.getState().currentIndex;
+    drawings.forEach(d => {
+      if (d.points[0]?.time !== undefined && d.points[0].time > cIdx) return;
+      const pts = d.points.map(p => convertLogicalToPixel(p));
+      const isSel = d.id === selectedDrawingId;
+      const col = d.color || '#000000';
+      switch (d.type) {
+        case 'freehand': ctx.strokeStyle = col; ctx.lineWidth = isSel ? 4 : 2; ctx.beginPath(); ctx.moveTo(pts[0].x, pts[0].y); pts.forEach(p => ctx.lineTo(p.x, p.y)); ctx.stroke(); break;
+        case 'trendline': drawLine(ctx, pts[0], pts[1], col, isSel ? 4 : 2); break;
+        case 'horizontal': drawLine(ctx, { ...pts[0], x: 0 }, { ...pts[0], x: ctx.canvas.width }, col, isSel ? 4 : 2); break;
+        case 'rectangle': drawRectangle(ctx, pts[0], pts[1], col); break;
+        case 'fibonacci': drawFibonacci(ctx, pts[0], pts[1], col); break;
+        case 'riskReward': drawRiskReward(ctx, pts[0], pts[1]); break;
+        case 'text': drawText(ctx, pts[0], d.text || '', col, isSel); break;
+        case 'callout': drawCallout(ctx, pts[0], pts[1], d.text || '', col, isSel); break;
+        case 'channel': drawChannel(ctx, pts, col, isSel); break;
       }
-      renderDrawing(ctx, drawing, drawing.id === selectedDrawingId);
+      if (isSel && d.type !== 'text') {
+        ctx.fillStyle = '#FFF'; ctx.strokeStyle = '#2196F3'; ctx.lineWidth = 2;
+        pts.forEach(p => { ctx.fillRect(p.x - 4, p.y - 4, 8, 8); ctx.strokeRect(p.x - 4, p.y - 4, 8, 8); });
+      }
     });
-    if (currentDrawing.length >= 2) {
-      renderDrawing(ctx, { id: 'temp', type: activeTool, points: currentDrawing, color: getDrawingColor(activeTool) }, false);
+    if (currentDrawing.length >= 1) {
+      const col = getDrawingColor(activeTool);
+      const pts = currentDrawing.map(p => convertLogicalToPixel(p));
+      if (activeTool === 'channel') drawChannel(ctx, pts, col, false);
+      else if (pts.length >= 2) switch (activeTool) {
+        case 'trendline': drawLine(ctx, pts[0], pts[1], col); break;
+        case 'rectangle': drawRectangle(ctx, pts[0], pts[1], col); break;
+        case 'riskReward': drawRiskReward(ctx, pts[0], pts[1]); break;
+      }
     }
-    // Call custom render callback if provided
-    if (onCustomRender) {
-      onCustomRender(ctx);
-    }
-  }, [chartApi, seriesApi, drawings, currentDrawing, selectedDrawingId, activeTool, getDrawingColor, renderDrawing, canvasRef, onCustomRender]);
+    onCustomRender?.(ctx);
+  }, [chartApi, seriesApi, drawings, currentDrawing, selectedDrawingId, activeTool, getDrawingColor, convertLogicalToPixel, canvasRef, onCustomRender]);
+
+  useEffect(() => { renderCanvas(); }, [renderCanvas]);
 
   useEffect(() => {
-    renderCanvas();
-  }, [renderCanvas]);
-
-  useEffect(() => {
-    if (!chartApi || !seriesApi) return;
-    const timeScale = chartApi.timeScale();
-    const handleSync = () => requestAnimationFrame(() => renderCanvas());
-
-    // Subscribe to time scale changes for smooth updates during zoom/pan
-    // Note: Price scale doesn't have event subscriptions in lightweight-charts API
-    timeScale.subscribeVisibleLogicalRangeChange(handleSync);
-    timeScale.subscribeVisibleTimeRangeChange(handleSync);
-
-    return () => {
-      timeScale.unsubscribeVisibleLogicalRangeChange(handleSync);
-      timeScale.unsubscribeVisibleTimeRangeChange(handleSync);
-    };
-  }, [chartApi, seriesApi, renderCanvas]);
-
-  const clearDrawings = () => {
-    setDrawings([]);
-    setCurrentDrawing([]);
-    setSelectedDrawingId(null);
-  };
+    if (!chartApi) return;
+    const ts = chartApi.timeScale(), sync = () => requestAnimationFrame(() => renderCanvas());
+    ts.subscribeVisibleLogicalRangeChange(sync); ts.subscribeVisibleTimeRangeChange(sync);
+    return () => { ts.unsubscribeVisibleLogicalRangeChange(sync); ts.unsubscribeVisibleTimeRangeChange(sync); };
+  }, [chartApi, renderCanvas]);
 
   return {
-    drawings,
-    clearDrawings,
-    addTextDrawing,
-    addCalloutDrawing,
-    deleteSelectedDrawing,
-    selectedDrawingId,
-    isHoveringSelected,
-    handleMouseDown,
-    handleMouseMove,
-    handleMouseUp,
-    renderCanvas,
+    drawings, clearDrawings: () => { setDrawings([]); setCurrentDrawing([]); setSelectedDrawingId(null); },
+    addTextDrawing, addCalloutDrawing, deleteSelectedDrawing, selectedDrawingId, isHoveringSelected, handleMouseDown, handleMouseMove, handleMouseUp, renderCanvas
   };
 }

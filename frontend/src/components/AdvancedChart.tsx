@@ -711,6 +711,7 @@ export function AdvancedChart({
         '7': 'riskReward',
         '8': 'text',
         '9': 'callout',
+        '0': 'channel',
       };
 
       const key = e.key.toLowerCase();

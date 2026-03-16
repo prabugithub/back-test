@@ -14,7 +14,8 @@ import {
   MessageSquare,
   Eye,
   EyeOff,
-  Download
+  Download,
+  SeparatorHorizontal
 } from 'lucide-react';
 import { useSessionStore } from '../stores/sessionStore';
 import { calculatePivotPoints } from '../utils/indicators';
@@ -22,7 +23,7 @@ import { analyzeMarketStructure } from '../utils/pivotAnalysis';
 import { LayoutGrid } from 'lucide-react';
 
 
-export type DrawingTool = 'none' | 'select' | 'trendline' | 'horizontal' | 'rectangle' | 'fibonacci' | 'riskReward' | 'freehand' | 'text' | 'callout';
+export type DrawingTool = 'none' | 'select' | 'trendline' | 'horizontal' | 'rectangle' | 'fibonacci' | 'riskReward' | 'freehand' | 'text' | 'callout' | 'channel';
 export type Indicator = 'none' | 'sma21' | 'sma60' | 'ema21' | 'ema60' | 'pivotPoints' | 'alBrooks';
 
 interface ChartToolbarProps {
@@ -100,6 +101,7 @@ export function ChartToolbar({
     { id: 'riskReward', icon: Target, label: 'Risk/Reward', shortcut: '7' },
     { id: 'text', icon: Type, label: 'Text', shortcut: '8' },
     { id: 'callout', icon: MessageSquare, label: 'Callout', shortcut: '9' },
+    { id: 'channel', icon: SeparatorHorizontal, label: 'Parallel Channel', shortcut: '0' },
   ];
 
   const indicators: Array<{ id: Indicator; label: string; color: string }> = [
