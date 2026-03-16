@@ -49,6 +49,8 @@ export function useChartDrawings({
   const [isDragging, setIsDragging] = useState(false);
   const [dragOffset, setDragOffset] = useState<Point>({ x: 0, y: 0 });
   const [isHoveringSelected, setIsHoveringSelected] = useState(false);
+  const [isResizing, setIsResizing] = useState(false);
+  const [resizeHandleIndex, setResizeHandleIndex] = useState<number>(-1);
 
   // Use refs to track current values without causing re-renders
   const activeToolRef = useRef(activeTool);
@@ -57,6 +59,8 @@ export function useChartDrawings({
   const isDraggingRef = useRef(isDragging);
   const dragOffsetRef = useRef(dragOffset);
   const selectedDrawingIdRef = useRef(selectedDrawingId);
+  const isResizingRef = useRef(isResizing);
+  const resizeHandleIndexRef = useRef(resizeHandleIndex);
 
   // Keep refs in sync with state
   useEffect(() => {
@@ -82,6 +86,14 @@ export function useChartDrawings({
   useEffect(() => {
     selectedDrawingIdRef.current = selectedDrawingId;
   }, [selectedDrawingId]);
+
+  useEffect(() => {
+    isResizingRef.current = isResizing;
+  }, [isResizing]);
+
+  useEffect(() => {
+    resizeHandleIndexRef.current = resizeHandleIndex;
+  }, [resizeHandleIndex]);
 
   const getChartCoordinates = useCallback((event: MouseEvent, canvas: HTMLCanvasElement): Point => {
     const rect = canvas.getBoundingClientRect();
@@ -133,6 +145,23 @@ export function useChartDrawings({
 
     return { ...point, x, y };
   }, [chartApi, seriesApi]);
+
+  const HANDLE_SIZE = 8; // half-size of square handle in px
+
+  // Returns the index of the resize handle at `point` for the given drawing, or -1
+  const getResizeHandleAtPoint = (point: Point, drawing: Drawing): number => {
+    const points = drawing.points.map(p => convertLogicalToPixel(p));
+    for (let i = 0; i < points.length; i++) {
+      const hp = points[i];
+      if (
+        point.x >= hp.x - HANDLE_SIZE && point.x <= hp.x + HANDLE_SIZE &&
+        point.y >= hp.y - HANDLE_SIZE && point.y <= hp.y + HANDLE_SIZE
+      ) {
+        return i;
+      }
+    }
+    return -1;
+  };
 
   // Hit detection helper functions
   const isPointNearLine = (point: Point, p1: Point, p2: Point, threshold = 8): boolean => {
@@ -349,6 +378,19 @@ export function useChartDrawings({
 
     if (activeToolRef.current === 'none') return false;
 
+    // Check resize handle first (only when a drawing is already selected in select mode)
+    if (activeToolRef.current === 'select' && selectedDrawingIdRef.current) {
+      const selectedDrawing = drawings.find(d => d.id === selectedDrawingIdRef.current);
+      if (selectedDrawing) {
+        const handleIdx = getResizeHandleAtPoint(point, selectedDrawing);
+        if (handleIdx !== -1) {
+          setIsResizing(true);
+          setResizeHandleIndex(handleIdx);
+          return true;
+        }
+      }
+    }
+
     const foundDrawing = findDrawingAtPoint(point, drawings);
 
     if (foundDrawing) {
@@ -365,6 +407,8 @@ export function useChartDrawings({
       } else {
         setSelectedDrawingId(foundDrawing.id);
         setIsDragging(false);
+        setIsResizing(false);
+        setResizeHandleIndex(-1);
       }
       // If we clicked a drawing in ANY tool mode, we consider it handled (selected)
       return true;
@@ -373,6 +417,8 @@ export function useChartDrawings({
     if (activeToolRef.current === 'select') {
       setSelectedDrawingId(null);
       setIsDragging(false);
+      setIsResizing(false);
+      setResizeHandleIndex(-1);
       return false;
     }
 
@@ -402,6 +448,50 @@ export function useChartDrawings({
     if (!canvasRef.current || !chartApi || !seriesApi) return;
 
     const point = getChartCoordinates(event, canvasRef.current);
+
+    // Resize: move only the specific handle point
+    if (isResizingRef.current && activeToolRef.current === 'select' && selectedDrawingIdRef.current) {
+      const handleIdx = resizeHandleIndexRef.current;
+      setDrawings((prevDrawings) =>
+        prevDrawings.map((drawing) => {
+          if (drawing.id !== selectedDrawingIdRef.current) return drawing;
+          const newPoints = drawing.points.map((p, i) => {
+            if (i !== handleIdx) return p;
+            const timeScale = chartApi.timeScale();
+            const logical = timeScale.coordinateToLogical(point.x);
+            const price = seriesApi.coordinateToPrice(point.y);
+            return {
+              ...p,
+              x: point.x,
+              y: point.y,
+              time: logical !== null ? logical : p.time,
+              price: price !== null ? price : p.price,
+            };
+          });
+
+          // Auto-update quantity if RR tool is resized
+          if (drawing.type === 'riskReward' && newPoints[0].price && newPoints[1]?.price) {
+            const p1Price = newPoints[0].price!;
+            const p2Price = newPoints[1].price!;
+            const slDist = Math.abs(p1Price - p2Price);
+            if (slDist > 0) {
+              const newQty = Math.floor(riskPerTrade / slDist);
+              setTradeQuantity(newQty);
+              const entry = p1Price;
+              const sl = p2Price;
+              const target = entry + (entry - sl) * 2;
+              setManualLevels({ sl, target });
+            }
+          }
+
+          return { ...drawing, points: newPoints };
+        })
+      );
+
+      // Update cursor
+      canvasRef.current!.style.cursor = 'crosshair';
+      return;
+    }
 
     if (isDraggingRef.current && activeToolRef.current === 'select' && selectedDrawingIdRef.current) {
       setDrawings((prevDrawings) => {
@@ -454,12 +544,20 @@ export function useChartDrawings({
       return;
     }
 
-    if (activeToolRef.current === 'select' && selectedDrawingIdRef.current && !isDraggingRef.current) {
+    if (activeToolRef.current === 'select' && selectedDrawingIdRef.current && !isDraggingRef.current && !isResizingRef.current) {
       const selectedDrawing = drawings.find(d => d.id === selectedDrawingIdRef.current);
-      if (selectedDrawing && isPointOnDrawing(point, selectedDrawing)) {
-        setIsHoveringSelected(true);
-      } else {
-        setIsHoveringSelected(false);
+      if (selectedDrawing) {
+        const handleIdx = getResizeHandleAtPoint(point, selectedDrawing);
+        if (handleIdx !== -1) {
+          canvasRef.current!.style.cursor = 'crosshair';
+          setIsHoveringSelected(false);
+        } else if (isPointOnDrawing(point, selectedDrawing)) {
+          canvasRef.current!.style.cursor = 'move';
+          setIsHoveringSelected(true);
+        } else {
+          canvasRef.current!.style.cursor = 'default';
+          setIsHoveringSelected(false);
+        }
       }
     }
 
@@ -476,8 +574,16 @@ export function useChartDrawings({
   }, [drawings, getChartCoordinates, convertLogicalToPixel, chartApi, seriesApi]);
 
   const handleMouseUp = useCallback(() => {
+    if (isResizingRef.current) {
+      setIsResizing(false);
+      setResizeHandleIndex(-1);
+      if (canvasRef.current) canvasRef.current.style.cursor = 'default';
+      return;
+    }
+
     if (isDraggingRef.current) {
       setIsDragging(false);
+      if (canvasRef.current) canvasRef.current.style.cursor = 'default';
       return;
     }
 
@@ -701,12 +807,15 @@ export function useChartDrawings({
   };
 
   const drawSelectionHandles = (ctx: CanvasRenderingContext2D, points: Point[]) => {
-    ctx.fillStyle = '#2196F3';
+    const hs = HANDLE_SIZE; // half-size
     points.forEach(point => {
       if (point.x < 0 || point.x > ctx.canvas.width || point.y < 0 || point.y > ctx.canvas.height) return;
-      ctx.beginPath();
-      ctx.arc(point.x, point.y, 5, 0, 2 * Math.PI);
-      ctx.fill();
+      // White fill with blue border – clear resize affordance
+      ctx.fillStyle = '#FFFFFF';
+      ctx.strokeStyle = '#2196F3';
+      ctx.lineWidth = 2;
+      ctx.fillRect(point.x - hs, point.y - hs, hs * 2, hs * 2);
+      ctx.strokeRect(point.x - hs, point.y - hs, hs * 2, hs * 2);
     });
   };
 
