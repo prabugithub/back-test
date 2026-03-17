@@ -401,7 +401,7 @@ export function AdvancedChart({
     
     // Remove series that are no longer active
     indicatorSeriesRef.current.forEach((s, name) => {
-      if (!indicatorsToKeep.has(name)) {
+      if (!indicatorsToKeep.has(name as Indicator)) {
         try { chart.removeSeries(s); } catch (e) {}
         indicatorSeriesRef.current.delete(name);
       }

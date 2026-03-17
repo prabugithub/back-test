@@ -48,7 +48,7 @@ export function useChartDrawings({
   const [selectedDrawingId, setSelectedDrawingId] = useState<string | null>(null);
   const [isDragging, setIsDragging] = useState(false);
   const [dragOffset, setDragOffset] = useState<Point>({ x: 0, y: 0 });
-  const [isHoveringSelected, setIsHoveringSelected] = useState(false);
+  const [isHoveringSelected] = useState(false);
   const [isResizing, setIsResizing] = useState(false);
   const [resizeHandleIndex, setResizeHandleIndex] = useState<number>(-1);
 
