@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo } from 'react';
+import { useState, useEffect, useMemo, useCallback, useRef } from 'react';
 import { Play, Pause, ChevronLeft, ChevronRight, FastForward, CalendarClock, Settings, X, Calendar } from 'lucide-react';
 import { useSessionStore } from '../stores/sessionStore';
 import { useNotificationStore } from '../stores/notificationStore';
@@ -10,6 +10,98 @@ import { fetchCandles } from '../services/api';
 
 // Dynamic import for local data
 const loadNiftyData = () => import('../assets/market-data/nifty5min_data.json');
+
+interface PivotStatusDisplayProps {
+  recentPivot: any;
+  showPivotRR: boolean;
+  riskPerTrade: number;
+  tradeQuantity: number;
+  setTradeQuantity: (qty: number) => void;
+  currentCandle: any;
+  handleExecuteTrade: (type: 'BUY' | 'SELL') => void;
+}
+
+const PivotStatusDisplay = ({
+  recentPivot,
+  showPivotRR,
+  riskPerTrade,
+  tradeQuantity,
+  setTradeQuantity,
+  currentCandle,
+  handleExecuteTrade,
+}: PivotStatusDisplayProps) => {
+  const pointsAtRisk = recentPivot ? recentPivot.slDistance : 0;
+  const calcQty = pointsAtRisk > 0 ? Math.floor(riskPerTrade / pointsAtRisk) : tradeQuantity;
+
+  const buySL = recentPivot && currentCandle ? (currentCandle.close - pointsAtRisk) : 0;
+  const buyTgt = recentPivot && currentCandle ? (currentCandle.close + pointsAtRisk * 2) : 0;
+  const sellSL = recentPivot && currentCandle ? (currentCandle.close + pointsAtRisk) : 0;
+  const sellTgt = recentPivot && currentCandle ? (currentCandle.close - pointsAtRisk * 2) : 0;
+
+  return (
+    <div className="flex items-center gap-1">
+      {showPivotRR && recentPivot && (
+        <button
+          onClick={() => setTradeQuantity(calcQty)}
+          className="flex items-center gap-1 px-1.5 py-0.5 bg-yellow-50 border border-yellow-200 hover:bg-yellow-100 hover:border-yellow-300 rounded text-[10px] text-yellow-800 whitespace-nowrap transition-colors cursor-pointer group"
+          title={`Click to set Quantity: ${calcQty} (Risk: 10k)`}
+        >
+          <span className="font-bold">{recentPivot.type === 'bullish' ? 'L' : 'S'}</span>
+          <span className="border-l border-yellow-300 pl-1 group-hover:border-yellow-400">{pointsAtRisk}</span>
+          <span className="ml-0.5 font-bold text-yellow-700 bg-yellow-200 px-1 rounded-sm group-hover:bg-yellow-300">Q:{calcQty}</span>
+        </button>
+      )}
+
+      <div className="flex flex-col items-center">
+        <span className="text-[8px] text-gray-400 uppercase font-bold leading-none mb-0.5">Qty</span>
+        <input
+          id="trade-quantity-input"
+          type="number"
+          min="1"
+          value={tradeQuantity || ''}
+          onChange={(e) => {
+            const val = e.target.value;
+            if (val === '') {
+              setTradeQuantity(0); // Temporary state, components handle 0/NaN gracefully
+              return;
+            }
+            const num = parseInt(val);
+            if (!isNaN(num)) {
+              setTradeQuantity(num);
+            }
+          }}
+          onBlur={(e) => {
+            const num = parseInt(e.target.value);
+            if (isNaN(num) || num < 1) {
+              setTradeQuantity(1);
+            }
+          }}
+          className="w-10 px-0.5 py-1 border rounded text-center text-xs font-medium focus:ring-1 focus:ring-blue-500 outline-none"
+          title="Trade Quantity (Q)"
+        />
+      </div>
+
+      <div className="flex items-center gap-0.5">
+        <button
+          onClick={() => handleExecuteTrade('BUY')}
+          disabled={!currentCandle}
+          className="px-2 py-1 bg-green-600 text-white rounded text-xs font-bold hover:bg-green-700 disabled:opacity-50"
+          title={`Buy ${tradeQuantity}${buySL ? ` (SL: ${buySL.toFixed(1)}, Tgt: ${buyTgt.toFixed(1)})` : ''} (B)`}
+        >
+          B
+        </button>
+        <button
+          onClick={() => handleExecuteTrade('SELL')}
+          disabled={!currentCandle}
+          className="px-2 py-1 bg-red-600 text-white rounded text-xs font-bold hover:bg-red-700 disabled:opacity-50"
+          title={`Sell ${tradeQuantity}${sellSL ? ` (SL: ${sellSL.toFixed(1)}, Tgt: ${sellTgt.toFixed(1)})` : ''} (S)`}
+        >
+          S
+        </button>
+      </div>
+    </div>
+  );
+};
 
 export function PlaybackControls({ onOpenHistory }: { onOpenHistory?: () => void }) {
   const {
@@ -36,6 +128,8 @@ export function PlaybackControls({ onOpenHistory }: { onOpenHistory?: () => void
     setSecondaryTimeframe,
   } = useSessionStore();
 
+  const currentCandle = useSessionStore((s) => s.candles[s.currentIndex] || null);
+
   const memoizedPivots = useMemo(() => {
     if (candles.length === 0) return [];
     return calculatePivotPoints(candles.slice(0, currentIndex + 1));
@@ -43,66 +137,38 @@ export function PlaybackControls({ onOpenHistory }: { onOpenHistory?: () => void
 
   const recentPivot = memoizedPivots.length > 0 ? memoizedPivots[memoizedPivots.length - 1] : null;
 
-  const PivotStatusDisplay = () => {
-    const pointsAtRisk = recentPivot ? recentPivot.slDistance : 0;
-    const calcQty = pointsAtRisk > 0 ? Math.floor(riskPerTrade / pointsAtRisk) : tradeQuantity;
+  const handleExecuteTrade = useCallback((type: 'BUY' | 'SELL') => {
+    if (!currentCandle) return;
 
-    const buySL = recentPivot && currentCandle ? (currentCandle.close - pointsAtRisk) : 0;
-    const buyTgt = recentPivot && currentCandle ? (currentCandle.close + pointsAtRisk * 2) : 0;
-    const sellSL = recentPivot && currentCandle ? (currentCandle.close + pointsAtRisk) : 0;
-    const sellTgt = recentPivot && currentCandle ? (currentCandle.close - pointsAtRisk * 2) : 0;
+    // Fallback to absolute latest pivot if no matching type found
+    const recentPivotForTrade = memoizedPivots
+      .filter(p => type === 'BUY' ? p.type === 'bullish' : p.type === 'bearish')
+      .pop() || recentPivot;
 
-    return (
-      <div className="flex items-center gap-1">
-        {showPivotRR && recentPivot && (
-          <button
-            onClick={() => setTradeQuantity(calcQty)}
-            className="flex items-center gap-1 px-1.5 py-0.5 bg-yellow-50 border border-yellow-200 hover:bg-yellow-100 hover:border-yellow-300 rounded text-[10px] text-yellow-800 whitespace-nowrap transition-colors cursor-pointer group"
-            title={`Click to set Quantity: ${calcQty} (Risk: 10k)`}
-          >
-            <span className="font-bold">{recentPivot.type === 'bullish' ? 'L' : 'S'}</span>
-            <span className="border-l border-yellow-300 pl-1 group-hover:border-yellow-400">{pointsAtRisk}</span>
-            <span className="ml-0.5 font-bold text-yellow-700 bg-yellow-200 px-1 rounded-sm group-hover:bg-yellow-300">Q:{calcQty}</span>
-          </button>
-        )}
+    let sl = undefined;
+    let target = undefined;
 
-        <div className="flex flex-col items-center">
-          <span className="text-[8px] text-gray-400 uppercase font-bold leading-none mb-0.5">Qty</span>
-          <input
-            id="trade-quantity-input"
-            type="number"
-            min="1"
-            value={tradeQuantity}
-            onChange={(e) => setTradeQuantity(Math.max(1, parseInt(e.target.value) || 1))}
-            className="w-10 px-0.5 py-1 border rounded text-center text-xs font-medium"
-            title="Trade Quantity (Q)"
-          />
-        </div>
+    // Prioritize Manual Levels from Chart Drawings (RR Tool)
+    if (manualLevels) {
+      sl = manualLevels.sl;
+      target = manualLevels.target;
+    }
+    // Fallback to Pivot Points
+    else if (recentPivotForTrade) {
+      const entryPrice = currentCandle.close;
+      const slDist = recentPivotForTrade.slDistance;
 
-        <div className="flex items-center gap-0.5">
-          <button
-            onClick={() => handleExecuteTrade('BUY')}
-            disabled={!currentCandle}
-            className="px-2 py-1 bg-green-600 text-white rounded text-xs font-bold hover:bg-green-700 disabled:opacity-50"
-            title={`Buy ${tradeQuantity}${buySL ? ` (SL: ${buySL.toFixed(1)}, Tgt: ${buyTgt.toFixed(1)})` : ''} (B)`}
-          >
-            B
-          </button>
-          <button
-            onClick={() => handleExecuteTrade('SELL')}
-            disabled={!currentCandle}
-            className="px-2 py-1 bg-red-600 text-white rounded text-xs font-bold hover:bg-red-700 disabled:opacity-50"
-            title={`Sell ${tradeQuantity}${sellSL ? ` (SL: ${sellSL.toFixed(1)}, Tgt: ${sellTgt.toFixed(1)})` : ''} (S)`}
-          >
-            S
-          </button>
-        </div>
-      </div>
-    );
-  };
+      if (type === 'BUY') {
+        sl = entryPrice - slDist;
+        target = entryPrice + (slDist * 2);
+      } else {
+        sl = entryPrice + slDist;
+        target = entryPrice - (slDist * 2);
+      }
+    }
 
-
-
+    initiateTrade(type, tradeQuantity, sl, target);
+  }, [currentCandle, memoizedPivots, recentPivot, manualLevels, tradeQuantity, initiateTrade]);
 
   const [customJump, setCustomJump] = useState('10');
   const [showSettings, setShowSettings] = useState(false);
@@ -315,9 +381,6 @@ export function PlaybackControls({ onOpenHistory }: { onOpenHistory?: () => void
     setShowDatePicker(false);
   };
 
-  // Use selector to get current candle
-  const currentCandle = useSessionStore((s) => s.candles[s.currentIndex] || null);
-
   // Auto-advance candles when playing
   useEffect(() => {
     if (!isPlaying) return;
@@ -333,7 +396,37 @@ export function PlaybackControls({ onOpenHistory }: { onOpenHistory?: () => void
     return () => clearInterval(interval);
   }, [isPlaying, speed, currentIndex, candles.length, step, pause]);
 
-  // Keyboard shortcuts
+  // Keyboard shortcuts using refs to prevent listener churn
+  const shortcutsRef = useRef({
+    isPlaying,
+    play,
+    pause,
+    step,
+    currentIndex,
+    candles,
+    tradeQuantity,
+    recentPivot,
+    riskPerTrade,
+    setTradeQuantity,
+    handleExecuteTrade
+  });
+
+  useEffect(() => {
+    shortcutsRef.current = {
+      isPlaying,
+      play,
+      pause,
+      step,
+      currentIndex,
+      candles,
+      tradeQuantity,
+      recentPivot,
+      riskPerTrade,
+      setTradeQuantity,
+      handleExecuteTrade
+    };
+  }, [isPlaying, play, pause, step, currentIndex, candles, tradeQuantity, recentPivot, riskPerTrade, setTradeQuantity, handleExecuteTrade]);
+
   useEffect(() => {
     const handleKeyPress = (e: KeyboardEvent) => {
       // Ignore if user is typing in an input field
@@ -342,32 +435,34 @@ export function PlaybackControls({ onOpenHistory }: { onOpenHistory?: () => void
         return;
       }
 
+      const s = shortcutsRef.current;
+
       if (e.code === 'Space') {
         e.preventDefault();
-        if (isPlaying) {
-          pause();
+        if (s.isPlaying) {
+          s.pause();
         } else {
-          play();
+          s.play();
         }
       } else if (e.code === 'ArrowRight') {
         e.preventDefault();
-        step('forward');
+        s.step('forward');
       } else if (e.code === 'ArrowLeft') {
         e.preventDefault();
-        step('backward');
+        s.step('backward');
       } else if (e.code === 'KeyB') {
         e.preventDefault();
-        handleExecuteTrade('BUY');
+        s.handleExecuteTrade('BUY');
       } else if (e.code === 'KeyS') {
         e.preventDefault();
-        handleExecuteTrade('SELL');
+        s.handleExecuteTrade('SELL');
       } else if (e.code === 'KeyQ') {
         e.preventDefault();
 
-        // Calculate recommended quantity based on risk using memoized pivots
-        if (recentPivot && recentPivot.slDistance > 0) {
-          const suggestedQty = Math.floor(riskPerTrade / recentPivot.slDistance);
-          setTradeQuantity(suggestedQty);
+        // Calculate recommended quantity based on risk
+        if (s.recentPivot && s.recentPivot.slDistance > 0) {
+          const suggestedQty = Math.floor(s.riskPerTrade / s.recentPivot.slDistance);
+          s.setTradeQuantity(suggestedQty);
         }
 
         const qtyInput = document.getElementById('trade-quantity-input');
@@ -380,40 +475,7 @@ export function PlaybackControls({ onOpenHistory }: { onOpenHistory?: () => void
 
     window.addEventListener('keydown', handleKeyPress);
     return () => window.removeEventListener('keydown', handleKeyPress);
-  }, [isPlaying, play, pause, step, currentIndex, candles, tradeQuantity]); // Added dependencies for trade execution
-
-  const handleExecuteTrade = (type: 'BUY' | 'SELL') => {
-    if (!currentCandle) return;
-
-    // Fallback to absolute latest pivot if no matching type found
-    const recentPivotForTrade = memoizedPivots
-      .filter(p => type === 'BUY' ? p.type === 'bullish' : p.type === 'bearish')
-      .pop() || recentPivot;
-
-    let sl = undefined;
-    let target = undefined;
-
-    // Prioritize Manual Levels from Chart Drawings (RR Tool)
-    if (manualLevels) {
-      sl = manualLevels.sl;
-      target = manualLevels.target;
-    }
-    // Fallback to Pivot Points
-    else if (recentPivotForTrade) {
-      const entryPrice = currentCandle.close;
-      const slDist = recentPivotForTrade.slDistance;
-
-      if (type === 'BUY') {
-        sl = entryPrice - slDist;
-        target = entryPrice + (slDist * 2);
-      } else {
-        sl = entryPrice + slDist;
-        target = entryPrice - (slDist * 2);
-      }
-    }
-
-    initiateTrade(type, tradeQuantity, sl, target);
-  };
+  }, []); // Empty deps, uses ref inside handler
 
   const progress = candles.length > 0 ? (currentIndex / (candles.length - 1)) * 100 : 0;
 
@@ -523,12 +585,15 @@ export function PlaybackControls({ onOpenHistory }: { onOpenHistory?: () => void
         <div className="flex items-center gap-1 flex-none">
           {/* Mini Trading Buttons */}
           <div className="flex items-center gap-1">
-            {/* Recent Pivot SL Info */}
-            {(() => {
-              // We use the last candle directly if possible to avoid recalculating pivots if not needed for display
-              // For the 'L/S' button, we can memoize the pivot calculation
-              return <PivotStatusDisplay />;
-            })()}
+            <PivotStatusDisplay
+              recentPivot={recentPivot}
+              showPivotRR={showPivotRR}
+              riskPerTrade={riskPerTrade}
+              tradeQuantity={tradeQuantity}
+              setTradeQuantity={setTradeQuantity}
+              currentCandle={currentCandle}
+              handleExecuteTrade={handleExecuteTrade}
+            />
           </div>
 
           <div className="w-px bg-gray-300 mx-1 h-6"></div>

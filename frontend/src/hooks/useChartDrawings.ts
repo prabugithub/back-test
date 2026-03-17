@@ -336,7 +336,10 @@ export function useChartDrawings({
            const p1 = newPoints[0].price, p2 = newPoints[1]?.price;
            if (p1 && p2 && Math.abs(p1 - p2) > 0) {
              const dist = Math.abs(p1 - p2);
-             setTradeQuantity(Math.floor(riskPerTrade / dist));
+             const newQty = Math.floor(riskPerTrade / dist);
+             if (newQty !== useSessionStore.getState().tradeQuantity) {
+               setTradeQuantity(newQty);
+             }
              setManualLevels({ sl: p2, target: p1 + (p1 - p2) * 2 });
            }
         }
@@ -360,7 +363,10 @@ export function useChartDrawings({
         if (d.type === 'riskReward') {
           const p1 = newPoints[0].price, p2 = newPoints[1]?.price;
           if (p1 && p2 && Math.abs(p1 - p2) > 0) {
-            setTradeQuantity(Math.floor(riskPerTrade / Math.abs(p1 - p2)));
+            const newQty = Math.floor(riskPerTrade / Math.abs(p1 - p2));
+            if (newQty !== useSessionStore.getState().tradeQuantity) {
+              setTradeQuantity(newQty);
+            }
             setManualLevels({ sl: p2, target: p1 + (p1 - p2) * 2 });
           }
         }
@@ -419,7 +425,10 @@ export function useChartDrawings({
       if (activeToolRef.current === 'riskReward' && pts[0].price && pts[1].price) {
         const dist = Math.abs(pts[0].price - pts[1].price);
         if (dist > 0) {
-          setTradeQuantity(Math.floor(riskPerTrade / dist));
+          const finalQty = Math.floor(riskPerTrade / dist);
+          if (finalQty !== useSessionStore.getState().tradeQuantity) {
+            setTradeQuantity(finalQty);
+          }
           setManualLevels({ sl: pts[1].price, target: pts[0].price + (pts[0].price - pts[1].price) * 2 });
         }
       }
@@ -589,7 +598,7 @@ export function useChartDrawings({
   }, [chartApi, renderCanvas]);
 
   return {
-    drawings, clearDrawings: () => { setDrawings([]); setCurrentDrawing([]); setSelectedDrawingId(null); },
+    drawings, clearDrawings: useCallback(() => { setDrawings([]); setCurrentDrawing([]); setSelectedDrawingId(null); }, []),
     addTextDrawing, addCalloutDrawing, deleteSelectedDrawing, selectedDrawingId, isHoveringSelected, handleMouseDown, handleMouseMove, handleMouseUp, renderCanvas
   };
 }

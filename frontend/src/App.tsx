@@ -10,7 +10,7 @@ import type { DrawingTool, Indicator } from './components/ChartToolbar';
 import { TradeHistoryDialog } from './components/TradeHistoryDialog';
 import { PositionOverlay } from './components/PositionOverlay';
 import { useSessionStore } from './stores/sessionStore';
-import { useState } from 'react';
+import { useState, useCallback } from 'react';
 import { NotificationToast } from './components/NotificationToast';
 import { TradeExitDialog } from './components/TradeExitDialog';
 import { TradeJournalDialog } from './components/TradeJournalDialog';
@@ -48,9 +48,18 @@ function App() {
   };
 
   /** Called by each chart when it becomes active — merges callbacks */
-  const handleRegisterCallbacks = (cbs: ChartCallbacks) => {
-    setChartCallbacks(cbs);
-  };
+  const handleRegisterCallbacks = useCallback((cbs: ChartCallbacks) => {
+    setChartCallbacks(prev => {
+      // Basic shallow comparison to prevent unnecessary state updates
+      const hasChanged = Object.keys(cbs).some(
+        key => (cbs as any)[key] !== (prev as any)[key]
+      );
+      if (!hasChanged && Object.keys(cbs).length === Object.keys(prev).length) {
+        return prev;
+      }
+      return cbs;
+    });
+  }, []);
 
   return (
     <QueryClientProvider client={queryClient}>

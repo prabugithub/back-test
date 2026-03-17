@@ -572,16 +572,16 @@ export function AdvancedChart({
     return dateStr ? `${dateStr}_Trade-${countToUse}` : defaultBase;
   };
 
-  const handleTakeScreenshot = () => {
+  const handleTakeScreenshot = useCallback(() => {
     const base64Image = getScreenshotData();
     if (!base64Image) return;
 
     setScreenshotDefaultName(getScreenshotDefaultName());
     setPendingScreenshotData(base64Image);
     setIsScreenshotDialogOpen(true);
-  };
+  }, [chart, trades]);
 
-  const handleDownloadScreenshot = () => {
+  const handleDownloadScreenshot = useCallback(() => {
     const base64Image = getScreenshotData();
     if (!base64Image) return;
 
@@ -591,7 +591,7 @@ export function AdvancedChart({
     link.href = base64Image;
     link.click();
     notify('Screenshot downloaded locally', 'success');
-  };
+  }, [chart, trades, notify]);
 
   // Register this chart's callbacks with the parent whenever active state changes
   // (placed after all handler definitions to avoid "used before declaration" errors)

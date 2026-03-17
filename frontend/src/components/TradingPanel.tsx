@@ -53,8 +53,24 @@ export function TradingPanel() {
           <input
             type="number"
             min={1}
-            value={quantity}
-            onChange={(e) => setQuantity(Math.max(1, parseInt(e.target.value) || 1))}
+            value={quantity || ''}
+            onChange={(e) => {
+              const val = e.target.value;
+              if (val === '') {
+                setQuantity(0);
+                return;
+              }
+              const num = parseInt(val);
+              if (!isNaN(num)) {
+                setQuantity(num);
+              }
+            }}
+            onBlur={(e) => {
+              const num = parseInt(e.target.value);
+              if (isNaN(num) || num < 1) {
+                setQuantity(1);
+              }
+            }}
             className="w-full px-3 py-2 border rounded text-center font-medium focus:ring-1 focus:ring-blue-500 text-lg"
             placeholder="Qty"
           />
