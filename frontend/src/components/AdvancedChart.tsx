@@ -109,13 +109,24 @@ export function AdvancedChart({
     setIsTextDialogOpen(true);
   }, []);
 
+  // Memoize heavy calculations
+  const memoizedPivots = useMemo(() => {
+    if (!activeIndicators.includes('pivotPoints') || visibleCandles.length === 0) return [];
+    return calculatePivotPoints(visibleCandles);
+  }, [visibleCandles, activeIndicators]);
+
+  const memoizedAlBrooks = useMemo(() => {
+    if (!activeIndicators.includes('alBrooks') || visibleCandles.length === 0) return [];
+    return calculateAlBrooks(visibleCandles, useAtrForSignals, 1.0);
+  }, [visibleCandles, activeIndicators, useAtrForSignals]);
+
   // Callback to render pivot risk-reward lines
   const handleCustomRender = useCallback((ctx: CanvasRenderingContext2D) => {
     if (!chart || !series || visibleCandles.length === 0) return;
     if (!activeIndicators.includes('pivotPoints') || !showMarkers || !showPivotRR) return;
 
-    // Calculate pivots
-    const allPivots = calculatePivotPoints(visibleCandles);
+    // Use memoized pivots
+    const allPivots = memoizedPivots;
     if (allPivots.length === 0) return;
 
     // Get the most recent pivot
@@ -204,7 +215,7 @@ export function AdvancedChart({
 
     // Reset context
     ctx.textAlign = 'start';
-  }, [chart, series, visibleCandles, activeIndicators, showMarkers, showPivotRR]);
+  }, [chart, series, visibleCandles, activeIndicators, showMarkers, showPivotRR, memoizedPivots]);
 
   const {
     clearDrawings,
@@ -386,53 +397,37 @@ export function AdvancedChart({
   useEffect(() => {
     if (!chart) return;
 
-    // Clear old indicator series (LineSeries only)
-    // We always clear them before re-adding to avoid duplication or stale series
-    indicatorSeriesRef.current.forEach((s) => {
-      if (s) {
-        try {
-          chart.removeSeries(s);
-        } catch (e) {
-          // If series was already removed or chart state is weird, ignore
-          console.debug('Skip removing internal series:', e);
-        }
+    const indicatorsToKeep = new Set(activeIndicators);
+    
+    // Remove series that are no longer active
+    indicatorSeriesRef.current.forEach((s, name) => {
+      if (!indicatorsToKeep.has(name)) {
+        try { chart.removeSeries(s); } catch (e) {}
+        indicatorSeriesRef.current.delete(name);
       }
     });
-    indicatorSeriesRef.current.clear();
 
     if (visibleCandles.length === 0) return;
 
-    // Add active line-based indicators
+    // Update or add active line-based indicators
     activeIndicators.forEach((indicator) => {
       let data: any[] = [];
       let color = '';
 
       switch (indicator) {
-        case 'sma21':
-          data = calculateSMA(visibleCandles, 21);
-          color = '#2962FF';
-          break;
-        case 'sma60':
-          data = calculateSMA(visibleCandles, 60);
-          color = '#FF6D00';
-          break;
-        case 'ema21':
-          data = calculateEMA(visibleCandles, 21);
-          color = '#00897B';
-          break;
-        case 'ema60':
-          data = calculateEMA(visibleCandles, 60);
-          color = '#D81B60';
-          break;
+        case 'sma21': data = calculateSMA(visibleCandles, 21); color = '#2962FF'; break;
+        case 'sma60': data = calculateSMA(visibleCandles, 60); color = '#FF6D00'; break;
+        case 'ema21': data = calculateEMA(visibleCandles, 21); color = '#00897B'; break;
+        case 'ema60': data = calculateEMA(visibleCandles, 60); color = '#D81B60'; break;
       }
 
       if (data.length > 0) {
-        const lineSeries = chart.addSeries(LineSeries, {
-          color,
-          lineWidth: 2,
-        });
+        let lineSeries = indicatorSeriesRef.current.get(indicator);
+        if (!lineSeries) {
+          lineSeries = chart.addSeries(LineSeries, { color, lineWidth: 2 });
+          indicatorSeriesRef.current.set(indicator, lineSeries);
+        }
         lineSeries.setData(data);
-        indicatorSeriesRef.current.set(indicator, lineSeries);
       }
     });
   }, [activeIndicators, visibleCandles, chart]);
@@ -479,7 +474,7 @@ export function AdvancedChart({
 
       // 2. Add Pivot Point Markers if active
       if (activeIndicators.includes('pivotPoints')) {
-        const allPivots = calculatePivotPoints(visibleCandles);
+        const allPivots = memoizedPivots;
         allPivots.forEach((p, index) => {
           const isLast = index === allPivots.length - 1;
           const gapTooltip = isLast ? ` SL:${p.slDistance}` : '';
@@ -499,7 +494,7 @@ export function AdvancedChart({
 
     // 3. Add Al Brooks Markers if active
     if (showMarkers && activeIndicators.includes('alBrooks')) {
-      const alBrooksSignals = calculateAlBrooks(visibleCandles, useAtrForSignals, 1.0);
+      const alBrooksSignals = memoizedAlBrooks;
       alBrooksSignals.forEach((s) => {
         let color = '#00BCD4'; // Default aqua
         const signal = s.signal;
@@ -524,7 +519,7 @@ export function AdvancedChart({
 
     allMarkers.sort((a, b) => (a.time as number) - (b.time as number));
     markersPrimitiveRef.current.setMarkers(allMarkers);
-  }, [activeIndicators, visibleCandles, trades, showMarkers, useAtrForSignals]);
+  }, [activeIndicators, visibleCandles, trades, showMarkers, useAtrForSignals, memoizedPivots, memoizedAlBrooks]);
 
   const handleClearDrawings = useCallback(() => {
     clearDrawings();
