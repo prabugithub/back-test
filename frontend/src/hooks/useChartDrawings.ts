@@ -264,15 +264,25 @@ export function useChartDrawings({
     const point = getChartCoordinates(event, canvasRef.current);
     if (activeToolRef.current === 'none') return false;
 
-    // Handle 3rd point of channel
-    if (activeToolRef.current === 'channel' && isDrawingRef.current && currentDrawingRef.current.length >= 2) {
-      const newId = `drawing-${Date.now()}`;
-      setDrawings(p => [...p, { id: newId, type: 'channel', points: [currentDrawingRef.current[0], currentDrawingRef.current[1], point], color: getDrawingColor('channel') }]);
-      setSelectedDrawingId(newId);
-      setCurrentDrawing([]);
-      setIsDrawing(false);
-      onToolComplete?.();
-      return true;
+    // Handle subsequent points for multi-point tools like 'channel'
+    if (isDrawingRef.current && activeToolRef.current === 'channel') {
+      const pts = currentDrawingRef.current;
+      if (pts.length === 2) {
+        // Second click: Fix the second point (p2) and prepare to define the width (p3)
+        // We use the current point as both the fixed end of the line and the starting point for width
+        setCurrentDrawing([pts[0], point, point]);
+        return true;
+      } else if (pts.length === 3) {
+        // Third click: Complete the drawing
+        const newId = `drawing-${Date.now()}`;
+        setDrawings(p => [...p, { id: newId, type: 'channel', points: [pts[0], pts[1], point], color: getDrawingColor('channel') }]);
+        setSelectedDrawingId(newId);
+        setCurrentDrawing([]);
+        setIsDrawing(false);
+        isDrawingRef.current = false;
+        onToolComplete?.();
+        return true;
+      }
     }
 
     // Check resize handle
@@ -306,6 +316,7 @@ export function useChartDrawings({
     setSelectedDrawingId(null); setIsDragging(false);
     setCurrentDrawing([point]);
     setIsDrawing(true);
+    isDrawingRef.current = true;
     return true;
   }, [drawings, getChartCoordinates, convertLogicalToPixel, onTextToolTrigger, addTextDrawing, getDrawingColor, onToolComplete]);
 
@@ -368,8 +379,11 @@ export function useChartDrawings({
       if (prev.length === 0) return [point];
       if (activeToolRef.current === 'freehand') return [...prev, point];
       if (activeToolRef.current === 'channel') {
-        if (prev.length === 1) return [prev[0], point];
-        return [prev[0], prev[1], point];
+        // Stage 1: Defining the first line (length is 1 or 2)
+        if (prev.length === 1 || prev.length === 2) return [prev[0], point];
+        // Stage 2: Defining the width (length is 3)
+        if (prev.length === 3) return [prev[0], prev[1], point];
+        return prev;
       }
       return [prev[0], point];
     });
@@ -381,7 +395,17 @@ export function useChartDrawings({
     if (!isDrawingRef.current || activeToolRef.current === 'none') return;
 
     const pts = currentDrawingRef.current;
-    if (activeToolRef.current === 'channel' && isDrawingRef.current) return;
+    if (activeToolRef.current === 'channel' && isDrawingRef.current) {
+      if (pts.length === 2) {
+        // If we dragged and released, fix p2 and immediately enter Stage 2 (width)
+        const dist = Math.hypot(pts[1].x - pts[0].x, pts[1].y - pts[0].y);
+        if (dist > 5) {
+          // Advance to 3 points: [p1, p2, p2_placeholder]
+          setCurrentDrawing([pts[0], pts[1], pts[1]]);
+        }
+      }
+      return; 
+    }
 
     if (pts.length >= 2) {
       if (activeToolRef.current === 'callout') {
@@ -400,7 +424,12 @@ export function useChartDrawings({
         }
       }
     }
-    if (activeToolRef.current !== 'freehand') { setCurrentDrawing([]); setIsDrawing(false); onToolComplete?.(); }
+    if (activeToolRef.current !== 'freehand') { 
+      setCurrentDrawing([]); 
+      setIsDrawing(false); 
+      isDrawingRef.current = false;
+      onToolComplete?.(); 
+    }
   }, [onToolComplete, getDrawingColor, riskPerTrade, setTradeQuantity, setManualLevels, onCalloutTrigger, addCalloutDrawing]);
 
   const drawLine = (ctx: CanvasRenderingContext2D, p1: Point, p2: Point, color: string, w = 2) => {
@@ -436,7 +465,17 @@ export function useChartDrawings({
 
   const drawChannel = (ctx: CanvasRenderingContext2D, pts: Point[], color: string, isSelected: boolean) => {
     if (pts.length < 2) return;
-    const p1 = pts[0], p2 = pts[1], p3 = pts[2] || p2;
+    const p1 = pts[0], p2 = pts[1];
+    
+    // Phase 1: Only have the first line
+    if (pts.length === 2) {
+      ctx.strokeStyle = color; ctx.lineWidth = isSelected ? 3 : 2;
+      ctx.beginPath(); ctx.moveTo(p1.x, p1.y); ctx.lineTo(p2.x, p2.y); ctx.stroke();
+      return;
+    }
+
+    // Phase 2: Parallel line width
+    const p3 = pts[2];
     const dx = p2.x - p1.x, dy = p2.y - p1.y, m2 = dx * dx + dy * dy;
     if (m2 === 0) return;
     const t = ((p3.x - p1.x) * dx + (p3.y - p1.y) * dy) / m2;
