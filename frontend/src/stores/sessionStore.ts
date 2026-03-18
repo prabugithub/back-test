@@ -328,7 +328,7 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
   },
 
   executeTrade: (type, quantity, stopLoss, target, priceOverride, exitReason = 'MANUAL', journal) => {
-    const { candles, currentIndex, trades, position, instrument } = get();
+    const { candles, currentIndex, trades, position, instrument, sessionConfig } = get();
     const currentCandle = candles[currentIndex];
 
     if (!currentCandle) {
@@ -403,6 +403,7 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
       trendReversedPnL: position?.trendReversedPnL,
       withTrendSeen: isSameSide ? (position?.withTrendSeen || isInitialWith) : isInitialWith,
       journal: journal || undefined,
+      interval: sessionConfig?.interval || '5', // Default to 5 if not set
     };
 
     const currentAvgPrice = position ? position.averagePrice : 0;

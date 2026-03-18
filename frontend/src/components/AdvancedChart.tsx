@@ -80,6 +80,7 @@ export function AdvancedChart({
   const useAtrForSignals = useSessionStore((s) => s.useAtrForSignals);
   const showPivotRR = useSessionStore((s) => s.showPivotRR);
   const secondaryTimeframe = useSessionStore((s) => s.secondaryTimeframe);
+  const sessionConfig = useSessionStore((s) => s.sessionConfig);
 
   const visibleCandles = useMemo(() => {
     const primaryVisible = candles.slice(0, currentIndex + 1);
@@ -440,10 +441,24 @@ export function AdvancedChart({
 
     // 1. Add Trade Markers
     if (showMarkers) {
+      const getTfMins = (tf: string | null | undefined) => {
+        if (!tf) return 5;
+        if (tf === '1D') return 1440;
+        return parseInt(tf) || 5;
+      };
+      
+      const chartInterval = isSecondary ? secondaryTimeframe : sessionConfig?.interval;
+      const chartTfMins = getTfMins(chartInterval);
+
       trades.forEach((trade) => {
+        // Only show trades that were taken on this timeframe or a higher one
+        // (Hide lower timeframe trades on higher timeframe charts)
+        const tradeTfMins = getTfMins(trade.interval);
+        if (tradeTfMins < chartTfMins) return;
+
         let markerTime = trade.timestamp;
         if (isSecondary && secondaryTimeframe) {
-          const tfSeconds = parseInt(secondaryTimeframe) * 60;
+          const tfSeconds = getTfMins(secondaryTimeframe) * 60;
           markerTime = Math.floor(trade.timestamp / tfSeconds) * tfSeconds;
         }
 
@@ -519,7 +534,7 @@ export function AdvancedChart({
 
     allMarkers.sort((a, b) => (a.time as number) - (b.time as number));
     markersPrimitiveRef.current.setMarkers(allMarkers);
-  }, [activeIndicators, visibleCandles, trades, showMarkers, useAtrForSignals, memoizedPivots, memoizedAlBrooks]);
+  }, [activeIndicators, visibleCandles, trades, showMarkers, useAtrForSignals, memoizedPivots, memoizedAlBrooks, sessionConfig, secondaryTimeframe, isSecondary]);
 
   const handleClearDrawings = useCallback(() => {
     clearDrawings();

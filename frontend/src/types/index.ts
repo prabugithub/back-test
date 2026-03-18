@@ -44,6 +44,7 @@ export interface Trade {
   trendReversedPnL?: number;
   withTrendSeen?: boolean;
   journal?: TradeJournal;
+  interval?: string;
 }
 
 // Position tracking
