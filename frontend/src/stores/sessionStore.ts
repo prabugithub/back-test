@@ -46,6 +46,7 @@ interface SessionStore {
   showSecondaryChart: boolean;
   secondaryTimeframe: string | null;
   secondaryCandles: Candle[];
+  crosshairPosition: { time: number | null; price: number | null; sourceChartId: 'primary' | 'secondary' | null };
 
   // Shared chart tool/indicator state (applies to the active/focused chart)
   activeChartId: 'primary' | 'secondary';
@@ -61,6 +62,7 @@ interface SessionStore {
   jump: (count: number) => void;
   setSpeed: (speed: number) => void;
   setCurrentIndex: (index: number) => void;
+  setCrosshairPosition: (pos: { time: number | null; price: number | null; sourceChartId: 'primary' | 'secondary' | null }) => void;
   executeTrade: (type: 'BUY' | 'SELL', quantity: number, stopLoss?: number, target?: number, priceOverride?: number, exitReason?: 'SL' | 'TP' | 'MANUAL' | 'TIME_OVER', journal?: TradeJournal) => void;
   initiateTrade: (type: 'BUY' | 'SELL', quantity: number, stopLoss?: number, target?: number) => void;
   resolveTradeRequest: (journal: TradeJournal | null, exitReason?: 'SL' | 'TP' | 'MANUAL' | 'TIME_OVER') => void;
@@ -128,6 +130,7 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
   showSecondaryChart: false,
   secondaryTimeframe: '60',
   secondaryCandles: [],
+  crosshairPosition: { time: null, price: null, sourceChartId: null },
   activeChartId: 'primary',
   sharedActiveTool: 'none',
   primaryIndicators: ['ema21', 'pivotPoints', 'alBrooks'],
@@ -262,6 +265,8 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
   },
 
   setSpeed: (speed) => set({ speed }),
+
+  setCrosshairPosition: (pos) => set({ crosshairPosition: pos }),
 
   setCurrentIndex: (index) => {
     const { candles } = get();

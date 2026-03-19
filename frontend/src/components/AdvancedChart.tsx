@@ -121,102 +121,116 @@ export function AdvancedChart({
     return calculateAlBrooks(visibleCandles, useAtrForSignals, 1.0);
   }, [visibleCandles, activeIndicators, useAtrForSignals]);
 
-  // Callback to render pivot risk-reward lines
+  // Callback to render additional overlays on the chart canvas
   const handleCustomRender = useCallback((ctx: CanvasRenderingContext2D) => {
     if (!chart || !series || visibleCandles.length === 0) return;
-    if (!activeIndicators.includes('pivotPoints') || !showMarkers || !showPivotRR) return;
 
-    // Use memoized pivots
-    const allPivots = memoizedPivots;
-    if (allPivots.length === 0) return;
+    // 1. Draw Pivot Risk-Reward Lines
+    if (activeIndicators.includes('pivotPoints') && showMarkers && showPivotRR) {
+      const allPivots = memoizedPivots;
+      if (allPivots.length > 0) {
+        const recentPivot = allPivots[allPivots.length - 1];
+        const pivotCandle = visibleCandles.find(c => c.timestamp === recentPivot.time);
+        
+        if (pivotCandle) {
+          const timeScale = chart.timeScale();
+          const pivotX = timeScale.timeToCoordinate(recentPivot.time);
+          
+          if (pivotX !== null) {
+            const entryPrice = pivotCandle.close;
+            const slDistance = recentPivot.slDistance;
+            let slPrice: number;
+            let direction: 'long' | 'short';
 
-    // Get the most recent pivot
-    const recentPivot = allPivots[allPivots.length - 1];
+            if (recentPivot.type === 'bullish') {
+              slPrice = entryPrice - slDistance;
+              direction = 'long';
+            } else {
+              slPrice = entryPrice + slDistance;
+              direction = 'short';
+            }
 
-    // Find the candle corresponding to this pivot to get the entry price (close)
-    const pivotCandle = visibleCandles.find(c => c.timestamp === recentPivot.time);
-    if (!pivotCandle) return;
+            const tp1Price = direction === 'long' ? entryPrice + slDistance : entryPrice - slDistance;
+            const tp2Price = direction === 'long' ? entryPrice + (slDistance * 2) : entryPrice - (slDistance * 2);
+            const tp3Price = direction === 'long' ? entryPrice + (slDistance * 3) : entryPrice - (slDistance * 3);
 
-    // Convert price and time to canvas coordinates
-    const timeScale = chart.timeScale();
+            const entryY = series.priceToCoordinate(entryPrice);
+            const slY = series.priceToCoordinate(slPrice);
+            const tp1Y = series.priceToCoordinate(tp1Price);
+            const tp2Y = series.priceToCoordinate(tp2Price);
+            const tp3Y = series.priceToCoordinate(tp3Price);
 
-    const pivotX = timeScale.timeToCoordinate(recentPivot.time);
-    if (pivotX === null) return;
+            if (entryY !== null && slY !== null && tp1Y !== null && tp2Y !== null && tp3Y !== null) {
+              const canvasWidth = ctx.canvas.width;
+              const startX = Math.max(0, pivotX) / (window.devicePixelRatio || 1);
+              const endX = (canvasWidth / (window.devicePixelRatio || 1)) - 60;
 
-    // Determine entry price (close of the signal candle) and SL distance
-    const entryPrice = pivotCandle.close;
-    const slDistance = recentPivot.slDistance;
+              const drawHorizontalLine = (y: number, color: string, label: string, lineWidth: number = 2, dashed: boolean = false) => {
+                ctx.save();
+                ctx.strokeStyle = color;
+                ctx.lineWidth = lineWidth;
+                ctx.setLineDash(dashed ? [5, 5] : []);
+                ctx.beginPath();
+                ctx.moveTo(startX, y);
+                ctx.lineTo(endX, y);
+                ctx.stroke();
+                
+                ctx.font = 'bold 11px Inter, sans-serif';
+                ctx.fillStyle = color;
+                ctx.textAlign = 'left';
+                ctx.fillText(label, endX + 5, y + 4);
+                ctx.restore();
+              };
 
-    let slPrice: number;
-    let direction: 'long' | 'short';
-
-    if (recentPivot.type === 'bullish') {
-      // For bullish pivot: entry at candle close, SL below
-      slPrice = entryPrice - slDistance;
-      direction = 'long';
-    } else {
-      // For bearish pivot: entry at candle close, SL above
-      slPrice = entryPrice + slDistance;
-      direction = 'short';
+              drawHorizontalLine(entryY, '#FFC107', 'ENTRY');
+              drawHorizontalLine(slY, '#F44336', 'SL');
+              drawHorizontalLine(tp1Y, '#4CAF50', '1:1', 1.5, true);
+              drawHorizontalLine(tp2Y, '#4CAF50', '1:2', 1.5, true);
+              drawHorizontalLine(tp3Y, '#2E7D32', '1:3', 1.5, true);
+            }
+          }
+        }
+      }
     }
 
-    // Calculate target prices based on risk (slDistance)
-    const tp1Price = direction === 'long' ? entryPrice + slDistance : entryPrice - slDistance;
-    const tp2Price = direction === 'long' ? entryPrice + (slDistance * 2) : entryPrice - (slDistance * 2);
-    const tp3Price = direction === 'long' ? entryPrice + (slDistance * 3) : entryPrice - (slDistance * 3);
+    // 2. Draw Sync Crosshair from other chart
+    const crosshairPosition = useSessionStore.getState().crosshairPosition;
+    if (crosshairPosition.time && crosshairPosition.sourceChartId !== chartId) {
+      const timeScale = chart.timeScale();
+      let syncTime = crosshairPosition.time;
 
-    // Convert prices to Y coordinates using series API
-    const entryY = series.priceToCoordinate(entryPrice);
-    const slY = series.priceToCoordinate(slPrice);
-    const tp1Y = series.priceToCoordinate(tp1Price);
-    const tp2Y = series.priceToCoordinate(tp2Price);
-    const tp3Y = series.priceToCoordinate(tp3Price);
+      // Align time for HTF chart if incoming time is from LTF
+      if (isSecondary && secondaryTimeframe) {
+        let tfMinutes = parseInt(secondaryTimeframe);
+        if (secondaryTimeframe === '1D') tfMinutes = 1440;
+        const timeframeSeconds = tfMinutes * 60;
+        syncTime = Math.floor(syncTime / timeframeSeconds) * timeframeSeconds;
+      }
 
-    if (entryY === null || slY === null || tp1Y === null || tp2Y === null || tp3Y === null) return;
+      const x = timeScale.timeToCoordinate(syncTime as any);
+      if (x !== null) {
+        ctx.save();
+        ctx.strokeStyle = '#2196F3'; // Blue sync color
+        ctx.setLineDash([4, 4]);
+        ctx.lineWidth = 1;
+        ctx.beginPath();
+        ctx.moveTo(x, 0);
+        ctx.lineTo(x, ctx.canvas.height);
+        ctx.stroke();
 
-    // Get canvas dimensions
-    const canvasWidth = ctx.canvas.width;
-    const startX = Math.max(0, pivotX);
-    const endX = canvasWidth - 60; // Leave space for labels
-
-    // Helper function to draw a horizontal line with label
-    const drawHorizontalLine = (
-      y: number,
-      color: string,
-      label: string,
-      lineWidth: number = 2,
-      dashed: boolean = false
-    ) => {
-      ctx.strokeStyle = color;
-      ctx.lineWidth = lineWidth;
-      ctx.setLineDash(dashed ? [5, 5] : []);
-      ctx.beginPath();
-      ctx.moveTo(startX, y);
-      ctx.lineTo(endX, y);
-      ctx.stroke();
-      ctx.setLineDash([]);
-
-      // Draw label
-      ctx.font = 'bold 11px Inter, sans-serif';
-      ctx.fillStyle = color;
-      ctx.textAlign = 'left';
-      ctx.fillText(label, endX + 5, y + 4);
-    };
-
-    // Draw Entry Line
-    drawHorizontalLine(entryY, '#FFC107', 'ENTRY', 2, false);
-
-    // Draw Stop Loss Line
-    drawHorizontalLine(slY, '#F44336', 'SL', 2, false);
-
-    // Draw Target Lines
-    drawHorizontalLine(tp1Y, '#4CAF50', '1:1', 1.5, true);
-    drawHorizontalLine(tp2Y, '#4CAF50', '1:2', 1.5, true);
-    drawHorizontalLine(tp3Y, '#2E7D32', '1:3', 1.5, true);
-
-    // Reset context
-    ctx.textAlign = 'start';
-  }, [chart, series, visibleCandles, activeIndicators, showMarkers, showPivotRR, memoizedPivots]);
+        if (crosshairPosition.price) {
+          const y = series.priceToCoordinate(crosshairPosition.price);
+          if (y !== null) {
+            ctx.beginPath();
+            ctx.moveTo(0, y);
+            ctx.lineTo(ctx.canvas.width, y);
+            ctx.stroke();
+          }
+        }
+        ctx.restore();
+      }
+    }
+  }, [chart, series, visibleCandles, activeIndicators, showMarkers, showPivotRR, memoizedPivots, isSecondary, secondaryTimeframe, chartId]);
 
   const {
     clearDrawings,
@@ -352,6 +366,59 @@ export function AdvancedChart({
       markersPrimitiveRef.current = null;
     };
   }, []); // Only run once on mount
+
+  // Sync crosshair with other charts
+  const setCrosshairPosition = useSessionStore((s) => s.setCrosshairPosition);
+  useEffect(() => {
+    if (!chart || !series) return;
+
+    // Track last handled time/price to avoid redundant store updates
+    let lastHandledTime: number | null = null;
+    let lastHandledPrice: number | null = null;
+
+    const handler = (param: any) => {
+      if (!param.time || !param.point) {
+        if (lastHandledTime !== null) {
+          const current = useSessionStore.getState().crosshairPosition;
+          if (current.sourceChartId === chartId) {
+            lastHandledTime = null;
+            lastHandledPrice = null;
+            setCrosshairPosition({ time: null, price: null, sourceChartId: null });
+          }
+        }
+        return;
+      }
+
+      const price = param.seriesData.get(series)?.close || param.seriesData.get(series)?.value || null;
+      
+      // Optimization: Only update store if the crosshair actually moved to a new candle or price level
+      if (param.time !== lastHandledTime || price !== lastHandledPrice) {
+        lastHandledTime = param.time as number;
+        lastHandledPrice = price;
+        setCrosshairPosition({ time: param.time as number, price, sourceChartId: chartId });
+      }
+    };
+
+    chart.subscribeCrosshairMove(handler);
+    return () => chart.unsubscribeCrosshairMove(handler);
+  }, [chart, series, chartId, setCrosshairPosition]);
+
+  // Redraw when crosshair position changes from other chart
+  // Redraw when crosshair position changes from other chart
+  // Optimized: Use a direct store subscription to avoid full component re-renders on every mouse move
+  useEffect(() => {
+    const unsubscribe = useSessionStore.subscribe((state, prevState) => {
+      // Only notify if crosshair position actually changed
+      if (state.crosshairPosition !== prevState.crosshairPosition) {
+        const pos = state.crosshairPosition;
+        // Only trigger redraw if position comes from a different chart
+        if (pos.sourceChartId !== chartId) {
+          renderCanvas();
+        }
+      }
+    });
+    return unsubscribe;
+  }, [chartId, renderCanvas]);
 
   // Update candle data
   useEffect(() => {
