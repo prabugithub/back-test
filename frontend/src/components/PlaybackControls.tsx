@@ -1,5 +1,5 @@
 import { useState, useEffect, useMemo, useCallback, useRef } from 'react';
-import { Play, Pause, ChevronLeft, ChevronRight, FastForward, CalendarClock, Settings, X, Calendar } from 'lucide-react';
+import { Play, Pause, ChevronLeft, ChevronRight, FastForward, CalendarClock, Settings, X, Calendar, Activity } from 'lucide-react';
 import { useSessionStore } from '../stores/sessionStore';
 import { useNotificationStore } from '../stores/notificationStore';
 import { formatTimestamp } from '../utils/formatters';
@@ -103,7 +103,7 @@ const PivotStatusDisplay = ({
   );
 };
 
-export function PlaybackControls({ onOpenHistory }: { onOpenHistory?: () => void }) {
+export function PlaybackControls({ onOpenHistory, onOpenDashboard }: { onOpenHistory?: () => void, onOpenDashboard?: () => void }) {
   const {
     isPlaying,
     speed,
@@ -604,6 +604,13 @@ export function PlaybackControls({ onOpenHistory }: { onOpenHistory?: () => void
             title="Analysis / Trade History"
           >
             <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><line x1="18" y1="20" x2="18" y2="10"></line><line x1="12" y1="20" x2="12" y2="4"></line><line x1="6" y1="20" x2="6" y2="14"></line></svg>
+          </button>
+          <button
+            onClick={onOpenDashboard}
+            className="p-1.5 text-purple-700 bg-purple-50 hover:bg-purple-100 rounded border border-purple-200"
+            title="Performance Analysis Dashboard"
+          >
+            <Activity size={16} />
           </button>
           <button
             onClick={() => setShowSettings(!showSettings)}

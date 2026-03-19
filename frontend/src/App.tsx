@@ -18,12 +18,16 @@ import { BackupHistoryDialog } from './components/BackupHistoryDialog';
 import { PromptDialog } from './components/PromptDialog';
 import { TimeframeSwitcher } from './components/TimeframeSwitcher';
 import { Save, FilePlus, RotateCcw } from 'lucide-react';
+import { PerformanceDashboard } from './components/PerformanceDashboard';
 
 const queryClient = new QueryClient();
 
 function App() {
   const candles = useSessionStore((s: any) => s.candles);
   const [isTradeHistoryOpen, setIsTradeHistoryOpen] = useState(false);
+  const [isPerformanceDashboardOpen, setIsPerformanceDashboardOpen] = useState(false);
+  const trades = useSessionStore((s: any) => s.trades);
+  const instrument = useSessionStore((s: any) => s.instrument);
   const [isBackupHistoryOpen, setIsBackupHistoryOpen] = useState(false);
   const [isSnapshotPromptOpen, setIsSnapshotPromptOpen] = useState(false);
   const showSecondaryChart = useSessionStore((s: any) => s.showSecondaryChart);
@@ -138,16 +142,28 @@ function App() {
                 )}
               </div>
 
-              {isTradeHistoryOpen && (
+               {isTradeHistoryOpen && (
                 <TradeHistoryDialog
                   isOpen={isTradeHistoryOpen}
                   onClose={() => setIsTradeHistoryOpen(false)}
+                  onOpenDashboard={() => setIsPerformanceDashboardOpen(true)}
+                />
+              )}
+              {isPerformanceDashboardOpen && (
+                <PerformanceDashboard
+                  isOpen={isPerformanceDashboardOpen}
+                  onClose={() => setIsPerformanceDashboardOpen(false)}
+                  liveTrades={trades}
+                  liveInstrument={instrument}
                 />
               )}
               {/* Controls Bar */}
               <div className="flex-none p-1 bg-white border-b z-10 flex flex-nowrap gap-2 items-center">
                 <div className="flex-1 min-w-0">
-                  <PlaybackControls onOpenHistory={() => setIsTradeHistoryOpen(true)} />
+                  <PlaybackControls 
+                    onOpenHistory={() => setIsTradeHistoryOpen(true)} 
+                    onOpenDashboard={() => setIsPerformanceDashboardOpen(true)}
+                  />
                 </div>
                 <TimeframeSwitcher />
                 {/* Compact Stats or Buttons could go here */}

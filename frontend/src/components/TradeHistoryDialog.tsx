@@ -1,5 +1,5 @@
 import { useRef, useEffect, useMemo, useState } from 'react';
-import { X, ChevronRight, ChevronDown, FileJson, Printer, FileSpreadsheet, Trash2, Link as LinkIcon, Eye } from 'lucide-react';
+import { X, ChevronRight, ChevronDown, FileJson, Printer, FileSpreadsheet, Trash2, Link as LinkIcon, Eye, Activity } from 'lucide-react';
 import { useSessionStore } from '../stores/sessionStore';
 import { formatCurrency, formatTimestamp } from '../utils/formatters';
 import { groupTradesIntoPositions, calculatePerformanceStats } from '../utils/tradeAnalysis';
@@ -7,9 +7,10 @@ import { groupTradesIntoPositions, calculatePerformanceStats } from '../utils/tr
 interface TradeHistoryDialogProps {
     isOpen: boolean;
     onClose: () => void;
+    onOpenDashboard?: () => void;
 }
 
-export function TradeHistoryDialog({ isOpen, onClose }: TradeHistoryDialogProps) {
+export function TradeHistoryDialog({ isOpen, onClose, onOpenDashboard }: TradeHistoryDialogProps) {
     const trades = useSessionStore((s) => s.trades);
     const instrument = useSessionStore((s) => s.instrument);
     const deleteTrade = useSessionStore((s) => s.deleteTrade);
@@ -263,6 +264,14 @@ export function TradeHistoryDialog({ isOpen, onClose }: TradeHistoryDialogProps)
                             >
                                 <Printer size={14} />
                                 Print
+                            </button>
+                            <button
+                                onClick={onOpenDashboard}
+                                className="flex items-center gap-1.5 px-3 py-1 bg-purple-600 text-white border border-purple-700 text-xs font-bold rounded shadow-sm hover:bg-purple-700 transition-colors"
+                                title="Load Performance Dashboard"
+                            >
+                                <Activity size={14} />
+                                Dashboard
                             </button>
                         </div>
                     </div>

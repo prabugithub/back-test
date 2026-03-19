@@ -1,5 +1,5 @@
 import { useState, useMemo } from 'react';
-import { X, Trash2, TrendingUp, TrendingDown, DollarSign, Target, Calendar, BarChart3, FileJson, Printer, FileSpreadsheet, Link as LinkIcon } from 'lucide-react';
+import { X, Trash2, TrendingUp, TrendingDown, DollarSign, Target, Calendar, BarChart3, FileJson, Printer, FileSpreadsheet, Link as LinkIcon, Activity } from 'lucide-react';
 import { getStoredSessions, deleteTradeSession, updateTradeSession, type TradeSession } from '../utils/tradeStorage';
 import { formatCurrency, formatTimestamp } from '../utils/formatters';
 import { groupTradesIntoPositions, calculatePerformanceStats, recalculateTradesPnL } from '../utils/tradeAnalysis';
@@ -7,9 +7,10 @@ import { groupTradesIntoPositions, calculatePerformanceStats, recalculateTradesP
 interface TradeReportDialogProps {
     isOpen: boolean;
     onClose: () => void;
+    onOpenDashboard?: () => void;
 }
 
-export function TradeReportDialog({ isOpen, onClose }: TradeReportDialogProps) {
+export function TradeReportDialog({ isOpen, onClose, onOpenDashboard }: TradeReportDialogProps) {
     const [sessions, setSessions] = useState<TradeSession[]>(() => getStoredSessions());
     const [selectedSessionId, setSelectedSessionId] = useState<string | null>(null);
 
@@ -364,6 +365,14 @@ export function TradeReportDialog({ isOpen, onClose }: TradeReportDialogProps) {
                                             >
                                                 <Printer size={16} />
                                                 Print
+                                            </button>
+                                            <button
+                                                onClick={onOpenDashboard}
+                                                className="flex items-center gap-2 px-4 py-1.5 bg-purple-600 text-white text-sm font-bold rounded-lg hover:bg-purple-700 transition-all shadow-md shadow-purple-100 flex-nowrap whitespace-nowrap"
+                                                title="Load Performance Dashboard"
+                                            >
+                                                <Activity size={16} />
+                                                Dashboard
                                             </button>
                                         </div>
                                     </div>

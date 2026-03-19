@@ -35,8 +35,11 @@ export interface TradePerformanceSummary {
     avgLoss: number;
     profitFactor: number;
     maxDrawdown: number;
+    maxDrawdownPercent: number;
     longs: { count: number; pnl: number };
     shorts: { count: number; pnl: number };
+    equityCurve: { timestamp: number; equity: number }[];
+    expectancy: number;
 }
 
 export function groupTradesIntoPositions(trades: Trade[]): GroupedPosition[] {
@@ -223,7 +226,9 @@ export function groupTradesIntoPositions(trades: Trade[]): GroupedPosition[] {
 }
 
 export function calculatePerformanceStats(positions: GroupedPosition[]): TradePerformanceSummary {
-    const closedPositions = positions.filter(p => p.status === 'CLOSED');
+    const closedPositions = [...positions]
+        .filter(p => p.status === 'CLOSED')
+        .sort((a, b) => (a.exitTime || 0) - (b.exitTime || 0));
 
     let totalPnL = 0;
     let winCount = 0;
@@ -235,8 +240,29 @@ export function calculatePerformanceStats(positions: GroupedPosition[]): TradePe
     let shortCount = 0;
     let shortPnL = 0;
 
+    const equityCurve = [{ timestamp: closedPositions[0]?.entryTime || Date.now(), equity: 0 }];
+    let currentEquity = 0;
+    let peakEquity = 0;
+    let maxDD = 0;
+
     closedPositions.forEach(p => {
+        currentEquity += p.realizedPnL;
         totalPnL += p.realizedPnL;
+        
+        equityCurve.push({ 
+            timestamp: p.exitTime || Date.now(), 
+            equity: currentEquity 
+        });
+
+        if (currentEquity > peakEquity) {
+            peakEquity = currentEquity;
+        } else {
+            const dd = peakEquity - currentEquity;
+            if (dd > maxDD) {
+                maxDD = dd;
+            }
+        }
+
         if (p.realizedPnL > 0) {
             winCount++;
             totalWinVal += p.realizedPnL;
@@ -254,18 +280,28 @@ export function calculatePerformanceStats(positions: GroupedPosition[]): TradePe
         }
     });
 
+    const totalTrades = closedPositions.length;
+    const winRate = totalTrades > 0 ? (winCount / totalTrades) * 100 : 0;
+    const avgWin = winCount > 0 ? totalWinVal / winCount : 0;
+    const avgLoss = lossCount > 0 ? totalLossVal / lossCount : 0;
+    const profitFactor = totalLossVal > 0 ? totalWinVal / totalLossVal : totalWinVal > 0 ? Infinity : 0;
+    const expectancy = totalTrades > 0 ? ( (winRate/100 * avgWin) - ((1 - winRate/100) * avgLoss) ) : 0;
+
     return {
-        totalTrades: closedPositions.length,
+        totalTrades,
         winningTrades: winCount,
         losingTrades: lossCount,
-        winRate: closedPositions.length > 0 ? (winCount / closedPositions.length) * 100 : 0,
+        winRate,
         totalPnL,
-        avgWin: winCount > 0 ? totalWinVal / winCount : 0,
-        avgLoss: lossCount > 0 ? totalLossVal / lossCount : 0,
-        profitFactor: totalLossVal > 0 ? totalWinVal / totalLossVal : totalWinVal > 0 ? Infinity : 0,
-        maxDrawdown: 0, // Need equity curve for this, skipping for now
+        avgWin,
+        avgLoss,
+        profitFactor,
+        maxDrawdown: maxDD,
+        maxDrawdownPercent: peakEquity !== 0 ? (maxDD / peakEquity) * 100 : 0,
         longs: { count: longCount, pnl: longPnL },
-        shorts: { count: shortCount, pnl: shortPnL }
+        shorts: { count: shortCount, pnl: shortPnL },
+        equityCurve,
+        expectancy
     };
 }
 
