@@ -216,10 +216,24 @@ export function groupTradesIntoPositions(trades: Trade[]): GroupedPosition[] {
         positions.push(currentPos);
     }
 
+    const normalizeTs = (ts: number) => ts > 1e11 ? ts : ts * 1000;
+
     // Calculate durations and refine details
     return positions.map(p => {
+        // Normalize position boundaries
+        p.entryTime = normalizeTs(p.entryTime);
+        if (p.exitTime) {
+            p.exitTime = normalizeTs(p.exitTime);
+        }
+        
+        // Normalize individual executions
+        p.executions = p.executions.map(ex => ({
+            ...ex,
+            timestamp: normalizeTs(ex.timestamp)
+        }));
+        
         if (p.entryTime && p.exitTime) {
-            p.durationMinutes = (p.exitTime - p.entryTime) / 60;
+            p.durationMinutes = (p.exitTime - p.entryTime) / (1000 * 60);
         }
         return p;
     }).reverse(); // Most recent first

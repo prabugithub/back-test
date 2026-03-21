@@ -60,21 +60,34 @@ export function PerformanceDashboard({ isOpen, onClose, liveTrades, liveInstrume
         }
 
         return allPos.filter(p => {
-            const matchInstrument = selectedInstrument === 'All' || p.instrument === selectedInstrument;
-            const entryExec = p.executions[0];
-            const category = entryExec?.journal?.tradeCategory || 'Discretionary';
-            const matchCategory = selectedCategory === 'All' || category === selectedCategory;
-            
-            const posDate = new Date(p.entryTime * 1000);
-            
-            // Robust date comparison using YYYY-MM-DD strings to avoid TZ issues
-            // This matches the precision of the HTML5 date input
-            const posDateStr = posDate.getFullYear() + '-' + 
-                               String(posDate.getMonth() + 1).padStart(2, '0') + '-' + 
-                               String(posDate.getDate()).padStart(2, '0');
+            // 1. Instrument Filter (Case-Insensitive)
+            const pInst = p.instrument.trim().toLowerCase();
+            const sInst = selectedInstrument.trim().toLowerCase();
+            const matchInstrument = selectedInstrument === 'All' || pInst === sInst;
 
-            const matchFrom = !dateRange.from || posDateStr >= dateRange.from;
-            const matchTo = !dateRange.to || posDateStr <= dateRange.to;
+            // 2. Category Filter (Case-Insensitive)
+            const entryExec = p.executions[0];
+            const pCat = (entryExec?.journal?.tradeCategory || 'Discretionary').trim().toLowerCase();
+            const sCat = selectedCategory.trim().toLowerCase();
+            const matchCategory = selectedCategory === 'All' || pCat === sCat;
+            
+            // 3. Date Filter (Robust Local Day Comparison)
+            const posDate = new Date(p.entryTime);
+            const tradeTime = new Date(posDate.getFullYear(), posDate.getMonth(), posDate.getDate()).getTime();
+            
+            let matchFrom = true;
+            if (dateRange.from) {
+                const [y, m, d] = dateRange.from.split('-').map(Number);
+                const fromTime = new Date(y, m - 1, d).getTime();
+                matchFrom = tradeTime >= fromTime;
+            }
+
+            let matchTo = true;
+            if (dateRange.to) {
+                const [y, m, d] = dateRange.to.split('-').map(Number);
+                const toTime = new Date(y, m - 1, d).getTime();
+                matchTo = tradeTime <= toTime;
+            }
 
             return matchInstrument && matchCategory && matchFrom && matchTo;
         }).sort((a,b) => a.entryTime - b.entryTime);
@@ -183,7 +196,7 @@ export function PerformanceDashboard({ isOpen, onClose, liveTrades, liveInstrume
             }
 
             // Hourly
-            const hour = new Date(p.entryTime * 1000).getHours();
+            const hour = new Date(p.entryTime).getHours();
             if (!hourly[hour]) hourly[hour] = { pnl: 0, count: 0, wins: 0 };
             hourly[hour].pnl += p.realizedPnL;
             hourly[hour].count += 1;
@@ -240,7 +253,7 @@ export function PerformanceDashboard({ isOpen, onClose, liveTrades, liveInstrume
         let csv = "ID,Instrument,Direction,Entry Time,Exit Time,Entry Price,Exit Price,Qty,PnL,LT Market,HT Market,Entry Pos,LLHH Pivot,Entry Sign,Category\n";
         filteredPositions.forEach(p => {
             const j = p.executions[0]?.journal;
-            csv += `${p.id},${p.instrument},${p.direction},${new Date(p.entryTime*1000).toLocaleString()},${p.exitTime ? new Date(p.exitTime*1000).toLocaleString() : 'OPEN'},${p.avgEntryPrice},${p.avgExitPrice || ''},${p.totalQuantity},${p.realizedPnL},${j?.ltMarket || ''},${j?.htMarket || ''},${j?.entryPosition || ''},${j?.llhhPivot || ''},${j?.entrySign || ''},${j?.tradeCategory || ''}\n`;
+            csv += `${p.id},${p.instrument},${p.direction},${new Date(p.entryTime).toLocaleString()},${p.exitTime ? new Date(p.exitTime).toLocaleString() : 'OPEN'},${p.avgEntryPrice},${p.avgExitPrice || ''},${p.totalQuantity},${p.realizedPnL},${j?.ltMarket || ''},${j?.htMarket || ''},${j?.entryPosition || ''},${j?.llhhPivot || ''},${j?.entrySign || ''},${j?.tradeCategory || ''}\n`;
         });
 
         const blob = new Blob([csv], { type: 'text/csv' });
@@ -814,8 +827,8 @@ function PositionRow({ pos, isExpanded, onToggle }: { pos: GroupedPosition, isEx
                     {isExpanded ? <ChevronDown size={16} className="text-slate-400" /> : <ChevronRight size={16} className="text-slate-400" />}
                 </td>
                 <td className="p-4">
-                    <div className="text-sm font-bold text-slate-700">{new Date(pos.entryTime * 1000).toLocaleDateString()}</div>
-                    <div className="text-[10px] text-slate-400 font-medium">{new Date(pos.entryTime * 1000).toLocaleTimeString()}</div>
+                    <div className="text-sm font-bold text-slate-700">{new Date(pos.entryTime).toLocaleDateString()}</div>
+                    <div className="text-[10px] text-slate-400 font-medium">{new Date(pos.entryTime).toLocaleTimeString()}</div>
                 </td>
                 <td className="p-4 text-sm font-black text-slate-600 uppercase tracking-tighter">{pos.instrument}</td>
                 <td className="p-4">
@@ -872,7 +885,7 @@ function PositionRow({ pos, isExpanded, onToggle }: { pos: GroupedPosition, isEx
                                     <tbody className="divide-y divide-slate-50">
                                         {pos.executions.map((ex, i) => (
                                             <tr key={i} className="text-xs">
-                                                <td className="p-3 text-slate-500">{new Date(ex.timestamp * 1000).toLocaleString()}</td>
+                                                <td className="p-3 text-slate-500">{new Date(ex.timestamp).toLocaleString()}</td>
                                                 <td className="p-3"><span className={`font-bold ${ex.type === 'BUY' ? 'text-emerald-600' : 'text-rose-600'}`}>{ex.type}</span></td>
                                                 <td className="p-3 text-right font-mono text-slate-700">{formatCurrency(ex.price)}</td>
                                                 <td className="p-3 text-right font-mono text-slate-500">{ex.quantity}</td>
