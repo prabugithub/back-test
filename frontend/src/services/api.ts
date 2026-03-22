@@ -51,3 +51,16 @@ export async function uploadScreenshot(image: string, fileName: string): Promise
   });
   return response.data;
 }
+
+/**
+ * Run option backtesting for spot trades
+ */
+export async function backtestOptions(params: {
+  spotTrades: any[];
+  offsetSell?: number;
+  offsetBuy?: number;
+  instrument?: string;
+}): Promise<any> {
+  const response = await apiClient.post('/api/options/backtest', params);
+  return response.data;
+}

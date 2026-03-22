@@ -13,6 +13,8 @@ import { getStoredSessions, type TradeSession } from '../utils/tradeStorage';
 import { groupTradesIntoPositions, calculatePerformanceStats, type GroupedPosition } from '../utils/tradeAnalysis';
 import { formatCurrency } from '../utils/formatters';
 import type { Trade } from '../types';
+import { OptionBacktestModal } from './OptionBacktestModal';
+import { ShieldCheck } from 'lucide-react';
 
 interface PerformanceDashboardProps {
     isOpen: boolean;
@@ -33,6 +35,7 @@ export function PerformanceDashboard({ isOpen, onClose, liveTrades, liveInstrume
     const [dateRange, setDateRange] = useState<{ from: string; to: string }>({ from: '', to: '' });
     const [activeTab, setActiveTab] = useState<'dashboard' | 'log'>('dashboard');
     const [searchQuery, setSearchQuery] = useState('');
+    const [isOptionModalOpen, setIsOptionModalOpen] = useState(false);
 
     useEffect(() => {
         if (isOpen) {
@@ -363,7 +366,14 @@ export function PerformanceDashboard({ isOpen, onClose, liveTrades, liveInstrume
                             </div>
                         </div>
 
-                        <div className="mt-auto pt-6 border-t border-slate-100">
+                        <div className="mt-auto space-y-3 pt-6 border-t border-slate-100">
+                            <button 
+                                onClick={() => setIsOptionModalOpen(true)}
+                                className="w-full flex items-center justify-center gap-2 bg-indigo-600 text-white rounded-xl py-3 text-sm font-bold shadow-lg shadow-indigo-200 hover:bg-indigo-700 transition-all cursor-pointer"
+                            >
+                                <ShieldCheck size={18} />
+                                Option Backtest (Dhan)
+                            </button>
                             <button 
                                 onClick={handleExportCSV}
                                 className="w-full flex items-center justify-center gap-2 bg-slate-800 text-white rounded-xl py-3 text-sm font-bold shadow-lg shadow-slate-200 hover:bg-slate-900 transition-all cursor-pointer"
@@ -373,6 +383,13 @@ export function PerformanceDashboard({ isOpen, onClose, liveTrades, liveInstrume
                             </button>
                         </div>
                     </div>
+                    
+                    <OptionBacktestModal 
+                        isOpen={isOptionModalOpen} 
+                        onClose={() => setIsOptionModalOpen(false)} 
+                        customPositions={filteredPositions}
+                        customInstrument={selectedInstrument === 'All' ? 'NIFTY' : selectedInstrument}
+                    />
 
                     {/* Dashboard Scrollable Area */}
                     <div className="flex-1 overflow-y-auto bg-slate-50/50 p-8 custom-scrollbar">

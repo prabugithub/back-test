@@ -1,11 +1,14 @@
 import { useSessionStore } from '../stores/sessionStore';
 import { formatCurrency, formatTime } from '../utils/formatters';
+import { useState } from 'react';
+import { OptionBacktestModal } from './OptionBacktestModal';
 
 export function SessionStats() {
   const trades = useSessionStore((s) => s.trades);
   const position = useSessionStore((s) => s.position);
   const candles = useSessionStore((s) => s.candles);
   const currentIndex = useSessionStore((s) => s.currentIndex);
+  const [isOptionModalOpen, setIsOptionModalOpen] = useState(false);
 
   // Calculate unrealized P&L inline
   const unrealizedPnL = (() => {
@@ -29,7 +32,17 @@ export function SessionStats() {
 
   return (
     <div className="bg-white border rounded-lg p-6 shadow-sm">
-      <h2 className="text-lg font-bold mb-4">Session Statistics</h2>
+      <div className="flex justify-between items-center mb-4">
+        <h2 className="text-lg font-bold">Session Statistics</h2>
+        <button 
+          onClick={() => setIsOptionModalOpen(true)}
+          className="bg-indigo-600 text-white px-3 py-1 rounded text-sm hover:bg-indigo-700 transition-colors shadow-sm"
+        >
+          Verify Option Returns
+        </button>
+      </div>
+
+      <OptionBacktestModal isOpen={isOptionModalOpen} onClose={() => setIsOptionModalOpen(false)} />
 
       {/* Position Summary */}
       {position && position.quantity > 0 && (

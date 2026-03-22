@@ -1,20 +1,30 @@
 import dotenv from 'dotenv';
 dotenv.config();
 
+import logger from './utils/logger';
+
+logger.info('--- DEBUG ENV ---');
+logger.info(`DHAN_ACCESS_TOKEN exists: ${!!process.env.DHAN_ACCESS_TOKEN}`);
+if (process.env.DHAN_ACCESS_TOKEN) {
+  logger.info(`DHAN_ACCESS_TOKEN length: ${process.env.DHAN_ACCESS_TOKEN.length}`);
+}
+logger.info('------------------');
+
 import express, { Express, Request, Response } from 'express';
 import cors from 'cors';
 import { initDatabase } from './config/database';
 import { initAngelOneClient, loginAngelOne } from './services/angelone.service';
+import { initDhanClient } from './services/dhan.service';
 import dataRoutes from './routes/data.routes';
 import screenshotRoutes from './routes/screenshot.routes';
-import logger from './utils/logger';
+import optionsRoutes from './routes/options.routes';
 
 const app: Express = express();
 const PORT = process.env.PORT || 3001;
 
 // Middleware
 app.use(cors());
-app.use(express.json({ limit: '10mb' })); // Increase limit for base64 images
+app.use(express.json({ limit: '10mb' })); 
 
 // Request logging middleware
 app.use((req: Request, res: Response, next) => {
@@ -28,6 +38,7 @@ app.use((req: Request, res: Response, next) => {
 // Routes
 app.use('/api/data', dataRoutes);
 app.use('/api/screenshot', screenshotRoutes);
+app.use('/api/options', optionsRoutes);
 
 // Root endpoint
 app.get('/', (req: Request, res: Response) => {
@@ -65,7 +76,7 @@ async function startServer() {
     await initDatabase();
     logger.info('Database initialized successfully');
 
-    // Start server immediately (so screenshots and other local features work)
+    // Start server immediately 
     app.listen(PORT, () => {
       logger.info(`Server running on http://localhost:${PORT}`);
       logger.info(`Environment: ${process.env.NODE_ENV || 'development'}`);
@@ -78,7 +89,13 @@ async function startServer() {
       logger.info('Angel One API client initialized and logged in');
     } catch (error: any) {
       logger.warn('Angel One API client initialization failed:', error.message);
-      logger.warn('Live API features will be limited. Local features (Screenshots, Cache) will still work.');
+    }
+
+    // Initialize Dhan client
+    try {
+      initDhanClient();
+    } catch (error: any) {
+      logger.warn('Dhan API client initialization failed:', error.message);
     }
   } catch (error) {
     logger.error('Failed to start server:', error);
