@@ -35,7 +35,7 @@ export function TradeHistoryDialog({ isOpen, onClose, onOpenDashboard }: TradeHi
 
         let csvContent = `TRADING SESSION ANALYSIS - ${instrument}\n`;
         csvContent += `Generated,${new Date().toLocaleString()}\n`;
-        csvContent += `Start Date,${trades.length > 0 ? new Date(trades[0].timestamp * 1000).toLocaleString() : 'N/A'}\n\n`;
+        csvContent += `Start Date,${trades.length > 0 ? formatTimestamp(trades[0].timestamp) : 'N/A'}\n\n`;
 
         csvContent += "PERFORMANCE SUMMARY\n";
         csvContent += `Total P&L,${stats.totalPnL.toFixed(2)}\n`;
@@ -68,7 +68,7 @@ export function TradeHistoryDialog({ isOpen, onClose, onOpenDashboard }: TradeHi
         csvContent += "\nRAW TRADE EXECUTIONS\n";
         csvContent += "Timestamp,Type,Price,Quantity,Instrument,P&L,SL,Target,SL Hit,TP Hit,Trend Reversed,PnL at Reversal,Exit Reason,Category,LT Market,HT Market,Entry Position,LLHH Pivot,Entry Sign,Align-Entry(Sys),Align-Entry(View),Align-Move(Sys),Align-Move(View),Notes,Screenshot\n";
         trades.forEach(trade => {
-            csvContent += `${new Date(trade.timestamp).toISOString()},${trade.type},${trade.price},${trade.quantity},${trade.instrument},${(trade.pnl || 0).toFixed(2)},${trade.stopLoss || ''},${trade.target || ''},${trade.slHit ? 'YES' : 'NO'},${trade.tpHit ? 'YES' : 'NO'},${trade.trendReversed ? 'YES' : 'NO'},${trade.trendReversedPnL?.toFixed(2) || ''},${trade.exitReason || ''},${trade.journal?.tradeCategory || ''},${trade.journal?.ltMarket || ''},${trade.journal?.htMarket || ''},${trade.journal?.entryPosition || ''},${trade.journal?.llhhPivot || ''},${trade.journal?.entrySign || ''},${trade.journal?.systemEntryAlign || ''},${trade.journal?.myViewEntryAlign || ''},${trade.journal?.systemMoveAlign || ''},${trade.journal?.myViewMoveAlign || ''},"${(trade.journal?.notes || '').replace(/"/g, '""')}",${trade.journal?.screenshotUrl || ''}\n`;
+            csvContent += `${formatTimestamp(trade.timestamp)},${trade.type},${trade.price},${trade.quantity},${trade.instrument},${(trade.pnl || 0).toFixed(2)},${trade.stopLoss || ''},${trade.target || ''},${trade.slHit ? 'YES' : 'NO'},${trade.tpHit ? 'YES' : 'NO'},${trade.trendReversed ? 'YES' : 'NO'},${trade.trendReversedPnL?.toFixed(2) || ''},${trade.exitReason || ''},${trade.journal?.tradeCategory || ''},${trade.journal?.ltMarket || ''},${trade.journal?.htMarket || ''},${trade.journal?.entryPosition || ''},${trade.journal?.llhhPivot || ''},${trade.journal?.entrySign || ''},${trade.journal?.systemEntryAlign || ''},${trade.journal?.myViewEntryAlign || ''},${trade.journal?.systemMoveAlign || ''},${trade.journal?.myViewMoveAlign || ''},"${(trade.journal?.notes || '').replace(/"/g, '""')}",${trade.journal?.screenshotUrl || ''}\n`;
         });
 
         const blob = new Blob([csvContent], { type: 'text/csv' });

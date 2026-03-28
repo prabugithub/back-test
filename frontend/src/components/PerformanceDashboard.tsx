@@ -256,7 +256,7 @@ export function PerformanceDashboard({ isOpen, onClose, liveTrades, liveInstrume
         let csv = "ID,Instrument,Direction,Entry Time,Exit Time,Entry Price,Exit Price,Qty,PnL,LT Market,HT Market,Entry Pos,LLHH Pivot,Entry Sign,Category\n";
         filteredPositions.forEach(p => {
             const j = p.executions[0]?.journal;
-            csv += `${p.id},${p.instrument},${p.direction},${new Date(p.entryTime).toLocaleString()},${p.exitTime ? new Date(p.exitTime).toLocaleString() : 'OPEN'},${p.avgEntryPrice},${p.avgExitPrice || ''},${p.totalQuantity},${p.realizedPnL},${j?.ltMarket || ''},${j?.htMarket || ''},${j?.entryPosition || ''},${j?.llhhPivot || ''},${j?.entrySign || ''},${j?.tradeCategory || ''}\n`;
+            csv += `${p.id},${p.instrument},${p.direction},${formatTimestamp(p.entryTime)},${p.exitTime ? formatTimestamp(p.exitTime) : 'OPEN'},${p.avgEntryPrice},${p.avgExitPrice || ''},${p.totalQuantity},${p.realizedPnL},${j?.ltMarket || ''},${j?.htMarket || ''},${j?.entryPosition || ''},${j?.llhhPivot || ''},${j?.entrySign || ''},${j?.tradeCategory || ''}\n`;
         });
 
         const blob = new Blob([csv], { type: 'text/csv' });
@@ -488,7 +488,7 @@ export function PerformanceDashboard({ isOpen, onClose, liveTrades, liveInstrume
                                                             <XAxis dataKey="timestamp" hide />
                                                             <YAxis tick={{fontSize: 10, fill: '#94a3b8'}} tickFormatter={(v) => `₹${v/1000}k`} axisLine={false} tickLine={false} />
                                                             <Tooltip 
-                                                                labelFormatter={(ts) => new Date(ts).toLocaleString()}
+                                                                labelFormatter={(ts) => formatTimestamp(ts)}
                                                                 contentStyle={{ borderRadius: '12px', border: 'none', boxShadow: '0 10px 15px -3px rgb(0 0 0 / 0.1)' }}
                                                             />
                                                             <Area type="monotone" dataKey="equity" stroke="#3b82f6" strokeWidth={3} fillOpacity={1} fill="url(#colorEquity)" />
