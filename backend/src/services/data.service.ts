@@ -92,35 +92,59 @@ function getCachedCandles(params: GetCandlesRequest): Candle[] {
  * Uses Yahoo Finance for indices, Angel One for stocks
  */
 async function fetchFromAngelOne(params: GetCandlesRequest): Promise<Candle[]> {
+  // Dhan to Angel Token Mapping for indices
+  const DHAN_TO_ANGEL_TOKEN_MAP: Record<string, string> = {
+    '13': '99926000', // Nifty 50
+    '25': '99926009', // Bank Nifty
+    '27': '99926037', // Finnifty
+    '99926074': '99926074', // Midcap
+    '99926013': '99926013', // IT
+  };
+
+  const angelToken = DHAN_TO_ANGEL_TOKEN_MAP[params.securityId] || params.securityId;
+
   // Check if this is an index that should use Yahoo Finance
   if (shouldUseYahooFinance(params.securityId)) {
-    logger.info('Using Yahoo Finance for index data', { token: params.securityId });
+    try {
+      logger.info('Using Yahoo Finance for index data', { token: params.securityId, angelToken });
 
-    const candleData = await fetchYahooHistoricalData({
-      token: params.securityId,
-      fromDate: params.fromDate,
-      toDate: params.toDate,
-      interval: params.interval,
-    });
+      const candleData = await fetchYahooHistoricalData({
+        token: params.securityId,
+        fromDate: params.fromDate,
+        toDate: params.toDate,
+        interval: params.interval,
+      });
 
-    // Convert to our Candle format
-    const candles: Candle[] = candleData.map((c) => ({
-      timestamp: c.timestamp,
-      open: c.open,
-      high: c.high,
-      low: c.low,
-      close: c.close,
-      volume: c.volume,
-    }));
+      // Convert to our Candle format
+      const candles: Candle[] = candleData.map((c) => ({
+        timestamp: c.timestamp,
+        open: c.open,
+        high: c.high,
+        low: c.low,
+        close: c.close,
+        volume: c.volume,
+      }));
 
-    // Sort by timestamp
-    candles.sort((a, b) => a.timestamp - b.timestamp);
+      // Sort by timestamp
+      candles.sort((a, b) => a.timestamp - b.timestamp);
 
-    return candles;
+      return candles;
+    } catch (err: any) {
+      if (err.message.includes('Too Many Requests') || err.message.includes('Yahoo Finance error')) {
+        logger.warn('Yahoo Finance rate limit/error hit. Falling back to Angel One API as backup.', {
+          token: params.securityId,
+          error: err.message
+        });
+        // Continue to Angel One logic below
+      } else {
+        throw err;
+      }
+    }
   }
 
-  // Use Angel One for stocks
-  logger.info('Using Angel One for stock data', { token: params.securityId });
+  // Use Angel One for stocks or fallback for indices
+  const isIndex = !!DHAN_TO_ANGEL_TOKEN_MAP[params.securityId];
+  logger.info(`Using Angel One for ${isIndex ? 'index' : 'stock'} data fetch`, { token: params.securityId, angelToken });
 
   // Angel One uses symbolToken instead of securityId
   // Format dates to Angel One format
@@ -131,7 +155,9 @@ async function fetchFromAngelOne(params: GetCandlesRequest): Promise<Candle[]> {
   // NSE_EQ, NSE_FNO, NSE_INDEX all map to 'NSE'
   // BSE_EQ maps to 'BSE'
   let exchange = 'NSE';
-  if (params.exchangeSegment.startsWith('NSE')) {
+  if (params.exchangeSegment === 'INDEX' || params.exchangeSegment === 'IDX_I' || isIndex) {
+    exchange = 'NSE'; 
+  } else if (params.exchangeSegment.startsWith('NSE')) {
     exchange = 'NSE';
   } else if (params.exchangeSegment.startsWith('BSE')) {
     exchange = 'BSE';
@@ -139,7 +165,7 @@ async function fetchFromAngelOne(params: GetCandlesRequest): Promise<Candle[]> {
 
   const candleData = await retryApiCall(() =>
     fetchHistoricalCandles({
-      symbolToken: params.securityId,  // Using securityId as symbolToken
+      symbolToken: angelToken,  // Using angelToken which is mapped for indices
       exchange: exchange,
       interval: params.interval,
       fromDate: fromDateTime,

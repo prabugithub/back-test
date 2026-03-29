@@ -125,7 +125,7 @@ export function InstrumentSelector() {
       if (cfg.dataSource === 'api' || cfg.dataSource === 'live') {
         const response = await fetchCandles({
           securityId: cfg.securityId,
-          exchangeSegment: cfg.instrumentType === 'INDEX' ? 'INDEX' : cfg.exchangeSegment,
+          exchangeSegment: cfg.exchangeSegment,
           instrument: cfg.instrumentType,
           interval: cfg.interval,
           fromDate: cfg.fromDate,
@@ -445,6 +445,7 @@ export function InstrumentSelector() {
                   >
                     <option value="NSE_EQ">NSE Equity</option>
                     <option value="NSE_FNO">NSE F&O</option>
+                    <option value="IDX_I">Index (IDX)</option>
                     <option value="BSE_EQ">BSE Equity</option>
                   </select>
                 </div>
