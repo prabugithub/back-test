@@ -159,7 +159,9 @@ export function InstrumentSelector() {
             throw new Error('Invalid JSON data format: Missing required columns');
           }
 
-          let allCandles = parseColumnarData(rawData as ColumnarData);
+          // Local data (Nifty JSON) is already offset by 5.5 hours (IST) from standard UTC
+          // We must subtract it so that displaying with local methods shows the correct time without double-offsetting.
+          let allCandles = parseColumnarData(rawData as ColumnarData, -19800);
 
           // Filter by date range if provided
           if (cfg.fromDate) {

@@ -12,13 +12,13 @@ export interface ColumnarData {
 /**
  * Parse columnar data (arrays) into array of Candle objects
  */
-export function parseColumnarData(data: ColumnarData): Candle[] {
+export function parseColumnarData(data: ColumnarData, timestampOffset: number = 0): Candle[] {
     const candles: Candle[] = [];
     const length = data.t.length;
 
     for (let i = 0; i < length; i++) {
         candles.push({
-            timestamp: data.t[i], // Assuming input is already in seconds or correct format
+            timestamp: data.t[i] + timestampOffset,
             open: data.o[i],
             high: data.h[i],
             low: data.l[i],

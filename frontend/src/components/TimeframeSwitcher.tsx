@@ -56,7 +56,8 @@ export function TimeframeSwitcher() {
                     throw new Error('Invalid JSON data format');
                 }
 
-                let allCandles = parseColumnarData(rawData as ColumnarData);
+                // Local data (Nifty JSON) is already offset by 5.5 hours (IST)
+                let allCandles = parseColumnarData(rawData as ColumnarData, -19800);
 
                 // Filter by date range
                 if (sessionConfig.fromDate) {
@@ -88,16 +89,16 @@ export function TimeframeSwitcher() {
                         if (currentTimestamp < resampledCandles[0].timestamp) {
                             // Get the date of the current timestamp
                             const currentDate = new Date(currentTimestamp * 1000);
-                            const currentDay = currentDate.getUTCDate();
-                            const currentMonth = currentDate.getUTCMonth();
-                            const currentYear = currentDate.getUTCFullYear();
+                            const currentDay = currentDate.getDate();
+                            const currentMonth = currentDate.getMonth();
+                            const currentYear = currentDate.getFullYear();
 
                             // Find the first candle on the same day
                             newIndex = resampledCandles.findIndex(c => {
                                 const candleDate = new Date(c.timestamp * 1000);
-                                return candleDate.getUTCDate() === currentDay &&
-                                    candleDate.getUTCMonth() === currentMonth &&
-                                    candleDate.getUTCFullYear() === currentYear;
+                                return candleDate.getDate() === currentDay &&
+                                    candleDate.getMonth() === currentMonth &&
+                                    candleDate.getFullYear() === currentYear;
                             });
 
                             if (newIndex === -1) {
@@ -118,29 +119,29 @@ export function TimeframeSwitcher() {
                                 if (foundCandle.timestamp === currentTimestamp) {
                                     // Exact match - use this candle
                                 } else {
-                                    // Found a later candle - check if target is a daily candle (00:00:00)
+                                    // Found a later candle - check if target is a daily candle (00:00:00 local)
                                     const targetDate = new Date(currentTimestamp * 1000);
-                                    const isTargetDailyCandle = targetDate.getUTCHours() === 0 &&
-                                        targetDate.getUTCMinutes() === 0 &&
-                                        targetDate.getUTCSeconds() === 0;
+                                    const isTargetDailyCandle = targetDate.getHours() === 0 &&
+                                        targetDate.getMinutes() === 0 &&
+                                        targetDate.getSeconds() === 0;
 
-                                    // Also check if target is at market open (e.g., 09:00, 09:15)
-                                    const targetHour = targetDate.getUTCHours();
-                                    const targetMinute = targetDate.getUTCMinutes();
-                                    const isNearMarketOpen = (targetHour === 9 && targetMinute <= 30) || (targetHour === 3 && targetMinute <= 30); // 09:00-09:30 or 03:00-03:30 UTC
+                                    // Also check if target is at market open (e.g., 09:15 IST)
+                                    const targetHour = targetDate.getHours();
+                                    const targetMinute = targetDate.getMinutes();
+                                    const isNearMarketOpen = (targetHour === 9 && targetMinute <= 30); // 09:00-09:30 local (IST)
 
                                     if (isTargetDailyCandle || isNearMarketOpen) {
                                         // Target is a daily candle or near market open, find first candle of that day
-                                        const targetDay = targetDate.getUTCDate();
-                                        const targetMonth = targetDate.getUTCMonth();
-                                        const targetYear = targetDate.getUTCFullYear();
+                                        const targetDay = targetDate.getDate();
+                                        const targetMonth = targetDate.getMonth();
+                                        const targetYear = targetDate.getFullYear();
 
                                         // Search for the first candle on the target day
                                         const sameDayIndex = resampledCandles.findIndex(c => {
                                             const candleDate = new Date(c.timestamp * 1000);
-                                            return candleDate.getUTCDate() === targetDay &&
-                                                candleDate.getUTCMonth() === targetMonth &&
-                                                candleDate.getUTCFullYear() === targetYear;
+                                            return candleDate.getDate() === targetDay &&
+                                                candleDate.getMonth() === targetMonth &&
+                                                candleDate.getFullYear() === targetYear;
                                         });
 
                                         if (sameDayIndex !== -1) {

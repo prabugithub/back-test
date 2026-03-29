@@ -241,7 +241,8 @@ export function PlaybackControls({ onOpenHistory, onOpenDashboard }: { onOpenHis
           throw new Error('Invalid JSON data format');
         }
 
-        let allCandles = parseColumnarData(rawData as ColumnarData);
+        // Local data (Nifty JSON) is already offset by 5.5 hours (IST)
+        let allCandles = parseColumnarData(rawData as ColumnarData, -19800);
 
         // Filter by date range
         if (startStr) {

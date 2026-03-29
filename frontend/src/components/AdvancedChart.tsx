@@ -295,13 +295,13 @@ export function AdvancedChart({
           const dayNames = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
           const monthNames = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
 
-          // Use UTC methods to match the chart's time interpretation
-          const dayName = dayNames[date.getUTCDay()];
-          const day = date.getUTCDate();
-          const month = monthNames[date.getUTCMonth()];
-          const year = date.getUTCFullYear();
-          const hours = date.getUTCHours().toString().padStart(2, '0');
-          const minutes = date.getUTCMinutes().toString().padStart(2, '0');
+          // Use local methods to show time in the user's timezone (e.g. IST)
+          const dayName = dayNames[date.getDay()];
+          const day = date.getDate();
+          const month = monthNames[date.getMonth()];
+          const year = date.getFullYear();
+          const hours = date.getHours().toString().padStart(2, '0');
+          const minutes = date.getMinutes().toString().padStart(2, '0');
 
           // Format: "Mon, 15 Jan 2024, 09:30"
           const formatted = `${dayName}, ${day} ${month} ${year}, ${hours}:${minutes}`;
@@ -533,14 +533,14 @@ export function AdvancedChart({
           const isMs = trade.timestamp > 1e11;
           const date = new Date(isMs ? trade.timestamp : trade.timestamp * 1000);
 
-          // Use UTC methods to ensure the label matches the chart's time scale (which usually interprets unix as UTC)
-          const hours = date.getUTCHours();
-          const minutes = date.getUTCMinutes();
-          const seconds = date.getUTCSeconds();
+          // Use local methods to ensure the label matches the user's timezone
+          const hours = date.getHours();
+          const minutes = date.getMinutes();
+          const seconds = date.getSeconds();
 
           // Format as HH:mm if it has time, or dd MMM if it's a daily candle (midnight)
           const timeStr = hours === 0 && minutes === 0 && seconds === 0
-            ? `${date.getUTCDate()} ${date.toLocaleString('default', { month: 'short', timeZone: 'UTC' })}`
+            ? `${date.getDate()} ${date.toLocaleString('default', { month: 'short' })}`
             : `${hours.toString().padStart(2, '0')}:${minutes.toString().padStart(2, '0')}`;
 
           allMarkers.push({

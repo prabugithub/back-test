@@ -2,7 +2,7 @@
 
 /**
  * Format timestamp to readable date/time
- * Uses UTC methods to avoid double-conversion when data is already offset to IST
+ * Uses local methods to show time in user's timezone (e.g. IST)
  */
 export function formatTimestamp(timestamp: number): string {
   if (!timestamp) return 'N/A';
@@ -12,13 +12,13 @@ export function formatTimestamp(timestamp: number): string {
   const tsMs = timestamp > 1e11 ? timestamp : timestamp * 1000;
   const date = new Date(tsMs);
   
-  const d = date.getUTCDate().toString().padStart(2, '0');
-  const m = (date.getUTCMonth() + 1).toString().padStart(2, '0');
-  const y = date.getUTCFullYear();
+  const d = date.getDate().toString().padStart(2, '0');
+  const m = (date.getMonth() + 1).toString().padStart(2, '0');
+  const y = date.getFullYear();
   
-  const hh = date.getUTCHours().toString().padStart(2, '0');
-  const mm = date.getUTCMinutes().toString().padStart(2, '0');
-  const ss = date.getUTCSeconds().toString().padStart(2, '0');
+  const hh = date.getHours().toString().padStart(2, '0');
+  const mm = date.getMinutes().toString().padStart(2, '0');
+  const ss = date.getSeconds().toString().padStart(2, '0');
   
   return `${d}-${m}-${y} ${hh}:${mm}:${ss}`;
 }
