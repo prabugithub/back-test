@@ -8,6 +8,7 @@ import {
   createSeriesMarkers,
 } from 'lightweight-charts';
 import { useSessionStore } from '../stores/sessionStore';
+import { useLiveStore } from '../stores/liveStore';
 import type { DrawingTool } from './ChartToolbar';
 import type { Indicator } from './ChartToolbar';
 import { calculateSMA, calculateEMA, calculatePivotPoints, calculateAlBrooks } from '../utils/indicators';
@@ -43,6 +44,7 @@ export function AdvancedChart({
   const [volumeSeries, setVolumeSeries] = useState<any>(null);
   const markersPrimitiveRef = useRef<any>(null);
   const indicatorSeriesRef = useRef<Map<string, any>>(new Map());
+  const lastCandleRef = useRef<any>(null);
 
   // Shared state from store
   const activeChartId = useSessionStore((s) => s.activeChartId);
@@ -455,6 +457,108 @@ export function AdvancedChart({
       }
     }
   }, [visibleCandles, series, volumeSeries, chart]);
+
+  // Keep a mutable ref of the last candle for live ticking without full re-renders
+  useEffect(() => {
+    if (visibleCandles.length > 0) {
+       const last = visibleCandles[visibleCandles.length - 1];
+       lastCandleRef.current = {
+         time: last.timestamp as any,
+         open: last.open,
+         high: last.high,
+         low: last.low,
+         close: last.close,
+         volume: last.volume,
+       };
+    } else {
+       lastCandleRef.current = null;
+    }
+  }, [visibleCandles]);
+
+  // Live Tick Subscription (Bypasses React State for Performance)
+  useEffect(() => {
+    if (!series || !chart) return;
+    
+    const unsubscribe = useLiveStore.subscribe((state, prevState) => {
+      const tick = state.lastTick;
+      if (tick && tick !== prevState.lastTick && lastCandleRef.current) {
+        
+        const chartInterval = isSecondary ? secondaryTimeframe : sessionConfig?.interval;
+        let tfMinutes = parseInt(chartInterval || '5');
+        if (chartInterval === '1D') tfMinutes = 1440;
+        const timeframeSeconds = tfMinutes * 60;
+        
+        // Find interval boundary matching resampler logic
+        const bucketStart = Math.floor(tick.timestamp / timeframeSeconds) * timeframeSeconds;
+        const lastCandle = lastCandleRef.current;
+        
+        if (bucketStart === lastCandle.time) {
+          // Update current active candle
+          lastCandle.close = tick.price;
+          lastCandle.high = Math.max(lastCandle.high, tick.price);
+          lastCandle.low = Math.min(lastCandle.low, tick.price);
+          lastCandle.volume = (lastCandle.volume || 0) + (tick.volume || 0);
+          
+          series.update({
+             time: lastCandle.time,
+             open: lastCandle.open,
+             high: lastCandle.high,
+             low: lastCandle.low,
+             close: lastCandle.close
+          });
+          
+          if (volumeSeries) {
+             volumeSeries.update({
+                time: lastCandle.time,
+                value: lastCandle.volume,
+                color: lastCandle.close >= lastCandle.open ? '#26a69a40' : '#ef535040'
+             });
+          }
+        } else if (bucketStart > lastCandle.time) {
+          // Form a new candle when crossing timeframe boundary
+          const newCandle = {
+             time: bucketStart as any,
+             open: tick.price,
+             high: tick.price,
+             low: tick.price,
+             close: tick.price,
+             volume: tick.volume || 0
+          };
+          lastCandleRef.current = newCandle;
+          
+          series.update({
+             time: newCandle.time,
+             open: newCandle.open,
+             high: newCandle.high,
+             low: newCandle.low,
+             close: newCandle.close
+          });
+          
+          if (volumeSeries) {
+             volumeSeries.update({
+                time: newCandle.time,
+                value: newCandle.volume,
+                color: '#26a69a40'
+             });
+          }
+          
+          // Optionally push to global store (only from primary to avoid duplicates)
+          if (!isSecondary) {
+             useSessionStore.getState().addLiveCandle({
+                timestamp: bucketStart,
+                open: tick.price,
+                high: tick.price,
+                low: tick.price,
+                close: tick.price,
+                volume: tick.volume || 0
+             });
+          }
+        }
+      }
+    });
+
+    return unsubscribe;
+  }, [series, chart, volumeSeries, isSecondary, secondaryTimeframe, sessionConfig]);
 
   // Reset on new data
   useEffect(() => {
