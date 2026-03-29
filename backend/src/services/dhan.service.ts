@@ -41,6 +41,133 @@ export function initDhanClient() {
 }
 
 /**
+ * Fetch historical candles from Dhan API (v2)
+ * Supports up to 1000 candles per request
+ */
+export async function fetchHistoricalCandles(params: DhanHistoricalParams) {
+    const accessToken = process.env.DHAN_ACCESS_TOKEN;
+    const clientID = process.env.DHAN_CLIENT_ID;
+    if (!accessToken || !clientID) {
+        throw new Error('DHAN_ACCESS_TOKEN and DHAN_CLIENT_ID are required');
+    }
+
+    try {
+        logger.info('Fetching historical candles from Dhan API (v2)', params);
+
+        const isMinuteInterval = ['1', '5', '15', '25', '60'].includes(String(params.interval));
+        const endpoint = isMinuteInterval 
+            ? 'https://api.dhan.co/v2/charts/intraday' 
+            : 'https://api.dhan.co/v2/charts/historical';
+            
+        const payload = isMinuteInterval ? {
+            securityId: params.securityId,
+            exchangeSegment: params.exchangeSegment,
+            instrument: params.instrument,
+            fromDate: params.fromDate,
+            toDate: params.toDate,
+            interval: params.interval
+        } : {
+            symbol: params.securityId,
+            securityId: params.securityId,
+            exchangeSegment: params.exchangeSegment,
+            instrument: params.instrument,
+            expiryCode: 0,
+            fromDate: params.fromDate,
+            toDate: params.toDate,
+            interval: params.interval
+        };
+
+        const response = await axios.post(endpoint, payload, {
+            headers: {
+                'Content-Type': 'application/json',
+                'access-token': accessToken,
+                'client-id': clientID
+            }
+        });
+
+        const timeArray = response.data.start_time || response.data.start_Time || response.data.timestamp;
+        
+        if (response.data && timeArray) {
+            const candles = [];
+            for (let i = 0; i < timeArray.length; i++) {
+                candles.push({
+                    timestamp: timeArray[i],
+                    open: response.data.open[i],
+                    high: response.data.high[i],
+                    low: response.data.low[i],
+                    close: response.data.close[i],
+                    volume: response.data.volume[i],
+                });
+            }
+            return candles;
+        }
+
+        return [];
+    } catch (error: any) {
+        if (error.response) {
+            logger.error('Dhan Historical API error response:', error.response.data);
+            throw new Error(`Dhan API error: ${JSON.stringify(error.response.data)}`);
+        }
+        logger.error('Dhan Historical API error:', error.message);
+        throw new Error(`Dhan API error: ${error.message}`);
+    }
+}
+
+/**
+ * Fetch intraday candles (today/yesterday) from Dhan API (v2)
+ */
+export async function fetchIntradayCandles(params: Omit<DhanHistoricalParams, 'fromDate' | 'toDate'>) {
+    const accessToken = process.env.DHAN_ACCESS_TOKEN;
+    const clientID = process.env.DHAN_CLIENT_ID;
+    if (!accessToken || !clientID) {
+        throw new Error('DHAN_ACCESS_TOKEN and DHAN_CLIENT_ID are required');
+    }
+
+    try {
+        logger.info('Fetching intraday candles from Dhan API (v2)', params);
+
+        const response = await axios.post('https://api.dhan.co/v2/charts/intraday', {
+            securityId: params.securityId,
+            exchangeSegment: params.exchangeSegment,
+            instrument: params.instrument,
+            interval: params.interval
+        }, {
+            headers: {
+                'Content-Type': 'application/json',
+                'access-token': accessToken,
+                'client-id': clientID
+            }
+        });
+
+        const timeArray = response.data.start_time || response.data.start_Time || response.data.timestamp;
+        
+        if (response.data && timeArray) {
+            const candles = [];
+            for (let i = 0; i < timeArray.length; i++) {
+                candles.push({
+                    timestamp: timeArray[i],
+                    open: response.data.open[i],
+                    high: response.data.high[i],
+                    low: response.data.low[i],
+                    close: response.data.close[i],
+                    volume: response.data.volume[i],
+                });
+            }
+            return candles;
+        }
+
+        return [];
+    } catch (error: any) {
+        if (error.response) {
+            logger.error('Dhan Intraday API error response:', error.response.data);
+            throw new Error(`Dhan API error: ${JSON.stringify(error.response.data)}`);
+        }
+        logger.error('Dhan Intraday API error:', error.message);
+        throw new Error(`Dhan API error: ${error.message}`);
+    }
+}
+
+/**
  * Get Dhan client instance
  */
 export function getDhanClient() {
@@ -95,11 +222,13 @@ export async function fetchRollingOptionData(params: {
             }
         });
 
-        if (response.data && response.data.start_time) {
+        const timeArray = response.data.start_time || response.data.start_Time || response.data.timestamp;
+        
+        if (response.data && timeArray) {
             const candles = [];
-            for (let i = 0; i < response.data.start_time.length; i++) {
+            for (let i = 0; i < timeArray.length; i++) {
                 candles.push({
-                    timestamp: response.data.start_time[i],
+                    timestamp: timeArray[i],
                     open: response.data.open[i],
                     high: response.data.high[i],
                     low: response.data.low[i],

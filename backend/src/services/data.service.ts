@@ -1,291 +1,70 @@
-import { getDatabase, saveDatabase } from '../config/database';
-import { fetchHistoricalCandles, retryApiCall } from './angelone.service';
-import { shouldUseYahooFinance, fetchYahooHistoricalData } from './yahoo.service';
+import { fetchHistoricalCandles as fetchDhanCandles } from './dhan.service';
 import { Candle, GetCandlesRequest } from '../types';
-import { format } from 'date-fns';
 import logger from '../utils/logger';
 
 /**
- * Get candles with automatic caching
+ * Get candles - TEMPORARILY MODIFIED FOR EXCLUSIVE DHAN TESTING
+ * Disables cache and all other fallbacks.
  */
 export async function getCandles(params: GetCandlesRequest): Promise<Candle[]> {
   try {
-    // Check if data exists in cache
-    const cachedCandles = getCachedCandles(params);
+    // 1. Check if Dhan credentials exist
+    const isDhanAvailable = !!process.env.DHAN_ACCESS_TOKEN && !!process.env.DHAN_CLIENT_ID;
 
-    if (cachedCandles.length > 0) {
-      logger.info('Returning cached candles', {
-        count: cachedCandles.length,
-        securityId: params.securityId,
-      });
-      return cachedCandles;
+    if (!isDhanAvailable) {
+      logger.error('Dhan credentials missing in .env');
+      throw new Error('Dhan credentials missing in .env');
     }
 
-    // Fetch from Angel One API if not cached
-    logger.info('Candles not found in cache, fetching from Angel One API');
-    const candles = await fetchFromAngelOne(params);
+    // 2. Fetch ONLY from Dhan API
+    logger.info('MODE: DHAN EXCLUSIVE - Fetching candles exclusively from Dhan API', { 
+      securityId: params.securityId,
+      exchangeSegment: params.exchangeSegment,
+      fromDate: params.fromDate,
+      toDate: params.toDate
+    });
 
-    // Store in cache
-    storeCandlesInCache(params, candles);
-
-    return candles;
-  } catch (error: any) {
-    logger.error('Failed to get candles:', error.message);
-    throw error;
-  }
-}
-
-/**
- * Get candles from SQLite cache
- */
-function getCachedCandles(params: GetCandlesRequest): Candle[] {
-  const db = getDatabase();
-
-  try {
-    const stmt = db.prepare(`
-      SELECT timestamp, open, high, low, close, volume
-      FROM candles
-      WHERE security_id = ?
-        AND exchange_segment = ?
-        AND interval = ?
-        AND timestamp >= ?
-        AND timestamp <= ?
-      ORDER BY timestamp ASC
-    `);
-
-    // Convert date strings to timestamps (assuming fromDate/toDate are YYYY-MM-DD)
-    const fromTimestamp = Math.floor(new Date(params.fromDate).getTime() / 1000);
-    const toTimestamp = Math.floor(new Date(params.toDate).getTime() / 1000);
-
-    stmt.bind([
-      params.securityId,
-      params.exchangeSegment,
-      params.interval,
-      fromTimestamp,
-      toTimestamp,
-    ]);
-
-    const candles: Candle[] = [];
-    while (stmt.step()) {
-      const row = stmt.getAsObject();
-      candles.push({
-        timestamp: row.timestamp as number,
-        open: row.open as number,
-        high: row.high as number,
-        low: row.low as number,
-        close: row.close as number,
-        volume: row.volume as number,
-      });
-    }
-
-    stmt.free();
-
-    return candles;
-  } catch (error: any) {
-    logger.error('Error reading from cache:', error.message);
-    return [];
-  }
-}
-
-/**
- * Fetch candles from appropriate data source
- * Uses Yahoo Finance for indices, Angel One for stocks
- */
-async function fetchFromAngelOne(params: GetCandlesRequest): Promise<Candle[]> {
-  // Dhan to Angel Token Mapping for indices
-  const DHAN_TO_ANGEL_TOKEN_MAP: Record<string, string> = {
-    '13': '99926000', // Nifty 50
-    '25': '99926009', // Bank Nifty
-    '27': '99926037', // Finnifty
-    '99926074': '99926074', // Midcap
-    '99926013': '99926013', // IT
-  };
-
-  const angelToken = DHAN_TO_ANGEL_TOKEN_MAP[params.securityId] || params.securityId;
-
-  // Check if this is an index that should use Yahoo Finance
-  if (shouldUseYahooFinance(params.securityId)) {
     try {
-      logger.info('Using Yahoo Finance for index data', { token: params.securityId, angelToken });
-
-      const candleData = await fetchYahooHistoricalData({
-        token: params.securityId,
-        fromDate: params.fromDate,
-        toDate: params.toDate,
+      const candles = await fetchDhanCandles({
+        securityId: params.securityId,
+        exchangeSegment: params.exchangeSegment === 'IDX_I' ? 'IDX_I' : 'NSE_INDEX',
+        instrument: 'INDEX',
         interval: params.interval,
+        fromDate: params.fromDate,
+        toDate: params.toDate
       });
 
-      // Convert to our Candle format
-      const candles: Candle[] = candleData.map((c) => ({
-        timestamp: c.timestamp,
-        open: c.open,
-        high: c.high,
-        low: c.low,
-        close: c.close,
-        volume: c.volume,
-      }));
-
-      // Sort by timestamp
-      candles.sort((a, b) => a.timestamp - b.timestamp);
-
-      return candles;
+      if (candles && candles.length > 0) {
+        logger.info(`Successfully fetched ${candles.length} candles from Dhan`);
+        return candles.map(c => ({
+          timestamp: c.timestamp,
+          open: c.open,
+          high: c.high,
+          low: c.low,
+          close: c.close,
+          volume: c.volume
+        }));
+      }
+      
+      logger.warn('Dhan API returned no data for this request');
+      return [];
     } catch (err: any) {
-      if (err.message.includes('Too Many Requests') || err.message.includes('Yahoo Finance error')) {
-        logger.warn('Yahoo Finance rate limit/error hit. Falling back to Angel One API as backup.', {
-          token: params.securityId,
-          error: err.message
-        });
-        // Continue to Angel One logic below
-      } else {
-        throw err;
-      }
+      logger.error('Dhan exclusive fetch failed:', err.message);
+      throw err;
     }
-  }
-
-  // Use Angel One for stocks or fallback for indices
-  const isIndex = !!DHAN_TO_ANGEL_TOKEN_MAP[params.securityId];
-  logger.info(`Using Angel One for ${isIndex ? 'index' : 'stock'} data fetch`, { token: params.securityId, angelToken });
-
-  // Angel One uses symbolToken instead of securityId
-  // Format dates to Angel One format
-  const fromDateTime = `${params.fromDate} 09:15`;
-  const toDateTime = `${params.toDate} 15:30`;
-
-  // Map exchange segment to Angel One exchange format
-  // NSE_EQ, NSE_FNO, NSE_INDEX all map to 'NSE'
-  // BSE_EQ maps to 'BSE'
-  let exchange = 'NSE';
-  if (params.exchangeSegment === 'INDEX' || params.exchangeSegment === 'IDX_I' || isIndex) {
-    exchange = 'NSE'; 
-  } else if (params.exchangeSegment.startsWith('NSE')) {
-    exchange = 'NSE';
-  } else if (params.exchangeSegment.startsWith('BSE')) {
-    exchange = 'BSE';
-  }
-
-  const candleData = await retryApiCall(() =>
-    fetchHistoricalCandles({
-      symbolToken: angelToken,  // Using angelToken which is mapped for indices
-      exchange: exchange,
-      interval: params.interval,
-      fromDate: fromDateTime,
-      toDate: toDateTime,
-    })
-  );
-
-  // Convert API response to our Candle format
-  const candles: Candle[] = candleData.map((c) => ({
-    timestamp: c.timestamp,
-    open: c.open,
-    high: c.high,
-    low: c.low,
-    close: c.close,
-    volume: c.volume,
-  }));
-
-  // Sort by timestamp
-  candles.sort((a, b) => a.timestamp - b.timestamp);
-
-  return candles;
-}
-
-/**
- * Store candles in SQLite cache
- */
-function storeCandlesInCache(params: GetCandlesRequest, candles: Candle[]): void {
-  const db = getDatabase();
-
-  try {
-    db.run('BEGIN TRANSACTION');
-
-    const stmt = db.prepare(`
-      INSERT OR IGNORE INTO candles
-      (security_id, exchange_segment, instrument, interval, timestamp, open, high, low, close, volume)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-    `);
-
-    let insertedCount = 0;
-    for (const candle of candles) {
-      stmt.bind([
-        params.securityId,
-        params.exchangeSegment,
-        params.instrument,
-        params.interval,
-        candle.timestamp,
-        candle.open,
-        candle.high,
-        candle.low,
-        candle.close,
-        candle.volume,
-      ]);
-
-      if (stmt.step()) {
-        insertedCount++;
-      }
-      stmt.reset();
-    }
-
-    stmt.free();
-    db.run('COMMIT');
-
-    logger.info(`Stored ${insertedCount} candles in cache`);
-    saveDatabase();
   } catch (error: any) {
-    db.run('ROLLBACK');
-    logger.error('Error storing candles in cache:', error.message);
+    logger.error('Failed to get candles (Exclusive Mode):', error.message);
     throw error;
   }
 }
 
 /**
- * Check if candles exist in cache for given parameters
+ * Empty stubs for disabled functions to prevent compilation errors
  */
 export function isCached(params: GetCandlesRequest): boolean {
-  const candles = getCachedCandles(params);
-  return candles.length > 0;
+  return false;
 }
 
-/**
- * Clear cache for specific parameters or all
- */
 export function clearCache(params?: Partial<GetCandlesRequest>): void {
-  const db = getDatabase();
-
-  try {
-    if (!params) {
-      db.run('DELETE FROM candles');
-      logger.info('Cleared all cache');
-    } else {
-      const conditions: string[] = [];
-      const values: any[] = [];
-
-      if (params.securityId) {
-        conditions.push('security_id = ?');
-        values.push(params.securityId);
-      }
-      if (params.exchangeSegment) {
-        conditions.push('exchange_segment = ?');
-        values.push(params.exchangeSegment);
-      }
-      if (params.interval) {
-        conditions.push('interval = ?');
-        values.push(params.interval);
-      }
-
-      if (conditions.length > 0) {
-        const query = `DELETE FROM candles WHERE ${conditions.join(' AND ')}`;
-        const stmt = db.prepare(query);
-        stmt.bind(values);
-        stmt.step();
-        stmt.free();
-
-        logger.info('Cleared cache with conditions', params);
-      }
-    }
-
-    saveDatabase();
-  } catch (error: any) {
-    logger.error('Error clearing cache:', error.message);
-    throw error;
-  }
+  logger.info('Cache clearing disabled in EXCLUSIVE mode');
 }

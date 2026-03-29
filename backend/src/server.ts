@@ -12,6 +12,15 @@ logger.info('------------------');
 
 import express, { Express, Request, Response } from 'express';
 import cors from 'cors';
+
+// Global error handling for unhandled exceptions (like from Socket.io or WS)
+process.on('uncaughtException', (err) => {
+  logger.error('CRITICAL: Uncaught Exception:', err);
+});
+
+process.on('unhandledRejection', (reason, promise) => {
+  logger.error('CRITICAL: Unhandled Rejection at:', promise, 'reason:', reason);
+});
 import { initDatabase } from './config/database';
 import { initAngelOneClient, loginAngelOne } from './services/angelone.service';
 import { initDhanClient } from './services/dhan.service';
