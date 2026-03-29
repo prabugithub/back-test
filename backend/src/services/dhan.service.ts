@@ -122,6 +122,62 @@ export async function fetchRollingOptionData(params: {
 }
 
 /**
+ * Place a market order on Dhan
+ */
+export async function placeOrder(params: {
+    securityId: string;
+    exchangeSegment: string;
+    transactionType: 'BUY' | 'SELL';
+    quantity: number;
+    productType?: 'CNC' | 'INTRADAY' | 'MARGIN' | 'MTF' | 'CO' | 'BO';
+}) {
+    const accessToken = process.env.DHAN_ACCESS_TOKEN;
+    const clientID = process.env.DHAN_CLIENT_ID;
+    if (!accessToken || !clientID) {
+        throw new Error('DHAN_ACCESS_TOKEN and DHAN_CLIENT_ID are required');
+    }
+
+    try {
+        logger.info('Placing market order on Dhan API', params);
+
+        const response = await axios.post('https://api.dhan.co/v2/orders', {
+            dhanClientId: clientID,
+            correlationId: `backtest-${Date.now()}`,
+            transactionType: params.transactionType,
+            exchangeSegment: params.exchangeSegment,
+            productType: params.productType || 'INTRADAY',
+            orderType: 'MARKET',
+            validity: 'DAY',
+            securityId: params.securityId,
+            quantity: params.quantity,
+            price: 0,
+            disclosedQuantity: 0,
+            triggerPrice: 0,
+            afterMarketOrder: false,
+            amoTime: 'OPEN',
+            boProfitValue: 0,
+            boStopLossValue: 0
+        }, {
+            headers: {
+                'Content-Type': 'application/json',
+                'access-token': accessToken,
+                'client-id': clientID
+            }
+        });
+
+        logger.info('Dhan Order placement response:', response.data);
+        return response.data;
+    } catch (error: any) {
+        if (error.response) {
+            logger.error('Dhan Order placement API error response:', error.response.data);
+            throw new Error(`Dhan API error: ${JSON.stringify(error.response.data)}`);
+        }
+        logger.error('Dhan Order placement API error:', error.message);
+        throw new Error(`Dhan API error: ${error.message}`);
+    }
+}
+
+/**
  * Retry wrapper for API calls
  */
 export async function retryApiCall<T>(fn: () => Promise<T>, maxRetries = 3, baseDelay = 1000): Promise<T> {

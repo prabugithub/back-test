@@ -64,3 +64,16 @@ export async function backtestOptions(params: {
   const response = await apiClient.post('/api/options/backtest', params);
   return response.data;
 }
+/**
+ * Place a live market order on Dhan
+ */
+export async function placeLiveOrder(params: {
+  securityId: string;
+  exchangeSegment: string;
+  transactionType: 'BUY' | 'SELL';
+  quantity: number;
+  productType?: string;
+}): Promise<any> {
+  const response = await apiClient.post('/api/live/order', params);
+  return response.data;
+}

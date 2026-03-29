@@ -126,6 +126,8 @@ export function PlaybackControls({ onOpenHistory, onOpenDashboard }: { onOpenHis
     secondaryTimeframe,
     toggleSecondaryChart,
     setSecondaryTimeframe,
+    isLiveMode,
+    livePrice,
   } = useSessionStore();
 
   const currentCandle = useSessionStore((s) => s.candles[s.currentIndex] || null);
@@ -482,103 +484,125 @@ export function PlaybackControls({ onOpenHistory, onOpenDashboard }: { onOpenHis
   return (
     <div className="relative">
       <div className="flex flex-nowrap items-center justify-between w-full h-full px-1 gap-x-2 py-1 overflow-x-auto scrollbar-hide">
-        {/* Left: Playback Controls */}
+        {/* Left: Playback Controls / Live Status */}
         <div className="flex items-center gap-0.5 flex-none">
-          <button
-            onClick={() => step('backward')}
-            disabled={currentIndex === 0}
-            className="p-1.5 rounded hover:bg-gray-100 disabled:opacity-30"
-            title="Step backward"
-          >
-            <ChevronLeft size={20} />
-          </button>
-
-          <button
-            onClick={isPlaying ? pause : play}
-            disabled={currentIndex >= candles.length - 1}
-            className="p-2 rounded-full bg-blue-600 text-white hover:bg-blue-700 disabled:opacity-50 mx-1"
-            title="Play/Pause (Space)"
-          >
-            {isPlaying ? <Pause size={20} /> : <Play size={20} />}
-          </button>
-
-          <button
-            onClick={() => step('forward')}
-            disabled={currentIndex >= candles.length - 1}
-            className="p-1.5 rounded hover:bg-gray-100 disabled:opacity-30"
-            title="Step forward"
-          >
-            <ChevronRight size={20} />
-          </button>
-
-          {/* Speed Selector */}
-          <select
-            value={speed}
-            onChange={(e) => setSpeed(Number(e.target.value))}
-            className="ml-2 px-1 py-1 text-xs border rounded bg-gray-50 focus:outline-none"
-            title="Playback Speed"
-          >
-            <option value={0.5}>0.5x</option>
-            <option value={1}>1x</option>
-            <option value={2}>2x</option>
-            <option value={5}>5x</option>
-            <option value={10}>10x</option>
-          </select>
-
-          {/* Jump Controls (Mini) */}
-          <div className="flex items-center gap-0.5 ml-1 border-l pl-1">
-            <button
-              onClick={() => jump(100)}
-              className="px-1 py-1 text-xs bg-gray-100 hover:bg-gray-200 rounded flex items-center justify-center w-6"
-              title="+100 Bars"
-            >
-              <FastForward size={12} />
-            </button>
-            <button
-              onClick={() => handleTimeJump(1)}
-              className="px-1 py-1 text-xs bg-gray-100 hover:bg-gray-200 rounded flex items-center justify-center w-6"
-              title="+1 Day"
-            >
-              <CalendarClock size={12} />
-            </button>
-            <button
-              onClick={() => setShowDatePicker(true)}
-              className="px-1 py-1 text-xs bg-blue-100 hover:bg-blue-200 text-blue-700 rounded flex items-center justify-center w-6"
-              title="Jump to Date"
-            >
-              <Calendar size={12} />
-            </button>
-
-            {/* Custom Jump */}
-            <div className="flex items-center gap-0.5 ml-0.5 border-l pl-0.5">
-              <input
-                type="number"
-                value={customJump}
-                onChange={(e) => setCustomJump(e.target.value)}
-                className="w-8 px-0.5 py-0.5 border rounded text-center text-[10px]"
-                placeholder="N"
-              />
-              <button
-                onClick={() => jump(Number(customJump))}
-                className="px-1 py-0.5 bg-blue-50 text-blue-700 border border-blue-200 rounded hover:bg-blue-100 text-[10px] font-bold"
-              >
-                Go
-              </button>
+          {isLiveMode ? (
+            <div className="flex items-center gap-2 px-3 py-1.5 bg-red-600 text-white rounded-full animate-pulse shadow-sm mr-2">
+              <div className="w-2 h-2 bg-white rounded-full"></div>
+              <span className="text-xs font-bold uppercase tracking-wider">Live</span>
             </div>
-          </div>
+          ) : (
+            <>
+              <button
+                onClick={() => step('backward')}
+                disabled={currentIndex === 0}
+                className="p-1.5 rounded hover:bg-gray-100 disabled:opacity-30"
+                title="Step backward"
+              >
+                <ChevronLeft size={20} />
+              </button>
+
+              <button
+                onClick={isPlaying ? pause : play}
+                disabled={currentIndex >= candles.length - 1}
+                className="p-2 rounded-full bg-blue-600 text-white hover:bg-blue-700 disabled:opacity-50 mx-1"
+                title="Play/Pause (Space)"
+              >
+                {isPlaying ? <Pause size={20} /> : <Play size={20} />}
+              </button>
+
+              <button
+                onClick={() => step('forward')}
+                disabled={currentIndex >= candles.length - 1}
+                className="p-1.5 rounded hover:bg-gray-100 disabled:opacity-30"
+                title="Step forward"
+              >
+                <ChevronRight size={20} />
+              </button>
+            </>
+          )}
+
+          {/* Speed Selector (Hide in live) */}
+          {!isLiveMode && (
+            <select
+              value={speed}
+              onChange={(e) => setSpeed(Number(e.target.value))}
+              className="ml-2 px-1 py-1 text-xs border rounded bg-gray-50 focus:outline-none"
+              title="Playback Speed"
+            >
+              <option value={0.5}>0.5x</option>
+              <option value={1}>1x</option>
+              <option value={2}>2x</option>
+              <option value={5}>5x</option>
+              <option value={10}>10x</option>
+            </select>
+          )}
+
+          {/* Jump Controls (Mini - Hide in live) */}
+          {!isLiveMode && (
+            <div className="flex items-center gap-0.5 ml-1 border-l pl-1">
+              <button
+                onClick={() => jump(100)}
+                className="px-1 py-1 text-xs bg-gray-100 hover:bg-gray-200 rounded flex items-center justify-center w-6"
+                title="+100 Bars"
+              >
+                <FastForward size={12} />
+              </button>
+              <button
+                onClick={() => handleTimeJump(1)}
+                className="px-1 py-1 text-xs bg-gray-100 hover:bg-gray-200 rounded flex items-center justify-center w-6"
+                title="+1 Day"
+              >
+                <CalendarClock size={12} />
+              </button>
+              <button
+                onClick={() => setShowDatePicker(true)}
+                className="px-1 py-1 text-xs bg-blue-100 hover:bg-blue-200 text-blue-700 rounded flex items-center justify-center w-6"
+                title="Jump to Date"
+              >
+                <Calendar size={12} />
+              </button>
+
+              {/* Custom Jump */}
+              <div className="flex items-center gap-0.5 ml-0.5 border-l pl-0.5">
+                <input
+                  type="number"
+                  value={customJump}
+                  onChange={(e) => setCustomJump(e.target.value)}
+                  className="w-8 px-0.5 py-0.5 border rounded text-center text-[10px]"
+                  placeholder="N"
+                />
+                <button
+                  onClick={() => jump(Number(customJump))}
+                  className="px-1 py-0.5 bg-blue-50 text-blue-700 border border-blue-200 rounded hover:bg-blue-100 text-[10px] font-bold"
+                >
+                  Go
+                </button>
+              </div>
+            </div>
+          )}
         </div>
 
         {/* Center: Progress / Date Info */}
         <div className="flex flex-col items-center justify-center text-xs text-gray-600 flex-1 px-2 min-w-[120px]">
-          <div className="font-medium text-gray-900 text-sm whitespace-nowrap">
-            {currentCandle ? formatTimestamp(currentCandle.timestamp) : '--'}
+          <div className="flex items-center gap-2">
+            <div className={`font-medium text-gray-900 text-sm whitespace-nowrap ${isLiveMode ? 'text-red-600 font-bold' : ''}`}>
+              {isLiveMode && livePrice ? `₹${livePrice.toFixed(2)}` : (currentCandle ? formatTimestamp(currentCandle.timestamp) : '--')}
+            </div>
+            {isLiveMode && currentCandle && (
+                <div className="text-[10px] text-gray-400">
+                    Last: {formatTimestamp(currentCandle.timestamp).split(' ')[1]}
+                </div>
+            )}
           </div>
-          <div className="w-full max-w-[12rem] bg-gray-200 rounded-full h-1.5 mt-1 mb-0.5 overflow-hidden">
-            <div
-              className="bg-blue-500 h-full transition-all duration-200"
-              style={{ width: `${progress}%` }}
-            />
-          </div>
+          {!isLiveMode && (
+            <div className="w-full max-w-[12rem] bg-gray-200 rounded-full h-1.5 mt-1 mb-0.5 overflow-hidden">
+                <div
+                className="bg-blue-500 h-full transition-all duration-200"
+                style={{ width: `${progress}%` }}
+                />
+            </div>
+          )}
         </div>
 
         {/* Right: Quick Actions (Buy/Sell & Reset) */}

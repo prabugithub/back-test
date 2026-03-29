@@ -18,9 +18,22 @@ import { initDhanClient } from './services/dhan.service';
 import dataRoutes from './routes/data.routes';
 import screenshotRoutes from './routes/screenshot.routes';
 import optionsRoutes from './routes/options.routes';
+import liveRoutes from './routes/live.routes';
+
+import { Server } from 'socket.io';
+import http from 'http';
+
+import { initDhanMarketFeed, handleSocketSubscription } from './services/dhanMarketFeed.service';
 
 const app: Express = express();
 const PORT = process.env.PORT || 3001;
+const httpServer = http.createServer(app);
+const io = new Server(httpServer, {
+  cors: {
+    origin: '*',
+    methods: ['GET', 'POST'],
+  },
+});
 
 // Middleware
 app.use(cors());
@@ -35,10 +48,23 @@ app.use((req: Request, res: Response, next) => {
   next();
 });
 
+// Real-time connections
+io.on('connection', (socket) => {
+  logger.info('New client connected', { id: socket.id });
+
+  // Use the new market feed subscription handlers
+  handleSocketSubscription(socket);
+
+  socket.on('disconnect', () => {
+    logger.info('Client disconnected', { id: socket.id });
+  });
+});
+
 // Routes
 app.use('/api/data', dataRoutes);
 app.use('/api/screenshot', screenshotRoutes);
 app.use('/api/options', optionsRoutes);
+app.use('/api/live', liveRoutes);
 
 // Root endpoint
 app.get('/', (req: Request, res: Response) => {
@@ -77,7 +103,7 @@ async function startServer() {
     logger.info('Database initialized successfully');
 
     // Start server immediately 
-    app.listen(PORT, () => {
+    httpServer.listen(PORT, () => {
       logger.info(`Server running on http://localhost:${PORT}`);
       logger.info(`Environment: ${process.env.NODE_ENV || 'development'}`);
     });
@@ -94,6 +120,8 @@ async function startServer() {
     // Initialize Dhan client
     try {
       initDhanClient();
+      // Initialize Market Feed
+      initDhanMarketFeed(io);
     } catch (error: any) {
       logger.warn('Dhan API client initialization failed:', error.message);
     }

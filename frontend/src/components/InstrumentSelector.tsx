@@ -4,13 +4,14 @@ import { fetchCandles } from '../services/api';
 import { useSessionStore } from '../stores/sessionStore';
 import { SYMBOLS, SYMBOL_CATEGORIES, searchSymbols, type Symbol } from '../data/symbols';
 import { parseColumnarData, resampleCandles, type ColumnarData } from '../utils/resampler';
+import { useLiveStore } from '../stores/liveStore';
 
 // Dynamic import for the large JSON file
 // We use a function to lazy load it only when needed
 const loadNiftyData = () => import('../assets/market-data/nifty5min_data.json');
 
 export function InstrumentSelector() {
-  const [dataSource, setDataSource] = useState<'api' | 'local'>('local');
+  const [dataSource, setDataSource] = useState<'api' | 'local' | 'live'>('local');
   const [securityId, setSecurityId] = useState('2885'); // RELIANCE on Angel One
   const [exchangeSegment, setExchangeSegment] = useState('NSE_EQ');
   const [instrument, setInstrument] = useState('EQUITY');
@@ -20,6 +21,37 @@ export function InstrumentSelector() {
   const [jumpToDate, setJumpToDate] = useState('');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [useDateBasedLoading, setUseDateBasedLoading] = useState(false);
+
+  // Auto-bind defaults for Live mode
+  useEffect(() => {
+    if (dataSource === 'live') {
+      // Bind Nifty
+      const nifty = SYMBOLS.find(s => s.symbol === 'NIFTY 50');
+      if (nifty && (!selectedSymbol || selectedSymbol.symbol !== 'NIFTY 50')) {
+        setSelectedSymbol(nifty);
+        setSecurityId(nifty.token);
+        setExchangeSegment(nifty.exchange);
+        setInstrument(nifty.instrumentType);
+      }
+
+      // Always set jump to today for Live
+      const today = new Date().toISOString().split('T')[0];
+      if (jumpToDate !== today) setJumpToDate(today);
+
+      // Handle historical data range
+      if (!useDateBasedLoading) {
+        const to = new Date();
+        const from = new Date();
+        from.setMonth(from.getMonth() - 1);
+        const fromStr = from.toISOString().split('T')[0];
+        const toStr = to.toISOString().split('T')[0];
+        
+        if (fromDate !== fromStr) setFromDate(fromStr);
+        if (toDate !== toStr) setToDate(toStr);
+      }
+    }
+  }, [dataSource, useDateBasedLoading]);
 
   // Symbol search states
   const [searchQuery, setSearchQuery] = useState('');
@@ -32,6 +64,9 @@ export function InstrumentSelector() {
   const setCurrentIndex = useSessionStore((s) => s.setCurrentIndex);
   const loadRemoteSession = useSessionStore((s) => s.loadRemoteSession);
   const restoreSessionState = useSessionStore((s) => s.restoreSessionState);
+  const setLiveModeInSession = useSessionStore((s) => s.setLiveMode);
+  
+  const { isConnected, isLiveMode, setLiveMode, connect } = useLiveStore();
 
   // Close dropdown when clicking outside
   useEffect(() => {
@@ -87,11 +122,11 @@ export function InstrumentSelector() {
     };
 
     try {
-      if (cfg.dataSource === 'api') {
+      if (cfg.dataSource === 'api' || cfg.dataSource === 'live') {
         const response = await fetchCandles({
           securityId: cfg.securityId,
-          exchangeSegment: cfg.exchangeSegment,
-          instrument: cfg.instrument,
+          exchangeSegment: cfg.instrumentType === 'INDEX' ? 'INDEX' : cfg.exchangeSegment,
+          instrument: cfg.instrumentType,
           interval: cfg.interval,
           fromDate: cfg.fromDate,
           toDate: cfg.toDate,
@@ -99,6 +134,11 @@ export function InstrumentSelector() {
 
         if (response.success && response.data.length > 0) {
           loadCandles(response.data, `${cfg.securityId}-${cfg.exchangeSegment}`, cfg);
+          
+          if (cfg.dataSource === 'live') {
+              setLiveModeInSession(true);
+              setLiveMode(true);
+          }
 
           // Apply initial jump if requested
           if (!overrideConfig && jumpToDate) {
@@ -243,136 +283,189 @@ export function InstrumentSelector() {
             <Database size={16} />
             API
           </button>
+          <button
+            onClick={() => {
+                setDataSource('live');
+                setLiveModeInSession(true);
+                connect();
+            }}
+            className={`px-3 py-1.5 text-sm font-medium rounded-md flex items-center gap-2 transition-all ${dataSource === 'live'
+              ? 'bg-white text-green-600 shadow-sm font-bold border border-green-200'
+              : 'text-gray-600 hover:text-gray-900'
+              }`}
+          >
+            <div className={`w-2 h-2 rounded-full ${isConnected ? 'bg-green-500' : 'bg-gray-400'} ${isLiveMode ? 'animate-pulse' : ''}`}></div>
+            Live
+          </button>
         </div>
       </div>
 
-      {dataSource === 'api' ? (
+      {dataSource === 'live' && (
+        <div className="mb-4 flex items-center gap-3 p-3 bg-green-50 border border-green-100 rounded-lg">
+          <div className="flex items-center gap-2">
+            <span className="text-sm font-bold text-green-800">NIFTY 50 (Selected by default)</span>
+            <div className="w-1.5 h-1.5 rounded-full bg-green-500 animate-pulse"></div>
+          </div>
+          <div className="h-4 w-px bg-green-200 mx-2"></div>
+          <label className="flex items-center gap-2 cursor-pointer select-none">
+            <div className="relative">
+              <input 
+                type="checkbox" 
+                className="sr-only" 
+                checked={useDateBasedLoading}
+                onChange={(e) => {
+                  const checked = e.target.checked;
+                  setUseDateBasedLoading(checked);
+                  if (!checked) {
+                    const to = new Date();
+                    const from = new Date();
+                    from.setMonth(from.getMonth() - 1);
+                    setFromDate(from.toISOString().split('T')[0]);
+                    setToDate(to.toISOString().split('T')[0]);
+                  }
+                }}
+              />
+              <div className={`block w-8 h-5 rounded-full transition-colors ${useDateBasedLoading ? 'bg-green-600' : 'bg-gray-300'}`}></div>
+              <div className={`absolute left-1 top-1 bg-white w-3 h-3 rounded-full transition-transform ${useDateBasedLoading ? 'translate-x-3' : ''}`}></div>
+            </div>
+            <span className="text-sm text-green-800 font-medium">Use Custom Date Range</span>
+          </label>
+        </div>
+      )}
+
+      {dataSource === 'api' || dataSource === 'live' ? (
         <>
-          {/* Symbol Search Dropdown */}
-          <div className="mb-4">
-            <label className="block text-sm font-medium text-gray-700 mb-1">
-              Search Symbol
-            </label>
-            <div className="relative" ref={dropdownRef}>
-              <div className="relative">
-                <input
-                  type="text"
-                  value={selectedSymbol ? `${selectedSymbol.name} (${selectedSymbol.symbol})` : searchQuery}
-                  onChange={(e) => {
-                    setSearchQuery(e.target.value);
-                    setShowDropdown(true);
-                    if (selectedSymbol) setSelectedSymbol(null);
-                  }}
-                  onFocus={() => setShowDropdown(true)}
-                  className="w-full px-3 py-2 pl-10 pr-10 border rounded focus:outline-none focus:ring-2 focus:ring-blue-500"
-                  placeholder="Search by name, symbol, or token..."
-                />
-                <Search className="absolute left-3 top-2.5 text-gray-400" size={18} />
-                {selectedSymbol && (
-                  <button
-                    onClick={handleClearSymbol}
-                    className="absolute right-3 top-2.5 text-gray-400 hover:text-gray-600"
-                  >
-                    <X size={18} />
-                  </button>
-                )}
-              </div>
+          {/* Symbol Search Dropdown - Only for API source */}
+          {dataSource === 'api' && (
+            <div className="mb-4">
+              <label className="block text-sm font-medium text-gray-700 mb-1">
+                Search Symbol
+              </label>
+              <div className="relative" ref={dropdownRef}>
+                <div className="relative">
+                  <input
+                    type="text"
+                    value={selectedSymbol ? `${selectedSymbol.name} (${selectedSymbol.symbol})` : searchQuery}
+                    onChange={(e) => {
+                      setSearchQuery(e.target.value);
+                      setShowDropdown(true);
+                      if (selectedSymbol) setSelectedSymbol(null);
+                    }}
+                    onFocus={() => setShowDropdown(true)}
+                    className="w-full px-3 py-2 pl-10 pr-10 border rounded focus:outline-none focus:ring-2 focus:ring-blue-500"
+                    placeholder="Search by name, symbol, or token..."
+                  />
+                  <Search className="absolute left-3 top-2.5 text-gray-400" size={18} />
+                  {selectedSymbol && (
+                    <button
+                      onClick={handleClearSymbol}
+                      className="absolute right-3 top-2.5 text-gray-400 hover:text-gray-600"
+                    >
+                      <X size={18} />
+                    </button>
+                  )}
+                </div>
 
-              {/* Category Filter */}
-              {showDropdown && (
-                <div className="absolute z-50 w-full mt-1 bg-white border rounded-lg shadow-lg max-h-96 overflow-hidden">
-                  <div className="p-2 border-b bg-gray-50 flex gap-1 flex-wrap">
-                    {SYMBOL_CATEGORIES.map((category) => (
-                      <button
-                        key={category}
-                        onClick={() => setSelectedCategory(category)}
-                        className={`px-2 py-1 text-xs rounded ${selectedCategory === category
-                          ? 'bg-blue-600 text-white'
-                          : 'bg-white text-gray-700 hover:bg-gray-100'
-                          }`}
-                      >
-                        {category}
-                      </button>
-                    ))}
-                  </div>
-
-                  {/* Symbol List */}
-                  <div className="overflow-y-auto max-h-80">
-                    {filteredSymbols.length > 0 ? (
-                      filteredSymbols.map((symbol) => (
+                {/* Category Filter */}
+                {showDropdown && (
+                  <div className="absolute z-50 w-full mt-1 bg-white border rounded-lg shadow-lg max-h-96 overflow-hidden">
+                    <div className="p-2 border-b bg-gray-50 flex gap-1 flex-wrap">
+                      {SYMBOL_CATEGORIES.map((category) => (
                         <button
-                          key={symbol.token}
-                          onClick={() => handleSymbolSelect(symbol)}
-                          className="w-full px-3 py-2 text-left hover:bg-blue-50 border-b last:border-b-0 transition-colors"
+                          key={category}
+                          onClick={() => setSelectedCategory(category)}
+                          className={`px-2 py-1 text-xs rounded ${selectedCategory === category
+                            ? 'bg-blue-600 text-white'
+                            : 'bg-white text-gray-700 hover:bg-gray-100'
+                            }`}
                         >
-                          <div className="flex items-center justify-between">
-                            <div>
-                              <div className="font-medium text-sm">{symbol.name}</div>
-                              <div className="text-xs text-gray-500">
-                                {symbol.symbol} • Token: {symbol.token}
+                          {category}
+                        </button>
+                      ))}
+                    </div>
+
+                    {/* Symbol List */}
+                    <div className="overflow-y-auto max-h-80">
+                      {filteredSymbols.length > 0 ? (
+                        filteredSymbols.map((symbol) => (
+                          <button
+                            key={symbol.token}
+                            onClick={() => handleSymbolSelect(symbol)}
+                            className="w-full px-3 py-2 text-left hover:bg-blue-50 border-b last:border-b-0 transition-colors"
+                          >
+                            <div className="flex items-center justify-between">
+                              <div>
+                                <div className="font-medium text-sm">{symbol.name}</div>
+                                <div className="text-xs text-gray-500">
+                                  {symbol.symbol} • Token: {symbol.token}
+                                </div>
+                              </div>
+                              <div className="text-xs px-2 py-1 bg-gray-100 rounded">
+                                {symbol.category}
                               </div>
                             </div>
-                            <div className="text-xs px-2 py-1 bg-gray-100 rounded">
-                              {symbol.category}
-                            </div>
-                          </div>
-                        </button>
-                      ))
-                    ) : (
-                      <div className="px-3 py-4 text-center text-gray-500 text-sm">
-                        No symbols found
-                      </div>
-                    )}
+                          </button>
+                        ))
+                      ) : (
+                        <div className="px-3 py-4 text-center text-gray-500 text-sm">
+                          No symbols found
+                        </div>
+                      )}
+                    </div>
                   </div>
-                </div>
-              )}
+                )}
+              </div>
             </div>
-          </div>
+          )}
 
           <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-4">
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">
-                Symbol Token
-              </label>
-              <input
-                type="text"
-                value={securityId}
-                onChange={(e) => setSecurityId(e.target.value)}
-                className="w-full px-3 py-2 border rounded focus:outline-none focus:ring-2 focus:ring-blue-500"
-                placeholder="e.g., 2885 for RELIANCE"
-              />
-            </div>
+            {dataSource === 'api' && (
+              <>
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">
+                    Symbol Token
+                  </label>
+                  <input
+                    type="text"
+                    value={securityId}
+                    onChange={(e) => setSecurityId(e.target.value)}
+                    className="w-full px-3 py-2 border rounded focus:outline-none focus:ring-2 focus:ring-blue-500"
+                    placeholder="e.g., 2885 for RELIANCE"
+                  />
+                </div>
 
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">
-                Exchange Segment
-              </label>
-              <select
-                value={exchangeSegment}
-                onChange={(e) => setExchangeSegment(e.target.value)}
-                className="w-full px-3 py-2 border rounded focus:outline-none focus:ring-2 focus:ring-blue-500"
-              >
-                <option value="NSE_EQ">NSE Equity</option>
-                <option value="NSE_FNO">NSE F&O</option>
-                <option value="BSE_EQ">BSE Equity</option>
-              </select>
-            </div>
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">
+                    Exchange Segment
+                  </label>
+                  <select
+                    value={exchangeSegment}
+                    onChange={(e) => setExchangeSegment(e.target.value)}
+                    className="w-full px-3 py-2 border rounded focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  >
+                    <option value="NSE_EQ">NSE Equity</option>
+                    <option value="NSE_FNO">NSE F&O</option>
+                    <option value="BSE_EQ">BSE Equity</option>
+                  </select>
+                </div>
 
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">
-                Instrument Type
-              </label>
-              <select
-                value={instrument}
-                onChange={(e) => setInstrument(e.target.value)}
-                className="w-full px-3 py-2 border rounded focus:outline-none focus:ring-2 focus:ring-blue-500"
-              >
-                <option value="EQUITY">Equity</option>
-                <option value="INDEX">Index</option>
-                <option value="FUTIDX">Index Future</option>
-                <option value="FUTSTK">Stock Future</option>
-              </select>
-            </div>
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">
+                    Instrument Type
+                  </label>
+                  <select
+                    value={instrument}
+                    onChange={(e) => setInstrument(e.target.value)}
+                    className="w-full px-3 py-2 border rounded focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  >
+                    <option value="EQUITY">Equity</option>
+                    <option value="INDEX">Index</option>
+                    <option value="FUTIDX">Index Future</option>
+                    <option value="FUTSTK">Stock Future</option>
+                  </select>
+                </div>
+              </>
+            )}
 
             <div>
               <label className="block text-sm font-medium text-gray-700 mb-1">
@@ -399,7 +492,8 @@ export function InstrumentSelector() {
                 type="date"
                 value={fromDate}
                 onChange={(e) => setFromDate(e.target.value)}
-                className="w-full px-3 py-2 border rounded focus:outline-none focus:ring-2 focus:ring-blue-500"
+                disabled={dataSource === 'live' && !useDateBasedLoading}
+                className={`w-full px-3 py-2 border rounded focus:outline-none focus:ring-2 focus:ring-blue-500 ${dataSource === 'live' && !useDateBasedLoading ? 'bg-gray-100 cursor-not-allowed text-gray-500' : ''}`}
               />
             </div>
 
@@ -411,21 +505,24 @@ export function InstrumentSelector() {
                 type="date"
                 value={toDate}
                 onChange={(e) => setToDate(e.target.value)}
-                className="w-full px-3 py-2 border rounded focus:outline-none focus:ring-2 focus:ring-blue-500"
+                disabled={dataSource === 'live' && !useDateBasedLoading}
+                className={`w-full px-3 py-2 border rounded focus:outline-none focus:ring-2 focus:ring-blue-500 ${dataSource === 'live' && !useDateBasedLoading ? 'bg-gray-100 cursor-not-allowed text-gray-500' : ''}`}
               />
             </div>
 
-            <div>
-              <label className="block text-sm font-medium text-blue-700 mb-1 font-bold">
-                Jump to Date
-              </label>
-              <input
-                type="date"
-                value={jumpToDate}
-                onChange={(e) => setJumpToDate(e.target.value)}
-                className="w-full px-3 py-2 border border-blue-300 rounded focus:outline-none focus:ring-2 focus:ring-blue-500 bg-blue-50"
-              />
-            </div>
+            {dataSource === 'api' && (
+              <div>
+                <label className="block text-sm font-medium text-blue-700 mb-1 font-bold">
+                  Jump to Date
+                </label>
+                <input
+                  type="date"
+                  value={jumpToDate}
+                  onChange={(e) => setJumpToDate(e.target.value)}
+                  className="w-full px-3 py-2 border border-blue-300 rounded focus:outline-none focus:ring-2 focus:ring-blue-500 bg-blue-50"
+                />
+              </div>
+            )}
           </div>
         </>
       ) : (
@@ -518,7 +615,7 @@ export function InstrumentSelector() {
         disabled={loading}
         className="mt-4 w-full px-6 py-3 bg-blue-600 text-white rounded-lg font-semibold hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
       >
-        {loading ? 'Processing...' : (dataSource === 'api' ? 'Fetch & Load' : 'Load Local Data')}
+        {loading ? 'Processing...' : (dataSource === 'api' ? 'Fetch & Load' : (dataSource === 'live' ? 'Start Live Feed' : 'Load Local Data'))}
       </button>
 
       {dataSource === 'api' && (

@@ -7,12 +7,16 @@ const yahooFinance = new YahooFinance();
 
 // Yahoo Finance symbol mapping for Indian indices
 const YAHOO_SYMBOL_MAP: Record<string, string> = {
-  // Nifty indices
+  // Nifty indices (Angel One Tokens)
   '99926000': '^NSEI',      // Nifty 50
   '99926009': '^NSEBANK',   // Nifty Bank
   '99926037': '^CNXFIN',    // Nifty Financial Services (Finnifty)
   '99926074': '^NSEMDCP50', // Nifty Midcap 50
   '99926013': '^CNXIT',     // Nifty IT
+  // Dhan Tokens
+  '13': '^NSEI',            // Nifty 50 Spot
+  '25': '^NSEBANK',         // Bank Nifty Spot
+  '27': '^CNXFIN',          // Nifty Financial Services Spot
 };
 
 /**

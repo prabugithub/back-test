@@ -6,6 +6,7 @@ import { saveSession, loadSession, restoreBackup, saveSnapshot, listSnapshots, l
 import { useNotificationStore } from './notificationStore';
 import { calculatePivotPoints } from '../utils/indicators';
 import { analyzeMarketStructure } from '../utils/pivotAnalysis';
+import { placeLiveOrder } from '../services/api';
 
 export interface SessionConfig {
   securityId: string;
@@ -25,6 +26,10 @@ interface SessionStore {
   position: Position | null;
   instrument: string;
   sessionConfig: SessionConfig | null;
+
+  // Live Mode
+  isLiveMode: boolean;
+  livePrice: number | null;
 
   // Playback state
   isPlaying: boolean;
@@ -56,6 +61,9 @@ interface SessionStore {
 
   // Actions
   loadCandles: (candles: Candle[], instrument: string, config?: SessionConfig) => void;
+  setLiveMode: (isLive: boolean) => void;
+  updateLivePrice: (price: number) => void;
+  addLiveCandle: (candle: Candle) => void;
   play: () => void;
   pause: () => void;
   step: (direction: 'forward' | 'backward') => void;
@@ -115,6 +123,8 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
   position: null,
   instrument: '',
   sessionConfig: null,
+  isLiveMode: false,
+  livePrice: null,
   isPlaying: false,
   speed: 1,
   isLoading: false,
@@ -144,7 +154,7 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
       candles,
       instrument,
       sessionConfig: config || null,
-      currentIndex: 0,
+      currentIndex: candles.length > 0 ? candles.length - 1 : 0, // Default to end for better UX
       trades: [],
       position: null,
       isPlaying: false,
@@ -152,6 +162,35 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
       pendingExitRequest: null,
       pendingTradeRequest: null,
     });
+  },
+
+  setLiveMode: (isLive) => {
+    set({ isLiveMode: isLive });
+    if (isLive) {
+      // Move to last candle when going live
+      const { candles } = get();
+      if (candles.length > 0) {
+        set({ currentIndex: candles.length - 1 });
+      }
+    }
+  },
+
+  updateLivePrice: (price) => {
+    set({ livePrice: price });
+    // Check SL/TP hits for current position using live price
+    const { isLiveMode, currentIndex } = get();
+    if (isLiveMode) {
+      get().checkSLTPHits(currentIndex, price);
+    }
+  },
+
+  addLiveCandle: (candle) => {
+    const { candles, isLiveMode } = get();
+    const newCandles = [...candles, candle];
+    set({ candles: newCandles });
+    if (isLiveMode) {
+      set({ currentIndex: newCandles.length - 1 });
+    }
   },
 
   play: () => set({ isPlaying: true }),
@@ -170,18 +209,23 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
     }
   },
 
-  checkSLTPHits: (index: number) => {
+  checkSLTPHits: (index: number, currentPrice?: number) => {
     const { candles, position } = get();
     if (!position || (!position.stopLoss && !position.target)) return;
 
+    // Use live price if provided, otherwise use current bar's candle data
     const candle = candles[index];
-    if (!candle) return;
+    if (!candle && !currentPrice) return;
 
     const { stopLoss, target, quantity } = position;
     const isLong = quantity > 0;
     const sl = Number(stopLoss);
     const tp = Number(target);
-    const { high, low, close } = candle;
+
+    const { high, low, close } = candle || { high: currentPrice!, low: currentPrice!, close: currentPrice! };
+    const effectiveClose = currentPrice || close;
+    const effectiveHigh = currentPrice ? Math.max(currentPrice, high) : high;
+    const effectiveLow = currentPrice ? Math.min(currentPrice, low) : low;
 
     // Track current state to see if update is needed
     let nextSlHit = !!position.slHit;
@@ -192,18 +236,18 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
 
     // 1. Check for ANY touch (Independent Flags)
     if (isLong) {
-      if (sl > 0 && low <= sl) nextSlHit = true;
-      if (tp > 0 && high >= tp) nextTpHit = true;
+      if (sl > 0 && effectiveLow <= sl) nextSlHit = true;
+      if (tp > 0 && effectiveHigh >= tp) nextTpHit = true;
     } else {
-      if (sl > 0 && high >= sl) nextSlHit = true;
-      if (tp > 0 && low <= tp) nextTpHit = true;
+      if (sl > 0 && effectiveHigh >= sl) nextSlHit = true;
+      if (tp > 0 && effectiveLow <= tp) nextTpHit = true;
     }
 
     // 2. Determine first hit for notification
     if (!nextHitFirst) {
       const hitThisBar = isLong
-        ? (sl > 0 && low <= sl ? 'SL' : (tp > 0 && high >= tp ? 'TP' : null))
-        : (sl > 0 && high >= sl ? 'SL' : (tp > 0 && low <= tp ? 'TP' : null));
+        ? (sl > 0 && effectiveLow <= sl ? 'SL' : (tp > 0 && effectiveHigh >= tp ? 'TP' : null))
+        : (sl > 0 && effectiveHigh >= sl ? 'SL' : (tp > 0 && effectiveLow <= tp ? 'TP' : null));
 
       if (hitThisBar) {
         nextHitFirst = hitThisBar;
@@ -217,18 +261,18 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
     // 3. Check for Close-based Trigger (Dialog)
     let dialogToTrigger: 'SL' | 'TP' | null = null;
     if (isLong) {
-      if (sl > 0 && close <= sl && !nextSlDialogShown) {
+      if (sl > 0 && effectiveClose <= sl && !nextSlDialogShown) {
         dialogToTrigger = 'SL';
         nextSlDialogShown = true;
-      } else if (tp > 0 && close >= tp && !nextTpDialogShown) {
+      } else if (tp > 0 && effectiveClose >= tp && !nextTpDialogShown) {
         dialogToTrigger = 'TP';
         nextTpDialogShown = true;
       }
     } else {
-      if (sl > 0 && close >= sl && !nextSlDialogShown) {
+      if (sl > 0 && effectiveClose >= sl && !nextSlDialogShown) {
         dialogToTrigger = 'SL';
         nextSlDialogShown = true;
-      } else if (tp > 0 && close <= tp && !nextTpDialogShown) {
+      } else if (tp > 0 && effectiveClose <= tp && !nextTpDialogShown) {
         dialogToTrigger = 'TP';
         nextTpDialogShown = true;
       }
@@ -332,9 +376,33 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
     set({ pendingTradeRequest: null });
   },
 
-  executeTrade: (type, quantity, stopLoss, target, priceOverride, exitReason = 'MANUAL', journal) => {
-    const { candles, currentIndex, trades, position, instrument, sessionConfig } = get();
+  executeTrade: async (type, quantity, stopLoss, target, priceOverride, exitReason = 'MANUAL', journal) => {
+    const { candles, currentIndex, trades, position, instrument, sessionConfig, isLiveMode } = get();
     const currentCandle = candles[currentIndex];
+
+    // Handle Live Order Placement
+    if (isLiveMode && sessionConfig) {
+      try {
+        const orderResult = await placeLiveOrder({
+          securityId: sessionConfig.securityId,
+          exchangeSegment: sessionConfig.exchangeSegment,
+          transactionType: type,
+          quantity: quantity,
+          productType: 'INTRADAY' // Defaulting to intraday for now
+        });
+
+        if (orderResult.success) {
+           useNotificationStore.getState().notify(`Live Order Placed: ${type} ${quantity} (ID: ${orderResult.data?.orderId || 'N/A'})`, 'info');
+        } else {
+           useNotificationStore.getState().notify(`Live Order Failed: ${orderResult.message || 'Unknown error'}`, 'error');
+           return; // Stop local execution if live order failed? 
+           // User might want to keep local in sync, but if order failed, local shouldn't proceed.
+        }
+      } catch (error: any) {
+        useNotificationStore.getState().notify(`Error placing live order: ${error.message}`, 'error');
+        return;
+      }
+    }
 
     if (!currentCandle) {
       console.error('No current candle available');
@@ -732,9 +800,13 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
   },
 
   getUnrealizedPnL: () => {
-    const { position, candles, currentIndex } = get();
+    const { position, candles, currentIndex, isLiveMode, livePrice } = get();
     if (!position || position.quantity === 0) {
       return 0;
+    }
+
+    if (isLiveMode && livePrice !== null) {
+      return (livePrice - position.averagePrice) * position.quantity;
     }
 
     const currentCandle = candles[currentIndex];
@@ -759,7 +831,7 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
     }
   },
 
-  checkTrendReversal: (index: number) => {
+  checkTrendReversal: (index: number, currentPrice?: number) => {
     const { candles, position, trades } = get();
     if (!position || position.quantity === 0 || position.trendReversed) return;
 
@@ -769,7 +841,7 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
 
     const direction = position.quantity > 0 ? "LONG" : "SHORT";
 
-    // Check if trend is aligned or against the position
+    // ... (rest of the logic remains mostly the same, but use currentPrice if index is last bar)
     const isAgainst = (direction === 'LONG' && ltMarket.startsWith('Bear')) ||
       (direction === 'SHORT' && ltMarket.startsWith('Bull'));
 
@@ -785,10 +857,10 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
     }
 
     // 2. If we are against the trend, only trigger notification if we were previously aligned
-    // This prevents notifications for trades intentionally entered counter-trend
     if (isAgainst && position.withTrendSeen) {
       const currentCandle = candles[index];
-      const unrealizedPnL = (currentCandle.close - position.averagePrice) * position.quantity;
+      const testPrice = currentPrice || (currentCandle ? currentCandle.close : 0);
+      const unrealizedPnL = (testPrice - position.averagePrice) * position.quantity;
 
       const updatedPosition = {
         ...position,
