@@ -11,6 +11,48 @@ import { fetchCandles } from '../services/api';
 // Dynamic import for local data
 const loadNiftyData = () => import('../assets/market-data/nifty5min_data.json');
 
+/**
+ * Returns { secondsLeft, totalSeconds, pct } for the current candle based on timeframe.
+ * Updates every second.
+ */
+function useCandleCountdown(intervalStr: string | undefined) {
+  const [secondsLeft, setSecondsLeft] = useState(0);
+  const [totalSeconds, setTotalSeconds] = useState(300);
+
+  useEffect(() => {
+    let tf = parseInt(intervalStr || '5');
+    if (intervalStr === '1D') tf = 1440;
+    const tfSec = tf * 60;
+
+    const compute = () => {
+      const nowSec = Math.floor(Date.now() / 1000);
+      const bucketStart = Math.floor(nowSec / tfSec) * tfSec;
+      const bucketEnd = bucketStart + tfSec;
+      setTotalSeconds(tfSec);
+      setSecondsLeft(Math.max(0, bucketEnd - nowSec));
+    };
+
+    compute(); // immediate
+    const id = setInterval(compute, 1000);
+    return () => clearInterval(id);
+  }, [intervalStr]);
+
+  const pct = totalSeconds > 0 ? ((totalSeconds - secondsLeft) / totalSeconds) * 100 : 0;
+
+  const fmt = (s: number) => {
+    const m = Math.floor(s / 60);
+    const sec = s % 60;
+    return m > 0 ? `${m}m ${sec.toString().padStart(2, '0')}s` : `${sec}s`;
+  };
+
+  // Color shifts red as candle approaches close
+  const color = secondsLeft <= 30 ? '#ef4444'   // last 30s → red
+    : secondsLeft <= 60 ? '#f97316'              // last 1m  → orange
+    : '#22c55e';                                 // otherwise → green
+
+  return { secondsLeft, totalSeconds, pct, formatted: fmt(secondsLeft), color };
+}
+
 interface PivotStatusDisplayProps {
   recentPivot: any;
   showPivotRR: boolean;
@@ -187,6 +229,7 @@ export function PlaybackControls({ onOpenHistory, onOpenDashboard }: { onOpenHis
 
   const resetSession = useSessionStore((s) => s.resetSession);
   const sessionConfig = useSessionStore((s) => s.sessionConfig);
+  const countdown = useCandleCountdown(isLiveMode ? sessionConfig?.interval : undefined);
 
   // Sync settings with session config when it changes or when opening settings
   useEffect(() => {
@@ -488,9 +531,16 @@ export function PlaybackControls({ onOpenHistory, onOpenDashboard }: { onOpenHis
         {/* Left: Playback Controls / Live Status */}
         <div className="flex items-center gap-0.5 flex-none">
           {isLiveMode ? (
-            <div className="flex items-center gap-2 px-3 py-1.5 bg-red-600 text-white rounded-full animate-pulse shadow-sm mr-2">
-              <div className="w-2 h-2 bg-white rounded-full"></div>
-              <span className="text-xs font-bold uppercase tracking-wider">Live</span>
+            <div className="flex items-center gap-2">
+              {/* LIVE badge */}
+              <div className="flex items-center gap-1.5 px-3 py-1.5 bg-red-600 text-white rounded-full animate-pulse shadow-sm">
+                <div className="w-2 h-2 bg-white rounded-full"></div>
+                <span className="text-xs font-bold uppercase tracking-wider">Live</span>
+              </div>
+              {/* Simple countdown */}
+              <span className="text-[11px] text-gray-400 whitespace-nowrap">
+                closes in <span className="font-mono" style={{ color: countdown.color }}>{countdown.formatted}</span>
+              </span>
             </div>
           ) : (
             <>
@@ -591,9 +641,9 @@ export function PlaybackControls({ onOpenHistory, onOpenDashboard }: { onOpenHis
               {isLiveMode && livePrice ? `₹${livePrice.toFixed(2)}` : (currentCandle ? formatTimestamp(currentCandle.timestamp) : '--')}
             </div>
             {isLiveMode && currentCandle && (
-                <div className="text-[10px] text-gray-400">
-                    Last: {formatTimestamp(currentCandle.timestamp).split(' ')[1]}
-                </div>
+              <div className="text-[10px] text-gray-400">
+                Last: {formatTimestamp(currentCandle.timestamp).split(' ')[1]}
+              </div>
             )}
           </div>
           {!isLiveMode && (
