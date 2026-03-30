@@ -117,14 +117,13 @@ async function startServer() {
       logger.info(`Environment: ${process.env.NODE_ENV || 'development'}`);
     });
 
-    // Initialize Angel One client and login (Background)
-    try {
-      initAngelOneClient();
-      await loginAngelOne();
-      logger.info('Angel One API client initialized and logged in');
-    } catch (error: any) {
-      logger.warn('Angel One API client initialization failed:', error.message);
-    }
+    // Initialize Angel One client and login (Concurrent background task)
+    initAngelOneClient();
+    loginAngelOne().then(() => {
+      logger.info('Angel One API client initialization completed');
+    }).catch((error) => {
+      logger.warn('Angel One login background task failed:', error.message);
+    });
 
     // Initialize Dhan client
     try {

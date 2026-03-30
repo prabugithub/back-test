@@ -590,12 +590,44 @@ export function useChartDrawings({
 
   useEffect(() => { renderCanvas(); }, [renderCanvas]);
 
+  const renderCanvasRef = useRef(renderCanvas);
+  renderCanvasRef.current = renderCanvas;
+
   useEffect(() => {
-    if (!chartApi) return;
-    const ts = chartApi.timeScale(), sync = () => requestAnimationFrame(() => renderCanvas());
-    ts.subscribeVisibleLogicalRangeChange(sync); ts.subscribeVisibleTimeRangeChange(sync);
-    return () => { ts.unsubscribeVisibleLogicalRangeChange(sync); ts.unsubscribeVisibleTimeRangeChange(sync); };
-  }, [chartApi, renderCanvas]);
+    if (!chartApi || !seriesApi) return;
+    
+    const sync = () => {
+      if (renderCanvasRef.current) {
+        renderCanvasRef.current();
+      }
+    };
+    
+    const ts = chartApi.timeScale();
+    ts.subscribeVisibleLogicalRangeChange(sync);
+    ts.subscribeVisibleTimeRangeChange(sync);
+
+    // This catches Y-axis pans/zooms and other redraw events
+    const redrawPrimitive = {
+      renderer: () => ({
+        draw: sync,
+      }),
+      update: () => {},
+    };
+
+    try {
+      seriesApi.attachPrimitive(redrawPrimitive);
+    } catch (e) {
+      console.warn('Failed to attach redraw primitive:', e);
+    }
+
+    return () => {
+      ts.unsubscribeVisibleLogicalRangeChange(sync);
+      ts.unsubscribeVisibleTimeRangeChange(sync);
+      try {
+        seriesApi.detachPrimitive(redrawPrimitive);
+      } catch (e) {}
+    };
+  }, [chartApi, seriesApi]);
 
   return {
     drawings, clearDrawings: useCallback(() => { setDrawings([]); setCurrentDrawing([]); setSelectedDrawingId(null); }, []),

@@ -1,6 +1,7 @@
 import { DhanFeed, Ticker } from 'dhanhq';
 import logger from '../utils/logger';
 import { Server } from 'socket.io';
+import axios from 'axios';
 
 
 let feedInstance: any = null;
@@ -36,27 +37,27 @@ function flushPendingSubscriptions() {
     pendingSubscriptions.length = 0;
 }
 
-// ── REST Polling Fallback ─────────────────────────────────────────────────────
-let restPollInterval: ReturnType<typeof setInterval> | null = null;
+// Control for REST polling to avoid overlapping requests
+let isPollingInProgress = false;
+let restPollInterval: any = null;
 
 /**
- * Poll the Dhan intraday chart API every second for the latest price.
+ * Poll the Dhan intraday chart API for the latest price.
  * Used as fallback when the WebSocket feed fails (e.g. expired token).
  */
-function startRestPolling(clientID: string, accessToken: string) {
-    if (restPollInterval) return; // already running
-
-    logger.info('🔄 Starting REST polling fallback (1-min chart, 1s interval)');
-    const axios = require('axios');
-
-    restPollInterval = setInterval(async () => {
-        if (subscribedTokens.size === 0) return;
-
+async function performRestPoll(clientID: string, accessToken: string) {
+    if (isPollingInProgress) return;
+    
+    isPollingInProgress = true;
+    try {
+        if (subscribedTokens.size === 0) return; // Silent return, will reschedule in finally
+        
         const today = new Date().toISOString().split('T')[0];
 
-        for (const token of subscribedTokens) {
+        // Loop through tokens sequentially to avoid swamping the event loop
+        for (const token of Array.from(subscribedTokens)) {
             try {
-                const response = await (axios.default || axios).post(
+                const response = await axios.post(
                     'https://api.dhan.co/v2/charts/intraday',
                     {
                         securityId: token,
@@ -72,7 +73,7 @@ function startRestPolling(clientID: string, accessToken: string) {
                             'client-id': clientID,
                             'Content-Type': 'application/json',
                         },
-                        timeout: 3000,
+                        timeout: 5000, // Reasonable timeout
                     }
                 );
 
@@ -83,7 +84,7 @@ function startRestPolling(clientID: string, accessToken: string) {
                 if (times.length > 0 && closes.length > 0) {
                     const lastTs = times[times.length - 1];
                     const lastClose = closes[closes.length - 1];
-                    logger.info(`[REST Poll] token:${token} price:${lastClose} ts:${lastTs}`);
+                    logger.debug(`[REST Poll] token:${token} price:${lastClose} ts:${lastTs}`);
                     io?.to(`instrument:${token}`).emit('tick', {
                         token,
                         price: Number(lastClose),
@@ -95,13 +96,27 @@ function startRestPolling(clientID: string, accessToken: string) {
                 logger.warn(`[REST Poll] Failed for token ${token}: ${err.message}`);
             }
         }
-    }, 1500); // 1.5s to avoid hammering the API
+    } finally {
+        isPollingInProgress = false;
+        // Schedule next poll ONLY after this one is finished
+        if (restPollInterval) { // reuse the variable for the timeout handle
+            restPollInterval = setTimeout(() => performRestPoll(clientID, accessToken), 2000) as any;
+        }
+    }
+}
+
+function startRestPolling(clientID: string, accessToken: string) {
+    if (restPollInterval) return; // already running
+
+    logger.info('🔄 Starting REST polling fallback (Safe loop, 2s delay)');
+    restPollInterval = setTimeout(() => performRestPoll(clientID, accessToken), 100) as any;
 }
 
 function stopRestPolling() {
     if (restPollInterval) {
-        clearInterval(restPollInterval);
+        clearTimeout(restPollInterval as any);
         restPollInterval = null;
+        isPollingInProgress = false;
         logger.info('REST polling stopped (WS connected)');
     }
 }
@@ -205,8 +220,15 @@ export function subscribeToInstrument(token: string, segment: string = 'NSE_EQ')
         // Queue for WS subscription when it connects
         const alreadyPending = pendingSubscriptions.some(p => p.token === token);
         if (!alreadyPending) {
-            logger.info(`Dhan WS not connected — queued for WS: ${token} (REST polling will handle it)`);
+            logger.info(`Dhan WS not connected — queued for WS: ${token} (REST polling fallback enabled)`);
             pendingSubscriptions.push({ token, segment });
+        }
+        
+        // Ensure REST polling is running if WS is down
+        const clientID = process.env.DHAN_CLIENT_ID;
+        const accessToken = process.env.DHAN_ACCESS_TOKEN;
+        if (clientID && accessToken) {
+            startRestPolling(clientID, accessToken);
         }
         return;
     }
