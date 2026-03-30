@@ -1,10 +1,14 @@
-import { DhanFeed, Ticker, NSE, NSE_FNO, BSE, MCX } from 'dhanhq';
+import { DhanFeed, Ticker } from 'dhanhq';
 import logger from '../utils/logger';
 import { Server } from 'socket.io';
+
 
 let feedInstance: any = null;
 let io: Server | null = null;
 const subscribedTokens: Set<string> = new Set();
+// Queue for subscriptions that arrive before the Dhan WS is open
+const pendingSubscriptions: Array<{ token: string; segment: string }> = [];
+let feedConnected = false;
 
 // Map string segments to Dhan numeric codes
 const SEGMENT_MAP: Record<string, number> = {
@@ -19,6 +23,89 @@ const SEGMENT_MAP: Record<string, number> = {
     'BSE_CURR': 7,
     'BSE_FNO': 8
 };
+
+/**
+ * Flush any pending subscriptions once the Dhan WS is connected
+ */
+function flushPendingSubscriptions() {
+    if (pendingSubscriptions.length === 0) return;
+    logger.info(`Flushing ${pendingSubscriptions.length} pending Dhan subscriptions`);
+    for (const { token, segment } of pendingSubscriptions) {
+        subscribeToInstrument(token, segment);
+    }
+    pendingSubscriptions.length = 0;
+}
+
+// ── REST Polling Fallback ─────────────────────────────────────────────────────
+let restPollInterval: ReturnType<typeof setInterval> | null = null;
+
+/**
+ * Poll the Dhan intraday chart API every second for the latest price.
+ * Used as fallback when the WebSocket feed fails (e.g. expired token).
+ */
+function startRestPolling(clientID: string, accessToken: string) {
+    if (restPollInterval) return; // already running
+
+    logger.info('🔄 Starting REST polling fallback (1-min chart, 1s interval)');
+    const axios = require('axios');
+
+    restPollInterval = setInterval(async () => {
+        if (subscribedTokens.size === 0) return;
+
+        const today = new Date().toISOString().split('T')[0];
+
+        for (const token of subscribedTokens) {
+            try {
+                const response = await (axios.default || axios).post(
+                    'https://api.dhan.co/v2/charts/intraday',
+                    {
+                        securityId: token,
+                        exchangeSegment: 'IDX_I',
+                        instrument: 'INDEX',
+                        interval: '1',
+                        fromDate: today,
+                        toDate: today,
+                    },
+                    {
+                        headers: {
+                            'access-token': accessToken,
+                            'client-id': clientID,
+                            'Content-Type': 'application/json',
+                        },
+                        timeout: 3000,
+                    }
+                );
+
+                const d = response.data;
+                const times: number[] = d.start_time || d.start_Time || d.timestamp || [];
+                const closes: number[] = d.close || [];
+
+                if (times.length > 0 && closes.length > 0) {
+                    const lastTs = times[times.length - 1];
+                    const lastClose = closes[closes.length - 1];
+                    logger.info(`[REST Poll] token:${token} price:${lastClose} ts:${lastTs}`);
+                    io?.to(`instrument:${token}`).emit('tick', {
+                        token,
+                        price: Number(lastClose),
+                        timestamp: Number(lastTs),
+                        volume: 0,
+                    });
+                }
+            } catch (err: any) {
+                logger.warn(`[REST Poll] Failed for token ${token}: ${err.message}`);
+            }
+        }
+    }, 1500); // 1.5s to avoid hammering the API
+}
+
+function stopRestPolling() {
+    if (restPollInterval) {
+        clearInterval(restPollInterval);
+        restPollInterval = null;
+        logger.info('REST polling stopped (WS connected)');
+    }
+}
+// ─────────────────────────────────────────────────────────────────────────────
 
 /**
  * Initialize Dhan Market Feed
@@ -40,47 +127,65 @@ export function initDhanMarketFeed(serverIo: Server) {
     });
 
     try {
-        // DhanFeed(clientId, accessToken, instruments, subscriptionCode, onConnect, onMessage, onClose)
         feedInstance = new DhanFeed(
             clientID,
             accessToken,
-            [], // Initial instruments
-            Ticker, // Ticker mode (LTP)
+            [],
+            Ticker,
             // onConnect
             (instance: any) => {
-                logger.info('Dhan Market Feed: Successfully connected and authorized');
+                feedConnected = true;
+                stopRestPolling(); // WS connected — stop REST polling if running
+                logger.info('Dhan Market Feed: WebSocket connected and authorized ✓');
+                flushPendingSubscriptions();
             },
             // onMessage
             (instance: any, message: any) => {
-                if (message) {
-                    const token = message.securityId || message.security_id;
-                    if (token) {
-                        io?.to(`instrument:${token}`).emit('tick', {
-                            token: String(token),
-                            price: message.ltp,
-                            timestamp: Math.floor(Date.now() / 1000),
-                            volume: 0
-                        });
-                    }
+                if (!message) return;
+                const token = message.securityId !== undefined ? String(message.securityId) : null;
+                const ltp = message.ltp ?? message.LTP ?? message.last_price ?? message.price;
+                if (token && ltp !== undefined && ltp !== null) {
+                    logger.info(`[WS Tick] token:${token} ltp:${ltp}`);
+                    io?.to(`instrument:${token}`).emit('tick', {
+                        token,
+                        price: Number(ltp),
+                        timestamp: Math.floor(Date.now() / 1000),
+                        volume: message.volume ?? message.Vol ?? 0
+                    });
+                } else {
+                    logger.info('Dhan Feed message (non-ticker):', JSON.stringify(message));
                 }
             },
             // onClose
             (code: number, reason: string) => {
-                logger.warn(`Dhan Market Feed: Connection closed. Code: ${code}, Reason: ${reason}`);
+                feedConnected = false;
+                logger.warn(`Dhan Market Feed: WebSocket closed. Code: ${code}`);
+                if (code === 1006) {
+                    logger.error('⚠️  Dhan WS closed with code 1006 (HTTP 400) — ACCESS TOKEN LIKELY EXPIRED. Falling back to REST polling.');
+                    startRestPolling(clientID, accessToken);
+                }
             }
         );
 
-        // Try to handle error if exposed
-        if (feedInstance && feedInstance.on) {
-             feedInstance.on('error', (err: any) => {
-                 logger.error('Dhan Market Feed Error:', err);
-             });
+        // Catch WS errors (e.g. HTTP 400 on connect)
+        if (feedInstance && feedInstance.ws === undefined) {
+            // ws not created yet — hook after connect is called
         }
 
-        logger.info('Dhan Market Feed: Calling .connect()');
+        logger.info('Dhan Market Feed: Connecting WebSocket...');
         feedInstance.connect();
+
+        // After a short delay, check if WS connected; if not, start REST polling
+        setTimeout(() => {
+            if (!feedConnected) {
+                logger.warn('Dhan WS did not connect within 5s — starting REST polling fallback');
+                startRestPolling(clientID, accessToken);
+            }
+        }, 5000);
+
     } catch (error: any) {
         logger.error('Dhan Market Feed: Failed to initialize:', error.message);
+        startRestPolling(clientID, accessToken);
     }
 }
 
@@ -93,18 +198,26 @@ export function subscribeToInstrument(token: string, segment: string = 'NSE_EQ')
         return;
     }
 
-    const numericSegment = (SEGMENT_MAP[segment] !== undefined) ? SEGMENT_MAP[segment] : 1;
+    // Always track in subscribedTokens — used by REST polling fallback
+    subscribedTokens.add(token);
 
-    if (!subscribedTokens.has(token)) {
-        logger.info(`Subscribing to Dhan: ${token} (Segment: ${numericSegment})`);
-        try {
-            // DhanFeed.subscribeSymbols(subscriptionCode, instruments)
-            // instruments is Array of [segment, token]
-            feedInstance.subscribeSymbols(Ticker, [[numericSegment, token]]);
-            subscribedTokens.add(token);
-        } catch (error: any) {
-            logger.error(`Error subscribing to instrument ${token}:`, error.message);
+    if (!feedConnected) {
+        // Queue for WS subscription when it connects
+        const alreadyPending = pendingSubscriptions.some(p => p.token === token);
+        if (!alreadyPending) {
+            logger.info(`Dhan WS not connected — queued for WS: ${token} (REST polling will handle it)`);
+            pendingSubscriptions.push({ token, segment });
         }
+        return;
+    }
+
+    const numericSegment = (SEGMENT_MAP[segment] !== undefined) ? SEGMENT_MAP[segment] : 1;
+    logger.info(`Subscribing to Dhan WS: ${token} (Segment: ${numericSegment})`);
+    try {
+        feedInstance.subscribeSymbols(Ticker, [[numericSegment, token]]);
+        logger.info(`Successfully sent WS subscribe for token: ${token}`);
+    } catch (error: any) {
+        logger.error(`Error subscribing to instrument ${token}:`, error.message);
     }
 }
 
@@ -114,7 +227,7 @@ export function subscribeToInstrument(token: string, segment: string = 'NSE_EQ')
 export function unsubscribeFromInstrument(token: string, segment: string = 'NSE_EQ') {
     if (!feedInstance) return;
 
-    const numericSegment = SEGMENT_MAP[segment] || 1;
+    const numericSegment = SEGMENT_MAP[segment] ?? 1;
 
     if (subscribedTokens.has(token)) {
         logger.info(`Unsubscribing from Dhan: ${token}`);
@@ -132,14 +245,45 @@ export function unsubscribeFromInstrument(token: string, segment: string = 'NSE_
  */
 export function handleSocketSubscription(socket: any) {
     socket.on('subscribe:instrument', (data: { token: string, segment?: string }) => {
-        socket.join(`instrument:${data.token}`);
-        const segment = data.segment === 'IDX_I' ? 'IDX_I' : (data.segment || 'NSE_EQ');
-        subscribeToInstrument(data.token, segment);
-        logger.info(`Socket ${socket.id} joined room instrument:${data.token} (Segment: ${segment})`);
+        const token = String(data.token);
+        const segment = data.segment || 'NSE_EQ';
+        socket.join(`instrument:${token}`);
+        subscribeToInstrument(token, segment);
+        logger.info(`Socket ${socket.id} joined room instrument:${token} (Segment: ${segment})`);
     });
 
     socket.on('unsubscribe:instrument', (data: { token: string, segment?: string }) => {
         socket.leave(`instrument:${data.token}`);
         logger.info(`Socket ${socket.id} left room instrument:${data.token}`);
     });
+}
+
+/**
+ * Get current feed status for debugging
+ */
+export function getFeedStatus() {
+    return {
+        feedConnected,
+        feedInitialized: !!feedInstance,
+        subscribedTokens: Array.from(subscribedTokens),
+        pendingSubscriptions: [...pendingSubscriptions],
+    };
+}
+
+/**
+ * Emit a fake tick to a token room (for pipeline testing only)
+ */
+export function emitTestTick(token: string, price: number) {
+    if (!io) {
+        logger.warn('emitTestTick: io not initialized');
+        return;
+    }
+    const tick = {
+        token,
+        price,
+        timestamp: Math.floor(Date.now() / 1000),
+        volume: 100,
+    };
+    logger.info(`emitTestTick -> room instrument:${token}`, tick);
+    io.to(`instrument:${token}`).emit('tick', tick);
 }

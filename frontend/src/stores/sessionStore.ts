@@ -186,7 +186,24 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
 
   addLiveCandle: (candle) => {
     const { candles, isLiveMode } = get();
-    const newCandles = [...candles, candle];
+    // Replace if a candle with the same timestamp already exists (e.g. last historical == first live bucket)
+    const lastCandle = candles[candles.length - 1];
+    let newCandles: typeof candles;
+    if (lastCandle && lastCandle.timestamp === candle.timestamp) {
+      // Update the last candle in-place (merge OHLC)
+      newCandles = [
+        ...candles.slice(0, -1),
+        {
+          ...lastCandle,
+          close: candle.close,
+          high: Math.max(lastCandle.high, candle.high),
+          low: Math.min(lastCandle.low, candle.low),
+          volume: (lastCandle.volume || 0) + (candle.volume || 0),
+        },
+      ];
+    } else {
+      newCandles = [...candles, candle];
+    }
     set({ candles: newCandles });
     if (isLiveMode) {
       set({ currentIndex: newCandles.length - 1 });

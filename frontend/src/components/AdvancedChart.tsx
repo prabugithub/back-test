@@ -426,7 +426,14 @@ export function AdvancedChart({
   useEffect(() => {
     if (!series) return;
 
-    const candleData = visibleCandles.map((c: any) => ({
+    // Deduplicate by timestamp — live candles can overlap last historical candle
+    const seenTs = new Map<number, any>();
+    for (const c of visibleCandles) {
+      seenTs.set(c.timestamp as number, c); // later entries win (live overrides historical)
+    }
+    const dedupedCandles = Array.from(seenTs.values());
+
+    const candleData = dedupedCandles.map((c: any) => ({
       time: c.timestamp as any,
       open: c.open,
       high: c.high,
@@ -434,7 +441,7 @@ export function AdvancedChart({
       close: c.close,
     }));
 
-    const volumeData = visibleCandles.map((c: any) => ({
+    const volumeData = dedupedCandles.map((c: any) => ({
       time: c.timestamp as any,
       value: c.volume,
       color: c.close >= c.open ? '#26a69a40' : '#ef535040',
@@ -445,12 +452,8 @@ export function AdvancedChart({
       volumeSeries.setData(volumeData);
     }
 
-    if (chart && visibleCandles.length > 0) {
+    if (chart && dedupedCandles.length > 0) {
       const timeScale = chart.timeScale();
-
-      // Auto-scroll logic: 
-      // If we are strictly "first loading" the data, fit content.
-      // If we are appending data (playback), we generally want to stay on the latest bar (right edge).
       if (isFirstLoadRef.current) {
         timeScale.fitContent();
         isFirstLoadRef.current = false;
@@ -481,79 +484,93 @@ export function AdvancedChart({
     
     const unsubscribe = useLiveStore.subscribe((state, prevState) => {
       const tick = state.lastTick;
-      if (tick && tick !== prevState.lastTick && lastCandleRef.current) {
+      const isLive = state.isLiveMode;
+
+      // Only process ticks in live mode, and only when tick actually changed
+      if (!isLive || !tick || tick === prevState.lastTick) return;
+
+      if (!lastCandleRef.current) {
+        console.warn('[Chart] Tick received but no candles loaded yet');
+        return;
+      }
         
-        const chartInterval = isSecondary ? secondaryTimeframe : sessionConfig?.interval;
-        let tfMinutes = parseInt(chartInterval || '5');
-        if (chartInterval === '1D') tfMinutes = 1440;
-        const timeframeSeconds = tfMinutes * 60;
+      const chartInterval = isSecondary ? secondaryTimeframe : sessionConfig?.interval;
+      let tfMinutes = parseInt(chartInterval || '5');
+      if (chartInterval === '1D') tfMinutes = 1440;
+      const timeframeSeconds = tfMinutes * 60;
+      
+      const bucketStart = Math.floor(tick.timestamp / timeframeSeconds) * timeframeSeconds;
+      const lastCandle = lastCandleRef.current;
+
+      console.debug(`[Chart${isSecondary ? '-2' : '-1'}] tick price=${tick.price} bucket=${bucketStart} last=${lastCandle.time}`);
+      
+      if (bucketStart === lastCandle.time) {
+        // Update current active candle (price update within same bar)
+        lastCandle.close = tick.price;
+        lastCandle.high = Math.max(lastCandle.high, tick.price);
+        lastCandle.low = Math.min(lastCandle.low, tick.price);
+        lastCandle.volume = (lastCandle.volume || 0) + (tick.volume || 0);
         
-        // Find interval boundary matching resampler logic
-        const bucketStart = Math.floor(tick.timestamp / timeframeSeconds) * timeframeSeconds;
-        const lastCandle = lastCandleRef.current;
+        series.update({
+           time: lastCandle.time,
+           open: lastCandle.open,
+           high: lastCandle.high,
+           low: lastCandle.low,
+           close: lastCandle.close
+        });
         
-        if (bucketStart === lastCandle.time) {
-          // Update current active candle
-          lastCandle.close = tick.price;
-          lastCandle.high = Math.max(lastCandle.high, tick.price);
-          lastCandle.low = Math.min(lastCandle.low, tick.price);
-          lastCandle.volume = (lastCandle.volume || 0) + (tick.volume || 0);
-          
-          series.update({
-             time: lastCandle.time,
-             open: lastCandle.open,
-             high: lastCandle.high,
-             low: lastCandle.low,
-             close: lastCandle.close
-          });
-          
-          if (volumeSeries) {
-             volumeSeries.update({
-                time: lastCandle.time,
-                value: lastCandle.volume,
-                color: lastCandle.close >= lastCandle.open ? '#26a69a40' : '#ef535040'
-             });
-          }
-        } else if (bucketStart > lastCandle.time) {
-          // Form a new candle when crossing timeframe boundary
-          const newCandle = {
-             time: bucketStart as any,
-             open: tick.price,
-             high: tick.price,
-             low: tick.price,
-             close: tick.price,
-             volume: tick.volume || 0
-          };
-          lastCandleRef.current = newCandle;
-          
-          series.update({
-             time: newCandle.time,
-             open: newCandle.open,
-             high: newCandle.high,
-             low: newCandle.low,
-             close: newCandle.close
-          });
-          
-          if (volumeSeries) {
-             volumeSeries.update({
-                time: newCandle.time,
-                value: newCandle.volume,
-                color: '#26a69a40'
-             });
-          }
-          
-          // Optionally push to global store (only from primary to avoid duplicates)
-          if (!isSecondary) {
-             useSessionStore.getState().addLiveCandle({
-                timestamp: bucketStart,
-                open: tick.price,
-                high: tick.price,
-                low: tick.price,
-                close: tick.price,
-                volume: tick.volume || 0
-             });
-          }
+        if (volumeSeries) {
+           volumeSeries.update({
+              time: lastCandle.time,
+              value: lastCandle.volume,
+              color: lastCandle.close >= lastCandle.open ? '#26a69a40' : '#ef535040'
+           });
         }
+      } else if (bucketStart > lastCandle.time) {
+        // New timeframe boundary — create a new candle
+        console.debug('[Chart] New candle at bucket', bucketStart);
+        const newCandle = {
+           time: bucketStart as any,
+           open: tick.price,
+           high: tick.price,
+           low: tick.price,
+           close: tick.price,
+           volume: tick.volume || 0
+        };
+        lastCandleRef.current = newCandle;
+        
+        series.update({
+           time: newCandle.time,
+           open: newCandle.open,
+           high: newCandle.high,
+           low: newCandle.low,
+           close: newCandle.close
+        });
+        
+        if (volumeSeries) {
+           volumeSeries.update({
+              time: newCandle.time,
+              value: newCandle.volume,
+              color: '#26a69a40'
+           });
+        }
+        
+        // Auto-scroll to show latest candle
+        try { chart.timeScale().scrollToRealTime(); } catch (_) {}
+
+        // Persist new candle to session store (primary chart only to avoid duplicates)
+        if (!isSecondary) {
+           useSessionStore.getState().addLiveCandle({
+              timestamp: bucketStart,
+              open: tick.price,
+              high: tick.price,
+              low: tick.price,
+              close: tick.price,
+              volume: tick.volume || 0
+           });
+        }
+      } else {
+        console.warn('[Chart] Stale tick ignored: bucket', bucketStart, '< lastCandle.time', lastCandle.time);
       }
     });
 
