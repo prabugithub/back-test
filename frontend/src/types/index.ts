@@ -45,6 +45,7 @@ export interface Trade {
   withTrendSeen?: boolean;
   journal?: TradeJournal;
   interval?: string;
+  liveOptionToken?: string;
 }
 
 // Position tracking
@@ -64,6 +65,7 @@ export interface Position {
   trendReversed?: boolean;
   trendReversedPnL?: number;
   withTrendSeen?: boolean;
+  liveOptionToken?: string;
 }
 
 // API request/response types

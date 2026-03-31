@@ -72,8 +72,20 @@ export async function placeLiveOrder(params: {
   exchangeSegment: string;
   transactionType: 'BUY' | 'SELL';
   quantity: number;
+  price?: number;
+  orderType?: 'MARKET' | 'LIMIT';
   productType?: string;
 }): Promise<any> {
   const response = await apiClient.post('/api/live/order', params);
+  return response.data;
+}
+
+/**
+ * Fetch ATM Option token for live trading
+ */
+export async function getATMOption(spotPrice: number, optionType: 'CE' | 'PE', instrument: 'NIFTY' | 'BANKNIFTY' = 'NIFTY'): Promise<any> {
+  const response = await apiClient.get('/api/live/atm-option', {
+    params: { price: spotPrice, type: optionType, instrument }
+  });
   return response.data;
 }

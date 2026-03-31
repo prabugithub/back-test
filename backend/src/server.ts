@@ -33,6 +33,7 @@ import { Server } from 'socket.io';
 import http from 'http';
 
 import { initDhanMarketFeed, handleSocketSubscription } from './services/dhanMarketFeed.service';
+import { initSymbolMaster } from './services/symbolMaster.service';
 
 const app: Express = express();
 const PORT = process.env.PORT || 3001;
@@ -128,6 +129,7 @@ async function startServer() {
     // Initialize Dhan client
     try {
       initDhanClient();
+      initSymbolMaster(); // Download and parse Scrip Master
       // Initialize Market Feed
       initDhanMarketFeed(io);
     } catch (error: any) {

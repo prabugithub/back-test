@@ -1,6 +1,7 @@
 import { Router, Request, Response } from 'express';
 import { placeOrder } from '../services/dhan.service';
 import { getFeedStatus, emitTestTick } from '../services/dhanMarketFeed.service';
+import { getATMOptionForOrder } from '../services/optionChain.service';
 import logger from '../utils/logger';
 
 const router = Router();
@@ -16,6 +17,8 @@ router.post('/order', async (req: Request, res: Response) => {
             exchangeSegment,
             transactionType,
             quantity,
+            price,
+            orderType,
             productType
         } = req.body;
 
@@ -31,6 +34,8 @@ router.post('/order', async (req: Request, res: Response) => {
             exchangeSegment,
             transactionType,
             quantity,
+            price,
+            orderType,
             productType
         });
 
@@ -66,5 +71,33 @@ router.post('/test-tick', (req: Request, res: Response) => {
     res.json({ success: true, message: `Test tick emitted for token ${token} @ ${price}` });
 });
 
-export default router;
+/**
+ * GET /api/live/atm-option
+ * Fetches ATM option details (securityId + live LTP) via:
+ *   1. Dhan Option Chain Expiry List API  → picks nearest weekly expiry
+ *   2. Dhan Option Chain API              → gets live LTP for ATM strike
+ *   3. Symbol Master CSV                  → resolves the official securityId
+ */
+router.get('/atm-option', async (req: Request, res: Response) => {
+    try {
+        const { price, type, instrument } = req.query;
+        if (!price || !type) {
+            return res.status(400).json({ error: 'Missing price or type query params' });
+        }
 
+        const spotPrice = Number(price);
+        const optType = (type as string).toUpperCase() as 'CE' | 'PE';
+        const instName = ((instrument as string) || 'NIFTY').toUpperCase() as 'NIFTY' | 'BANKNIFTY';
+
+        const result = await getATMOptionForOrder(spotPrice, optType, instName);
+
+        logger.info(`ATM Option resolved: ${result.tradingSymbol} | LTP: ${result.ltp} | Expiry: ${result.expiry}`);
+        res.json({ success: true, data: result });
+
+    } catch (error: any) {
+        logger.error('Error fetching ATM option:', error.message);
+        res.status(500).json({ error: 'Server error', message: error.message });
+    }
+});
+
+export default router;

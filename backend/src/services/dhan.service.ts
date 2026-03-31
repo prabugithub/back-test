@@ -258,6 +258,8 @@ export async function placeOrder(params: {
     exchangeSegment: string;
     transactionType: 'BUY' | 'SELL';
     quantity: number;
+    price?: number;          // Required for LIMIT orders
+    orderType?: 'MARKET' | 'LIMIT';
     productType?: 'CNC' | 'INTRADAY' | 'MARGIN' | 'MTF' | 'CO' | 'BO';
 }) {
     const accessToken = process.env.DHAN_ACCESS_TOKEN;
@@ -266,8 +268,16 @@ export async function placeOrder(params: {
         throw new Error('DHAN_ACCESS_TOKEN and DHAN_CLIENT_ID are required');
     }
 
+    const orderType = params.orderType || 'LIMIT';
+    const price = params.price || 0;
+
+    // For LIMIT orders, price must be > 0
+    if (orderType === 'LIMIT' && price <= 0) {
+        throw new Error('LIMIT order requires a valid price > 0');
+    }
+
     try {
-        logger.info('Placing market order on Dhan API', params);
+        logger.info('Placing order on Dhan API', { ...params, orderType, price });
 
         const response = await axios.post('https://api.dhan.co/v2/orders', {
             dhanClientId: clientID,
@@ -275,11 +285,11 @@ export async function placeOrder(params: {
             transactionType: params.transactionType,
             exchangeSegment: params.exchangeSegment,
             productType: params.productType || 'INTRADAY',
-            orderType: 'MARKET',
+            orderType,
             validity: 'DAY',
             securityId: params.securityId,
             quantity: params.quantity,
-            price: 0,
+            price,
             disclosedQuantity: 0,
             triggerPrice: 0,
             afterMarketOrder: false,

@@ -6,7 +6,7 @@ import { saveSession, loadSession, restoreBackup, saveSnapshot, listSnapshots, l
 import { useNotificationStore } from './notificationStore';
 import { calculatePivotPoints } from '../utils/indicators';
 import { analyzeMarketStructure } from '../utils/pivotAnalysis';
-import { placeLiveOrder } from '../services/api';
+import { placeLiveOrder, getATMOption } from '../services/api';
 
 export interface SessionConfig {
   securityId: string;
@@ -180,7 +180,7 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
     // Check SL/TP hits for current position using live price
     const { isLiveMode, currentIndex } = get();
     if (isLiveMode) {
-      get().checkSLTPHits(currentIndex, price);
+      get().checkSLTPHits(currentIndex);
     }
   },
 
@@ -396,31 +396,7 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
   executeTrade: async (type, quantity, stopLoss, target, priceOverride, exitReason = 'MANUAL', journal) => {
     const { candles, currentIndex, trades, position, instrument, sessionConfig, isLiveMode } = get();
     const currentCandle = candles[currentIndex];
-
-    // Handle Live Order Placement
-    if (isLiveMode && sessionConfig) {
-      try {
-        const orderResult = await placeLiveOrder({
-          securityId: sessionConfig.securityId,
-          exchangeSegment: sessionConfig.exchangeSegment,
-          transactionType: type,
-          quantity: quantity,
-          productType: 'INTRADAY' // Defaulting to intraday for now
-        });
-
-        if (orderResult.success) {
-           useNotificationStore.getState().notify(`Live Order Placed: ${type} ${quantity} (ID: ${orderResult.data?.orderId || 'N/A'})`, 'info');
-        } else {
-           useNotificationStore.getState().notify(`Live Order Failed: ${orderResult.message || 'Unknown error'}`, 'error');
-           return; // Stop local execution if live order failed? 
-           // User might want to keep local in sync, but if order failed, local shouldn't proceed.
-        }
-      } catch (error: any) {
-        useNotificationStore.getState().notify(`Error placing live order: ${error.message}`, 'error');
-        return;
-      }
-    }
-
+    
     if (!currentCandle) {
       console.error('No current candle available');
       return;
@@ -429,9 +405,93 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
     const currentPrice = priceOverride || currentCandle.close;
     const timestamp = currentCandle.timestamp;
 
+    // 1. Calculate the Live Trading Quantity (Lots based)
+    let finalQuantity = quantity;
+    if (isLiveMode && typeof instrument === 'string' && (instrument.includes('NIFTY') || instrument.includes('BANKNIFTY'))) {
+        const isBankNifty = instrument.includes('BANKNIFTY');
+        const lotSize = isBankNifty ? 15 : 65; 
+        const fraction = quantity / lotSize;
+        const decimal = fraction - Math.floor(fraction);
+        const lots = decimal > 0.5 ? Math.ceil(fraction) : Math.floor(fraction);
+        finalQuantity = Math.max(1, lots) * lotSize;
+    }
+
+    let atmOptionToken: string | undefined = undefined;
+
+    // Handle Live Order Placement
+    if (isLiveMode && sessionConfig) {
+      try {
+        let liveSecurityId = sessionConfig.securityId;
+        let liveExchange = sessionConfig.exchangeSegment;
+        let liveTransactionType = type;
+        let limitPrice: number | undefined = undefined;
+
+        // If it's an Index (NIFTY/BANKNIFTY) live trade → place via ATM Option
+        if (typeof instrument === 'string' && (instrument.toUpperCase().includes('NIFTY') || instrument.toUpperCase().includes('BANKNIFTY'))) {
+            if (position && position.liveOptionToken) {
+               // CLOSING: Sell the same option we bought
+               liveSecurityId = position.liveOptionToken;
+               liveExchange = 'NSE_FNO';
+               liveTransactionType = 'SELL';
+               // Try to get current LTP for closing limit order
+               try {
+                 const instName = instrument.toUpperCase().includes('BANKNIFTY') ? 'BANKNIFTY' : 'NIFTY';
+                 const optType = type === 'BUY' ? 'CE' : 'PE';
+                 const closingOptData = await getATMOption(currentPrice, optType, instName);
+                 if (closingOptData?.data?.ltp) {
+                   limitPrice = closingOptData.data.ltp;
+                 }
+               } catch (_) { /* use market if LTP unavailable */ }
+            } else {
+               // OPENING: Fetch the ATM weekly option token and its current LTP
+               const optType = type === 'BUY' ? 'CE' : 'PE';
+               const instName = instrument.toUpperCase().includes('BANKNIFTY') ? 'BANKNIFTY' : 'NIFTY';
+               const optData = await getATMOption(currentPrice, optType, instName);
+               if (optData && optData.success && optData.data) {
+                  liveSecurityId = optData.data.securityId;
+                  liveExchange = 'NSE_FNO';
+                  liveTransactionType = 'BUY';
+                  atmOptionToken = liveSecurityId;
+                  limitPrice = optData.data.ltp || undefined;
+                  useNotificationStore.getState().notify(
+                    `ATM Option: ${optData.data.tradingSymbol} | LTP: ${limitPrice?.toFixed(2) ?? 'N/A'}`,
+                    'info'
+                  );
+               } else {
+                  throw new Error('Could not find ATM Option token. Symbol Master may not be ready.');
+               }
+            }
+        }
+
+        if (!limitPrice) {
+          throw new Error('Could not fetch LTP for option. Cannot place LIMIT order without a valid price.');
+        }
+
+        const orderResult = await placeLiveOrder({
+          securityId: liveSecurityId,
+          exchangeSegment: liveExchange,
+          transactionType: liveTransactionType,
+          quantity: finalQuantity,
+          price: limitPrice,
+          orderType: 'LIMIT',
+          productType: 'INTRADAY'
+        });
+
+        if (orderResult.success) {
+           useNotificationStore.getState().notify(`Live Order Placed: ${liveTransactionType} ${finalQuantity} @ ₹${limitPrice?.toFixed(2)} (ID: ${orderResult.data?.orderId || 'N/A'})`, 'info');
+        } else {
+           useNotificationStore.getState().notify(`Live Order Failed: ${orderResult.message || 'Unknown error'}`, 'error');
+           return; 
+        }
+      } catch (error: any) {
+        useNotificationStore.getState().notify(`Error placing live option order: ${error.message}`, 'error');
+        return;
+      }
+    }
+
     const tradeSign = type === 'BUY' ? 1 : -1;
     const currentQty = position ? position.quantity : 0;
-    const tradeQtySigned = quantity * tradeSign;
+    const tradeQtySigned = finalQuantity * tradeSign;
     const newQty = currentQty + tradeQtySigned;
 
     const isSameDirection = (currentQty > 0 && tradeSign > 0) || (currentQty < 0 && tradeSign < 0);
@@ -479,8 +539,9 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
       timestamp,
       type,
       price: currentPrice,
-      quantity,
+      quantity: finalQuantity,
       instrument,
+      liveOptionToken: atmOptionToken || position?.liveOptionToken,
       stopLoss: tradeStopLoss,
       target: tradeTarget,
       exitReason: exitReason,
@@ -505,18 +566,18 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
     if (currentQty === 0) {
       newAvgPrice = currentPrice;
     } else if (isSameDirection) {
-      const totalValue = (Math.abs(currentQty) * currentAvgPrice) + (quantity * currentPrice);
-      const totalShares = Math.abs(currentQty) + quantity;
+      const totalValue = (Math.abs(currentQty) * currentAvgPrice) + (finalQuantity * currentPrice);
+      const totalShares = Math.abs(currentQty) + finalQuantity;
       newAvgPrice = totalValue / totalShares;
     } else {
-      const qtyClosing = Math.min(Math.abs(currentQty), quantity);
+      const qtyClosing = Math.min(Math.abs(currentQty), finalQuantity);
       const pnlPerShare = currentQty > 0 ? (currentPrice - currentAvgPrice) : (currentAvgPrice - currentPrice);
       const realizedParams = pnlPerShare * qtyClosing;
 
       tradePnL = realizedParams;
       newRealizedPnL += realizedParams;
 
-      const qtyRemaining = quantity - qtyClosing;
+      const qtyRemaining = finalQuantity - qtyClosing;
       if (qtyRemaining > 0) {
         newAvgPrice = currentPrice;
       }
@@ -540,6 +601,7 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
       trendReversed: isFlip ? undefined : position?.trendReversed,
       trendReversedPnL: isFlip ? undefined : position?.trendReversedPnL,
       withTrendSeen: trade.withTrendSeen,
+      liveOptionToken: atmOptionToken || position?.liveOptionToken,
     };
 
     set({
@@ -960,3 +1022,4 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
     }
   },
 }));
+
