@@ -77,27 +77,43 @@ async function fetchATMLTPFromChain(
     );
 
     const oc = response.data?.data?.oc || response.data?.oc;
-    if (!oc) throw new Error('Option chain data missing from Dhan response');
-
     // Round spot to nearest strike interval
     const interval = config.strikeInterval;
     const atmStrike = Math.round(spotPrice / interval) * interval;
 
-    // Search for ATM strike — try exact, then ±1 interval
-    for (const delta of [0, interval, -interval, 2 * interval, -2 * interval]) {
+    if (!oc) {
+        logger.warn(`Option chain data missing from Dhan response for ${instrumentName} exp ${expiry}`);
+        return { ltp: 0, atmStrike };
+    }
+
+    // Search for ATM strike — widen search to find ANY strike with a price if ATM is missing
+    const searchRange: number[] = [0];
+    for (let i = 1; i <= 10; i++) {
+        searchRange.push(i * interval);
+        searchRange.push(-i * interval);
+    }
+
+    for (const delta of searchRange) {
         const strike = atmStrike + delta;
         const strikeKey = String(strike);
-        const strikeData = oc[strikeKey];
+        
+        // Dhan might return strikes as "22500" or "22500.0"
+        const strikeData = oc[strikeKey] || oc[`${strike}.0`];
+        
         if (strikeData) {
             const optData = strikeData[optionType.toLowerCase()];
             if (optData && optData.last_price > 0) {
+                if (delta !== 0) {
+                    logger.warn(`Exact ATM ${atmStrike} has no LTP. Using adjusted strike ${strike} (delta: ${delta})`);
+                }
                 logger.info(`Option chain LTP for ${instrumentName} ${optionType} ${strike} exp ${expiry}: ${optData.last_price}`);
                 return { ltp: optData.last_price, atmStrike: strike };
             }
         }
     }
 
-    throw new Error(`Could not find LTP for ${instrumentName} ATM ${optionType} in chain (spot: ${spotPrice}, strike tried: ${atmStrike})`);
+    logger.warn(`Could not find ANY LTP for ${instrumentName} near ATM ${atmStrike} in chain. Returning LTP 0.`);
+    return { ltp: 0, atmStrike };
 }
 
 /**

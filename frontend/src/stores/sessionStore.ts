@@ -405,16 +405,8 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
     const currentPrice = priceOverride || currentCandle.close;
     const timestamp = currentCandle.timestamp;
 
-    // 1. Calculate the Live Trading Quantity (Lots based)
+    // Initial quantity calculation (will be refined for live index trades once lotSize is fetched)
     let finalQuantity = quantity;
-    if (isLiveMode && typeof instrument === 'string' && (instrument.includes('NIFTY') || instrument.includes('BANKNIFTY'))) {
-        const isBankNifty = instrument.includes('BANKNIFTY');
-        const lotSize = isBankNifty ? 15 : 65; 
-        const fraction = quantity / lotSize;
-        const decimal = fraction - Math.floor(fraction);
-        const lots = decimal > 0.5 ? Math.ceil(fraction) : Math.floor(fraction);
-        finalQuantity = Math.max(1, lots) * lotSize;
-    }
 
     let atmOptionToken: string | undefined = undefined;
 
@@ -427,25 +419,48 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
         let limitPrice: number | undefined = undefined;
 
         // If it's an Index (NIFTY/BANKNIFTY) live trade → place via ATM Option
-        if (typeof instrument === 'string' && (instrument.toUpperCase().includes('NIFTY') || instrument.toUpperCase().includes('BANKNIFTY'))) {
+        const isNiftyIndex = (typeof instrument === 'string' && instrument.toUpperCase().includes('NIFTY')) || String(sessionConfig.securityId) === '13';
+        const isBankNiftyIndex = (typeof instrument === 'string' && instrument.toUpperCase().includes('BANKNIFTY')) || String(sessionConfig.securityId) === '25';
+        
+        if (isNiftyIndex || isBankNiftyIndex) {
             if (position && position.liveOptionToken) {
-               // CLOSING: Sell the same option we bought
+               // CLOSING: Sell the same option we already hold
                liveSecurityId = position.liveOptionToken;
                liveExchange = 'NSE_FNO';
-               liveTransactionType = 'SELL';
-               // Try to get current LTP for closing limit order
-               try {
-                 const instName = instrument.toUpperCase().includes('BANKNIFTY') ? 'BANKNIFTY' : 'NIFTY';
-                 const optType = type === 'BUY' ? 'CE' : 'PE';
-                 const closingOptData = await getATMOption(currentPrice, optType, instName);
-                 if (closingOptData?.data?.ltp) {
-                   limitPrice = closingOptData.data.ltp;
-                 }
-               } catch (_) { /* use market if LTP unavailable */ }
+               liveTransactionType = type; // e.g. SELL to close a LONG
+               
+                // Try to get current LTP for closing limit order
+                try {
+                  const instName = isBankNiftyIndex ? 'BANKNIFTY' : 'NIFTY';
+                  // We use the same option type as the position we hold
+                  const optType = (position.quantity > 0) ? 'CE' : 'PE'; 
+                  const closingOptData = await getATMOption(currentPrice, optType, instName);
+                  if (closingOptData?.success) {
+                    if (closingOptData.data?.ltp) {
+                      limitPrice = closingOptData.data.ltp;
+                    }
+                    
+                    // Refine quantity for closing trade
+                    if (closingOptData.data?.lotSize) {
+                      const lotSize = closingOptData.data.lotSize;
+                      const fraction = quantity / lotSize;
+                      // For closing, we round to nearest lot (0.5 threshold)
+                      const lots = Math.round(fraction);
+                      finalQuantity = Math.max(1, lots) * lotSize;
+                      
+                      // Safety: if we are closing a position, don't exceed the current position size
+                      if (Math.abs(finalQuantity) > Math.abs(position.quantity)) {
+                         finalQuantity = Math.abs(position.quantity);
+                      }
+                    }
+                  }
+                } catch (err) { 
+                  console.warn('Could not fetch LTP/LotSize for closing, will fallback to MARKET', err);
+                }
             } else {
                // OPENING: Fetch the ATM weekly option token and its current LTP
                const optType = type === 'BUY' ? 'CE' : 'PE';
-               const instName = instrument.toUpperCase().includes('BANKNIFTY') ? 'BANKNIFTY' : 'NIFTY';
+               const instName = isBankNiftyIndex ? 'BANKNIFTY' : 'NIFTY';
                const optData = await getATMOption(currentPrice, optType, instName);
                if (optData && optData.success && optData.data) {
                   liveSecurityId = optData.data.securityId;
@@ -453,8 +468,20 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
                   liveTransactionType = 'BUY';
                   atmOptionToken = liveSecurityId;
                   limitPrice = optData.data.ltp || undefined;
+                  
+                  // Refine quantity based on official lot size from backend
+                  if (optData.data.lotSize) {
+                     const lotSize = optData.data.lotSize;
+                     const fraction = quantity / lotSize;
+                     // Rounding logic: more than 0.1 of a lot rounds UP (1.1 lots -> 2 lots)
+                     // This ensures a 1-lot minimum even for small risk amounts.
+                     const decimal = fraction - Math.floor(fraction);
+                     const lots = decimal > 0.1 ? Math.ceil(fraction) : Math.floor(fraction);
+                     finalQuantity = Math.max(1, lots) * lotSize;
+                  }
+
                   useNotificationStore.getState().notify(
-                    `ATM Option: ${optData.data.tradingSymbol} | LTP: ${limitPrice?.toFixed(2) ?? 'N/A'}`,
+                    `ATM Option: ${optData.data.tradingSymbol} | Qty: ${finalQuantity} (${Math.round(finalQuantity / (optData.data.lotSize || 1))} lots)`,
                     'info'
                   );
                } else {
@@ -463,17 +490,25 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
             }
         }
 
+        let orderTypeToUse: 'LIMIT' | 'MARKET' = 'LIMIT';
         if (!limitPrice) {
-          throw new Error('Could not fetch LTP for option. Cannot place LIMIT order without a valid price.');
+          orderTypeToUse = 'MARKET';
+          console.warn('LTP not available for option, falling back to MARKET order');
+          useNotificationStore.getState().notify('LTP unavailable: Placing MARKET order instead of LIMIT', 'warning');
+        }
+
+        // Fail-safe: Ensure we never send an index directly to Dhan API
+        if (liveExchange === 'IDX_I' || String(liveSecurityId) === '13' || String(liveSecurityId) === '25') {
+          throw new Error(`Invalid live order: Attempted to trade Index ${liveSecurityId} directly. Ensure Symbol Master is resolving ATM options.`);
         }
 
         const orderResult = await placeLiveOrder({
-          securityId: liveSecurityId,
+          securityId: String(liveSecurityId),
           exchangeSegment: liveExchange,
           transactionType: liveTransactionType,
           quantity: finalQuantity,
-          price: limitPrice,
-          orderType: 'LIMIT',
+          price: orderTypeToUse === 'LIMIT' ? limitPrice : 0,
+          orderType: orderTypeToUse,
           productType: 'INTRADAY'
         });
 
