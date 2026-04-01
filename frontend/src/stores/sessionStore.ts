@@ -6,7 +6,7 @@ import { saveSession, loadSession, restoreBackup, saveSnapshot, listSnapshots, l
 import { useNotificationStore } from './notificationStore';
 import { calculatePivotPoints } from '../utils/indicators';
 import { analyzeMarketStructure } from '../utils/pivotAnalysis';
-import { placeLiveOrder, getATMOption } from '../services/api';
+import { placeLiveOrder, getATMOption, executeSmartExit } from '../services/api';
 
 export interface SessionConfig {
   securityId: string;
@@ -275,19 +275,26 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
       }
     }
 
-    // 3. Check for Close-based Trigger (Dialog)
+    // 3. Check for Close-based Trigger (Dialog) or Live Option Touch-based Auto Exit
     let dialogToTrigger: 'SL' | 'TP' | null = null;
+    let autoExitSL = false;
+
+    const { isLiveMode } = get();
+    const isLiveOption = isLiveMode && position.liveOptionToken;
+
     if (isLong) {
-      if (sl > 0 && effectiveClose <= sl && !nextSlDialogShown) {
-        dialogToTrigger = 'SL';
+      if (sl > 0 && (isLiveOption ? effectiveLow : effectiveClose) <= sl && !nextSlDialogShown) {
+        if (isLiveOption) autoExitSL = true;
+        else dialogToTrigger = 'SL';
         nextSlDialogShown = true;
       } else if (tp > 0 && effectiveClose >= tp && !nextTpDialogShown) {
         dialogToTrigger = 'TP';
         nextTpDialogShown = true;
       }
     } else {
-      if (sl > 0 && effectiveClose >= sl && !nextSlDialogShown) {
-        dialogToTrigger = 'SL';
+      if (sl > 0 && (isLiveOption ? effectiveHigh : effectiveClose) >= sl && !nextSlDialogShown) {
+        if (isLiveOption) autoExitSL = true;
+        else dialogToTrigger = 'SL';
         nextSlDialogShown = true;
       } else if (tp > 0 && effectiveClose <= tp && !nextTpDialogShown) {
         dialogToTrigger = 'TP';
@@ -303,7 +310,7 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
       nextSlDialogShown !== position.slDialogShown ||
       nextTpDialogShown !== position.tpDialogShown;
 
-    if (hasChanged || dialogToTrigger) {
+    if (hasChanged || dialogToTrigger || autoExitSL) {
       const updatedPosition = {
         ...position,
         slHit: nextSlHit,
@@ -313,7 +320,22 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
         tpDialogShown: nextTpDialogShown,
       };
 
-      if (dialogToTrigger) {
+      if (autoExitSL) {
+        // Immediately fire the exit trade locally to clean UI and trigger backend smart-exit via executeTrade
+        set({ position: updatedPosition });
+        
+        // Push a notification that we are auto-exiting via smart chaser
+        useNotificationStore.getState().notify(
+            `SL Hit at ${sl.toFixed(2)}. Initiating Smart Exit Chaser for protecting capital.`, 
+            'warning'
+        );
+
+        get().executeTrade(
+           isLong ? 'SELL' : 'BUY',
+           Math.abs(position.quantity),
+           undefined, undefined, undefined, 'SL'
+        );
+      } else if (dialogToTrigger) {
         set({
           isPlaying: false,
           pendingExitRequest: { type: dialogToTrigger, price: dialogToTrigger === 'SL' ? sl : tp, spotPrice: close },
@@ -502,20 +524,33 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
           throw new Error(`Invalid live order: Attempted to trade Index ${liveSecurityId} directly. Ensure Symbol Master is resolving ATM options.`);
         }
 
-        const orderResult = await placeLiveOrder({
-          securityId: String(liveSecurityId),
-          exchangeSegment: liveExchange,
-          transactionType: liveTransactionType,
-          quantity: finalQuantity,
-          price: orderTypeToUse === 'LIMIT' ? limitPrice : 0,
-          orderType: orderTypeToUse,
-          productType: 'INTRADAY'
-        });
+        let orderResult;
 
-        if (orderResult.success) {
-           useNotificationStore.getState().notify(`Live Order Placed: ${liveTransactionType} ${finalQuantity} @ ₹${limitPrice?.toFixed(2)} (ID: ${orderResult.data?.orderId || 'N/A'})`, 'info');
+        if (exitReason === 'SL' && position && position.liveOptionToken && isLiveMode) {
+             orderResult = await executeSmartExit({
+                 securityId: String(liveSecurityId),
+                 exchangeSegment: liveExchange,
+                 transactionType: liveTransactionType,
+                 quantity: finalQuantity,
+                 slPrice: Number(position.stopLoss)
+             });
         } else {
-           useNotificationStore.getState().notify(`Live Order Failed: ${orderResult.message || 'Unknown error'}`, 'error');
+             orderResult = await placeLiveOrder({
+               securityId: String(liveSecurityId),
+               exchangeSegment: liveExchange,
+               transactionType: liveTransactionType,
+               quantity: finalQuantity,
+               price: orderTypeToUse === 'LIMIT' ? limitPrice : 0,
+               orderType: orderTypeToUse,
+               productType: 'INTRADAY'
+             });
+        }
+
+        if (orderResult && orderResult.success) {
+           const logMsg = exitReason === 'SL' ? `Smart Exit Launched` : `Live Order Placed`;
+           useNotificationStore.getState().notify(`${logMsg}: ${liveTransactionType} ${finalQuantity} @ ₹${limitPrice?.toFixed(2) || 'auto'} (ID: ${orderResult.data?.orderId || orderResult.orderId || 'N/A'})`, 'info');
+        } else {
+           useNotificationStore.getState().notify(`Live Order Failed: ${orderResult?.message || 'Unknown error'}`, 'error');
            return; 
         }
       } catch (error: any) {

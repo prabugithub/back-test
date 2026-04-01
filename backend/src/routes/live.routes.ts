@@ -2,6 +2,7 @@ import { Router, Request, Response } from 'express';
 import { placeOrder } from '../services/dhan.service';
 import { getFeedStatus, emitTestTick } from '../services/dhanMarketFeed.service';
 import { getATMOptionForOrder } from '../services/optionChain.service';
+import { executeSmartExit } from '../services/smartExit.service';
 import logger from '../utils/logger';
 
 const router = Router();
@@ -47,6 +48,38 @@ router.post('/order', async (req: Request, res: Response) => {
         logger.error('Error placing order:', error.message);
         res.status(500).json({
             error: 'Failed to place order',
+            message: error.message
+        });
+    }
+});
+
+/**
+ * POST /api/live/smart-exit
+ * Start the Smart Exit Chaser Loop
+ */
+router.post('/smart-exit', async (req: Request, res: Response) => {
+    try {
+        const {
+            securityId,
+            exchangeSegment,
+            transactionType,
+            quantity,
+            slPrice
+        } = req.body;
+
+        if (!securityId || !exchangeSegment || !transactionType || !quantity || !slPrice) {
+            return res.status(400).json({
+                error: 'Missing required parameters',
+                required: ['securityId', 'exchangeSegment', 'transactionType', 'quantity', 'slPrice']
+            });
+        }
+
+        const result = await executeSmartExit(req.body);
+        res.json(result);
+    } catch (error: any) {
+        logger.error('Error starting Smart Exit:', error.message);
+        res.status(500).json({
+            error: 'Failed to start Smart Exit',
             message: error.message
         });
     }

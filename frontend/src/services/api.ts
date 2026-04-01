@@ -81,6 +81,20 @@ export async function placeLiveOrder(params: {
 }
 
 /**
+ * Execute Smart Exit Loop for Options
+ */
+export async function executeSmartExit(params: {
+  securityId: string;
+  exchangeSegment: string;
+  transactionType: 'BUY' | 'SELL';
+  quantity: number;
+  slPrice: number;
+}): Promise<any> {
+  const response = await apiClient.post('/api/live/smart-exit', params);
+  return response.data;
+}
+
+/**
  * Fetch ATM Option token for live trading
  */
 export async function getATMOption(spotPrice: number, optionType: 'CE' | 'PE', instrument: 'NIFTY' | 'BANKNIFTY' = 'NIFTY'): Promise<any> {

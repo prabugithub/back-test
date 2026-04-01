@@ -317,6 +317,81 @@ export async function placeOrder(params: {
 }
 
 /**
+ * Get Order Status from Dhan
+ */
+export async function getOrderStatus(orderId: string) {
+    const accessToken = process.env.DHAN_ACCESS_TOKEN;
+    const clientID = process.env.DHAN_CLIENT_ID;
+    if (!accessToken || !clientID) {
+        throw new Error('DHAN_ACCESS_TOKEN and DHAN_CLIENT_ID are required');
+    }
+
+    try {
+        const response = await axios.get(`https://api.dhan.co/v2/orders/${orderId}`, {
+            headers: {
+                'access-token': accessToken,
+                'client-id': clientID
+            }
+        });
+        return response.data;
+    } catch (error: any) {
+        if (error.response) {
+            logger.error(`Dhan Get Order API error response for ${orderId}:`, error.response.data);
+            throw new Error(`Dhan API error: ${JSON.stringify(error.response.data)}`);
+        }
+        logger.error(`Dhan Get Order API error for ${orderId}:`, error.message);
+        throw new Error(`Dhan API error: ${error.message}`);
+    }
+}
+
+/**
+ * Modify a pending order on Dhan
+ */
+export async function modifyOrder(orderId: string, params: {
+    orderType: 'MARKET' | 'LIMIT';
+    price?: number;
+    quantity: number;
+    exchangeSegment: string;
+}) {
+    const accessToken = process.env.DHAN_ACCESS_TOKEN;
+    const clientID = process.env.DHAN_CLIENT_ID;
+    if (!accessToken || !clientID) {
+        throw new Error('DHAN_ACCESS_TOKEN and DHAN_CLIENT_ID are required');
+    }
+
+    try {
+        logger.info(`Modifying order ${orderId} on Dhan API`, params);
+
+        const response = await axios.put(`https://api.dhan.co/v2/orders/${orderId}`, {
+            orderId: orderId,
+            orderType: params.orderType,
+            quantity: params.quantity,
+            price: params.price || 0,
+            exchangeSegment: params.exchangeSegment,
+            validity: 'DAY',
+            disclosedQuantity: 0,
+            triggerPrice: 0
+        }, {
+            headers: {
+                'Content-Type': 'application/json',
+                'access-token': accessToken,
+                'client-id': clientID
+            }
+        });
+
+        logger.info(`Dhan Order Modify response for ${orderId}:`, response.data);
+        return response.data;
+    } catch (error: any) {
+        if (error.response) {
+            logger.error(`Dhan Order Modify API error response for ${orderId}:`, error.response.data);
+            throw new Error(`Dhan API error: ${JSON.stringify(error.response.data)}`);
+        }
+        logger.error(`Dhan Order Modify API error for ${orderId}:`, error.message);
+        throw new Error(`Dhan API error: ${error.message}`);
+    }
+}
+
+/**
  * Retry wrapper for API calls
  */
 export async function retryApiCall<T>(fn: () => Promise<T>, maxRetries = 3, baseDelay = 1000): Promise<T> {
