@@ -57,6 +57,7 @@ interface PivotStatusDisplayProps {
   recentPivot: any;
   showPivotRR: boolean;
   riskPerTrade: number;
+  targetRR: number;
   tradeQuantity: number;
   setTradeQuantity: (qty: number) => void;
   currentCandle: any;
@@ -67,6 +68,7 @@ const PivotStatusDisplay = ({
   recentPivot,
   showPivotRR,
   riskPerTrade,
+  targetRR,
   tradeQuantity,
   setTradeQuantity,
   currentCandle,
@@ -76,9 +78,9 @@ const PivotStatusDisplay = ({
   const calcQty = pointsAtRisk > 0 ? Math.floor(riskPerTrade / pointsAtRisk) : tradeQuantity;
 
   const buySL = recentPivot && currentCandle ? (currentCandle.close - pointsAtRisk) : 0;
-  const buyTgt = recentPivot && currentCandle ? (currentCandle.close + pointsAtRisk * 2) : 0;
+  const buyTgt = recentPivot && currentCandle ? (currentCandle.close + pointsAtRisk * targetRR) : 0;
   const sellSL = recentPivot && currentCandle ? (currentCandle.close + pointsAtRisk) : 0;
-  const sellTgt = recentPivot && currentCandle ? (currentCandle.close - pointsAtRisk * 2) : 0;
+  const sellTgt = recentPivot && currentCandle ? (currentCandle.close - pointsAtRisk * targetRR) : 0;
 
   return (
     <div className="flex items-center gap-1">
@@ -162,6 +164,10 @@ export function PlaybackControls({ onOpenHistory, onOpenDashboard }: { onOpenHis
     tradeQuantity,
     setTradeQuantity,
     riskPerTrade,
+    targetRR,
+    setTargetRR,
+    autoExitTarget,
+    setAutoExitTarget,
     manualLevels,
     showPivotRR,
     showSecondaryChart,
@@ -204,15 +210,15 @@ export function PlaybackControls({ onOpenHistory, onOpenDashboard }: { onOpenHis
 
       if (type === 'BUY') {
         sl = entryPrice - slDist;
-        target = entryPrice + (slDist * 2);
+        target = entryPrice + (slDist * targetRR);
       } else {
         sl = entryPrice + slDist;
-        target = entryPrice - (slDist * 2);
+        target = entryPrice - (slDist * targetRR);
       }
     }
 
     initiateTrade(type, tradeQuantity, sl, target);
-  }, [currentCandle, memoizedPivots, recentPivot, manualLevels, tradeQuantity, initiateTrade]);
+  }, [currentCandle, memoizedPivots, recentPivot, manualLevels, tradeQuantity, targetRR, initiateTrade]);
 
   const [customJump, setCustomJump] = useState('10');
   const [showSettings, setShowSettings] = useState(false);
@@ -664,6 +670,7 @@ export function PlaybackControls({ onOpenHistory, onOpenDashboard }: { onOpenHis
               recentPivot={recentPivot}
               showPivotRR={showPivotRR}
               riskPerTrade={riskPerTrade}
+              targetRR={targetRR}
               tradeQuantity={tradeQuantity}
               setTradeQuantity={setTradeQuantity}
               currentCandle={currentCandle}
@@ -791,6 +798,35 @@ export function PlaybackControls({ onOpenHistory, onOpenDashboard }: { onOpenHis
             >
               {isReloading ? 'Loading...' : 'Apply Changes'}
             </button>
+
+            {/* Risk Settings */}
+            <div className="pt-2 border-t mt-2">
+              <label className="block text-xs font-medium text-gray-700 mb-2">
+                Risk Settings
+              </label>
+              
+              <div className="flex items-center justify-between mb-2">
+                <span className="text-xs text-gray-600">Target RR Ratio (1:X)</span>
+                <input
+                  type="number"
+                  min="1"
+                  step="0.5"
+                  value={targetRR}
+                  onChange={(e) => setTargetRR(Number(e.target.value))}
+                  className="w-16 px-2 py-1 text-sm border border-gray-300 rounded focus:outline-none focus:ring-1 focus:ring-blue-500"
+                />
+              </div>
+
+              <label className="flex items-center gap-2 cursor-pointer group mb-2">
+                <input
+                  type="checkbox"
+                  checked={autoExitTarget}
+                  onChange={(e) => setAutoExitTarget(e.target.checked)}
+                  className="w-4 h-4 rounded border-gray-300 text-blue-600 focus:ring-blue-500"
+                />
+                <span className="text-xs text-gray-700">Auto Exit Target (TP)</span>
+              </label>
+            </div>
 
             {/* Secondary Timeframe */}
             <div className="pt-2 border-t mt-2 bg-blue-50/50 p-2 rounded-lg border border-blue-100">

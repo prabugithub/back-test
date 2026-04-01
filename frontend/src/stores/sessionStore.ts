@@ -39,6 +39,8 @@ interface SessionStore {
   pendingTradeRequest: { type: 'BUY' | 'SELL', quantity: number, stopLoss?: number, target?: number } | null;
   tradeQuantity: number;
   riskPerTrade: number;
+  targetRR: number;
+  autoExitTarget: boolean;
   manualLevels: { sl: number, target: number } | null;
 
 
@@ -91,6 +93,8 @@ interface SessionStore {
   toggleMarkers: (chartId?: 'primary' | 'secondary') => void;
   setTradeQuantity: (qty: number) => void;
   setRiskPerTrade: (risk: number) => void;
+  setTargetRR: (rr: number) => void;
+  setAutoExitTarget: (auto: boolean) => void;
   setManualLevels: (levels: { sl: number, target: number } | null) => void;
   checkTrendReversal: (index: number) => void;
   toggleAtrForSignals: () => void;
@@ -134,6 +138,8 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
   secondaryShowMarkers: false,
   tradeQuantity: 65,
   riskPerTrade: 10000,
+  targetRR: 2,
+  autoExitTarget: true,
   manualLevels: null,
   useAtrForSignals: false,
   showPivotRR: false,
@@ -163,6 +169,10 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
       pendingTradeRequest: null,
     });
   },
+
+  setTargetRR: (rr) => set({ targetRR: rr }),
+
+  setAutoExitTarget: (auto) => set({ autoExitTarget: auto }),
 
   setLiveMode: (isLive) => {
     set({ isLiveMode: isLive });
@@ -278,8 +288,9 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
     // 3. Check for Close-based Trigger (Dialog) or Live Option Touch-based Auto Exit
     let dialogToTrigger: 'SL' | 'TP' | null = null;
     let autoExitSL = false;
+    let autoExitTP = false;
 
-    const { isLiveMode } = get();
+    const { isLiveMode, autoExitTarget } = get();
     const isLiveOption = isLiveMode && position.liveOptionToken;
 
     if (isLong) {
@@ -287,8 +298,9 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
         if (isLiveOption) autoExitSL = true;
         else dialogToTrigger = 'SL';
         nextSlDialogShown = true;
-      } else if (tp > 0 && effectiveClose >= tp && !nextTpDialogShown) {
-        dialogToTrigger = 'TP';
+      } else if (tp > 0 && (isLiveOption ? effectiveHigh : effectiveClose) >= tp && !nextTpDialogShown) {
+        if (isLiveOption && autoExitTarget) autoExitTP = true;
+        else dialogToTrigger = 'TP';
         nextTpDialogShown = true;
       }
     } else {
@@ -296,8 +308,9 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
         if (isLiveOption) autoExitSL = true;
         else dialogToTrigger = 'SL';
         nextSlDialogShown = true;
-      } else if (tp > 0 && effectiveClose <= tp && !nextTpDialogShown) {
-        dialogToTrigger = 'TP';
+      } else if (tp > 0 && (isLiveOption ? effectiveLow : effectiveClose) <= tp && !nextTpDialogShown) {
+        if (isLiveOption && autoExitTarget) autoExitTP = true;
+        else dialogToTrigger = 'TP';
         nextTpDialogShown = true;
       }
     }
@@ -310,7 +323,7 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
       nextSlDialogShown !== position.slDialogShown ||
       nextTpDialogShown !== position.tpDialogShown;
 
-    if (hasChanged || dialogToTrigger || autoExitSL) {
+    if (hasChanged || dialogToTrigger || autoExitSL || autoExitTP) {
       const updatedPosition = {
         ...position,
         slHit: nextSlHit,
@@ -334,6 +347,19 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
            isLong ? 'SELL' : 'BUY',
            Math.abs(position.quantity),
            undefined, undefined, undefined, 'SL'
+        );
+      } else if (autoExitTP) {
+        set({ position: updatedPosition });
+        
+        useNotificationStore.getState().notify(
+            `Target Hit at ${tp.toFixed(2)}. Auto Exiting based on Risk settings.`, 
+            'success'
+        );
+
+        get().executeTrade(
+           isLong ? 'SELL' : 'BUY',
+           Math.abs(position.quantity),
+           undefined, undefined, undefined, 'TP'
         );
       } else if (dialogToTrigger) {
         set({
