@@ -20,10 +20,7 @@ import {
 import { useSessionStore } from '../stores/sessionStore';
 import { calculatePivotPoints } from '../utils/indicators';
 import { analyzeMarketStructure } from '../utils/pivotAnalysis';
-import { LayoutGrid } from 'lucide-react';
-
-
-export type DrawingTool = 'none' | 'select' | 'trendline' | 'horizontal' | 'rectangle' | 'fibonacci' | 'riskReward' | 'freehand' | 'text' | 'callout' | 'channel';
+import { LayoutGrid } from 'lucide-react';import { type DrawingTool } from '../types';
 export type Indicator = 'none' | 'sma21' | 'sma60' | 'ema21' | 'ema60' | 'pivotPoints' | 'alBrooks';
 
 interface ChartToolbarProps {

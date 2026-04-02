@@ -235,7 +235,7 @@ export function InstrumentSelector() {
         // Note: handleFetch is async but loadCandles inside it is synchronous in zustand usually, 
         // but let's be safe.
         setTimeout(() => {
-          restoreSessionState(data.trades, data.position, data.currentIndex);
+          restoreSessionState(data.trades, data.position, data.currentIndex, data.uiSettings);
         }, 100);
       } else {
         setError("No saved session found.");

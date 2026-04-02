@@ -1,5 +1,5 @@
 import { create } from 'zustand';
-import type { Candle, Trade, Position, TradeJournal } from '../types';
+import type { Candle, Trade, Position, TradeJournal, Drawing } from '../types';
 import { saveTradeSession } from '../utils/tradeStorage';
 import { groupTradesIntoPositions, calculatePerformanceStats, recalculateTradesPnL } from '../utils/tradeAnalysis';
 import { saveSession, loadSession, restoreBackup, saveSnapshot, listSnapshots, listHistory, deleteSnapshot, type SessionState } from '../services/firebaseSessionService';
@@ -60,8 +60,10 @@ interface SessionStore {
   sharedActiveTool: string;
   primaryIndicators: string[];
   secondaryIndicators: string[];
+  drawings: Drawing[];
 
   // Actions
+  setDrawings: (drawings: Drawing[]) => void;
   loadCandles: (candles: Candle[], instrument: string, config?: SessionConfig) => void;
   setLiveMode: (isLive: boolean) => void;
   syncLivePositions: () => Promise<void>;
@@ -78,8 +80,8 @@ interface SessionStore {
   initiateTrade: (type: 'BUY' | 'SELL', quantity: number, stopLoss?: number, target?: number) => void;
   resolveTradeRequest: (journal: TradeJournal | null, exitReason?: 'SL' | 'TP' | 'MANUAL' | 'TIME_OVER') => void;
   saveRemoteSession: () => Promise<void>;
-  loadRemoteSession: () => Promise<{ config: SessionConfig, data: { trades: Trade[], position: Position | null, currentIndex: number } } | null>;
-  restoreSessionState: (trades: Trade[], position: Position | null, currentIndex: number) => void;
+  loadRemoteSession: () => Promise<{ config: SessionConfig, data: { trades: Trade[], position: Position | null, currentIndex: number, uiSettings?: any } } | null>;
+  restoreSessionState: (trades: Trade[], position: Position | null, currentIndex: number, uiSettings?: any) => void;
   resetSession: () => void;
   saveCurrentSession: () => void;
   deleteTrade: (tradeId: string) => void;
@@ -154,10 +156,11 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
   sharedActiveTool: 'none',
   primaryIndicators: ['ema21', 'pivotPoints', 'alBrooks'],
   secondaryIndicators: ['ema21', 'pivotPoints', 'alBrooks'],
-
+  drawings: [],
 
 
   // Actions
+  setDrawings: (drawings) => set({ drawings }),
   loadCandles: (candles, instrument, config) => {
     set({
       candles,
@@ -866,7 +869,12 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
   },
 
   saveRemoteSession: async () => {
-    const { instrument, trades, position, currentIndex, sessionConfig } = get();
+    const { 
+      instrument, trades, position, currentIndex, sessionConfig,
+      drawings, primaryIndicators, secondaryIndicators, secondaryTimeframe,
+      showSecondaryChart, tradeQuantity, riskPerTrade, targetRR,
+      autoExitTarget, useAtrForSignals, showPivotRR
+    } = get();
 
     if (!sessionConfig) {
       console.warn("Cannot save session: Missing session configuration");
@@ -895,6 +903,19 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
       currentIndex,
       trades: sanitizedTrades,
       position,
+      uiSettings: {
+        drawings,
+        primaryIndicators,
+        secondaryIndicators,
+        secondaryTimeframe,
+        showSecondaryChart,
+        tradeQuantity,
+        riskPerTrade,
+        targetRR,
+        autoExitTarget,
+        useAtrForSignals,
+        showPivotRR
+      }
     };
 
     const fullState = {
@@ -936,7 +957,8 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
       const data = {
         trades: state.trades,
         position: state.position,
-        currentIndex: state.currentIndex
+        currentIndex: state.currentIndex,
+        uiSettings: state.uiSettings
       };
 
       return { config, data };
@@ -948,12 +970,19 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
     }
   },
 
-  restoreSessionState: (trades, position, currentIndex) => {
+  restoreSessionState: (trades, position, currentIndex, uiSettings) => {
     set({
       trades,
       position,
       currentIndex
     });
+    
+    if (uiSettings) {
+      set((state) => ({
+        ...state,
+        ...uiSettings
+      }));
+    }
   },
 
   restoreRemoteBackup: async (historyId?: string) => {
@@ -966,6 +995,9 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
           position: state.position,
           currentIndex: state.currentIndex
         });
+        if (state.uiSettings) {
+          set((s) => ({ ...s, ...state.uiSettings }));
+        }
         useNotificationStore.getState().notify('Session version restored successfully!', 'success');
       }
     } catch (e: any) {
@@ -986,7 +1018,12 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
   },
 
   saveRemoteSnapshot: async (name: string) => {
-    const { instrument, trades, position, currentIndex, sessionConfig } = get();
+    const { 
+      instrument, trades, position, currentIndex, sessionConfig,
+      drawings, primaryIndicators, secondaryIndicators, secondaryTimeframe,
+      showSecondaryChart, tradeQuantity, riskPerTrade, targetRR,
+      autoExitTarget, useAtrForSignals, showPivotRR
+    } = get();
 
     if (!sessionConfig) {
       useNotificationStore.getState().notify('Cannot save snapshot: Missing configuration', 'error');
@@ -1003,6 +1040,19 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
       currentIndex,
       trades,
       position,
+      uiSettings: {
+        drawings,
+        primaryIndicators,
+        secondaryIndicators,
+        secondaryTimeframe,
+        showSecondaryChart,
+        tradeQuantity,
+        riskPerTrade,
+        targetRR,
+        autoExitTarget,
+        useAtrForSignals,
+        showPivotRR
+      }
     };
 
     set({ isLoading: true });

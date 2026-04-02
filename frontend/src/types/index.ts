@@ -84,3 +84,20 @@ export interface CandlesResponse {
   count: number;
   cached: boolean;
 }
+
+export type DrawingTool = 'none' | 'select' | 'trendline' | 'horizontal' | 'rectangle' | 'fibonacci' | 'riskReward' | 'freehand' | 'text' | 'callout' | 'channel';
+
+export interface Point {
+  x: number;
+  y: number;
+  price?: number;
+  time?: number;
+}
+
+export interface Drawing {
+  id: string;
+  type: DrawingTool;
+  points: Point[];
+  color?: string;
+  text?: string;
+}

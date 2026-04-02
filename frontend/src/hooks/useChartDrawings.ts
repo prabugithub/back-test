@@ -1,21 +1,6 @@
 import { useRef, useEffect, useState, useCallback } from 'react';
-import type { DrawingTool } from '../components/ChartToolbar';
 import { useSessionStore } from '../stores/sessionStore';
-
-export interface Point {
-  x: number;
-  y: number;
-  price?: number;
-  time?: number;
-}
-
-export interface Drawing {
-  id: string;
-  type: DrawingTool;
-  points: Point[];
-  color?: string;
-  text?: string;
-}
+import { type Point, type Drawing, type DrawingTool } from '../types';
 
 interface UseChartDrawingsProps {
   canvasRef: React.MutableRefObject<HTMLCanvasElement | null>;
@@ -42,7 +27,18 @@ export function useChartDrawings({
   const riskPerTrade = useSessionStore((s) => s.riskPerTrade);
   const setManualLevels = useSessionStore((s) => s.setManualLevels);
 
-  const [drawings, setDrawings] = useState<Drawing[]>([]);
+  const drawings = useSessionStore((s) => s.drawings);
+  const setDrawingsState = useSessionStore((s) => s.setDrawings);
+
+  // Helper to maintain compatibility with functional set state
+  const setDrawings = useCallback((action: Drawing[] | ((prev: Drawing[]) => Drawing[])) => {
+    if (typeof action === 'function') {
+      setDrawingsState(action(useSessionStore.getState().drawings));
+    } else {
+      setDrawingsState(action);
+    }
+  }, [setDrawingsState]);
+
   const [currentDrawing, setCurrentDrawing] = useState<Point[]>([]);
   const [isDrawing, setIsDrawing] = useState(false);
   const [selectedDrawingId, setSelectedDrawingId] = useState<string | null>(null);

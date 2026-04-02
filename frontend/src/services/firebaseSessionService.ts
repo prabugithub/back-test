@@ -1,6 +1,6 @@
 import { db } from '../config/firebase';
 import { doc, setDoc, getDoc, writeBatch, deleteDoc } from 'firebase/firestore';
-import type { Trade, Position } from '../types';
+import type { Trade, Position, Drawing } from '../types';
 
 export interface SessionState {
     id?: string;
@@ -14,6 +14,19 @@ export interface SessionState {
     currentIndex: number;
     trades: Trade[];
     position: Position | null;
+    uiSettings?: {
+        drawings?: Drawing[];
+        primaryIndicators?: string[];
+        secondaryIndicators?: string[];
+        secondaryTimeframe?: string | null;
+        showSecondaryChart?: boolean;
+        tradeQuantity?: number;
+        riskPerTrade?: number;
+        targetRR?: number;
+        autoExitTarget?: boolean;
+        useAtrForSignals?: boolean;
+        showPivotRR?: boolean;
+    };
 }
 
 const CONSTANT_SESSION_ID = "current_session";
