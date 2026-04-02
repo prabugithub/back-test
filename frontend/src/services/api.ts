@@ -103,3 +103,11 @@ export async function getATMOption(spotPrice: number, optionType: 'CE' | 'PE', i
   });
   return response.data;
 }
+
+/**
+ * Fetch real account positions
+ */
+export async function getLivePositions(): Promise<any> {
+    const response = await apiClient.get('/api/live/positions');
+    return response.data;
+}

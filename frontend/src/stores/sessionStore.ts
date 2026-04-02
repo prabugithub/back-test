@@ -6,7 +6,7 @@ import { saveSession, loadSession, restoreBackup, saveSnapshot, listSnapshots, l
 import { useNotificationStore } from './notificationStore';
 import { calculatePivotPoints } from '../utils/indicators';
 import { analyzeMarketStructure } from '../utils/pivotAnalysis';
-import { placeLiveOrder, getATMOption, executeSmartExit } from '../services/api';
+import { placeLiveOrder, getATMOption, executeSmartExit, getLivePositions } from '../services/api';
 
 export interface SessionConfig {
   securityId: string;
@@ -64,6 +64,7 @@ interface SessionStore {
   // Actions
   loadCandles: (candles: Candle[], instrument: string, config?: SessionConfig) => void;
   setLiveMode: (isLive: boolean) => void;
+  syncLivePositions: () => Promise<void>;
   updateLivePrice: (price: number) => void;
   addLiveCandle: (candle: Candle) => void;
   play: () => void;
@@ -182,6 +183,61 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
       if (candles.length > 0) {
         set({ currentIndex: candles.length - 1 });
       }
+      get().syncLivePositions();
+    }
+  },
+
+  syncLivePositions: async () => {
+    try {
+      const resp = await getLivePositions();
+      if (resp?.success && Array.isArray(resp.data)) {
+        // Find the active position. 
+        // We only care about active options or index positions for the current session.
+        // Specifically, ignore equity/stocks and only pick FNO.
+        const openPosition = resp.data.find((p: any) => 
+           p.positionType !== 'CLOSED' && 
+           (p.buyQty !== p.sellQty) && 
+           p.exchangeSegment === 'NSE_FNO'
+        );
+        
+        if (openPosition) {
+          const qty = openPosition.positionType === 'LONG' 
+            ? Math.abs(openPosition.buyQty - openPosition.sellQty)
+            : -Math.abs(openPosition.sellQty - openPosition.buyQty);
+            
+          const avgPrice = openPosition.positionType === 'LONG' ? openPosition.buyAvg : openPosition.sellAvg;
+
+          const currentStorePos = get().position;
+          
+          set({
+            position: {
+              instrument: currentStorePos?.instrument || openPosition.tradingSymbol || 'NIFTY',
+              quantity: qty,
+              averagePrice: avgPrice,
+              realizedPnL: openPosition.realizedProfit || 0,
+              unrealizedPnL: openPosition.unrealizedProfit || 0,
+              liveOptionToken: openPosition.securityId,
+              // Retain local stop/target if mapping from an existing tracked position
+              stopLoss: currentStorePos?.stopLoss,
+              target: currentStorePos?.target,
+              slHit: currentStorePos?.slHit,
+              tpHit: currentStorePos?.tpHit,
+              slDialogShown: currentStorePos?.slDialogShown,
+              tpDialogShown: currentStorePos?.tpDialogShown,
+              hitFirst: currentStorePos?.hitFirst,
+            }
+          });
+          useNotificationStore.getState().notify(`Synced Option Position: ${openPosition.tradingSymbol} (Qty ${qty})`, 'info');
+        } else {
+          // If no active open option positions remotely, but we have one locally, clear it.
+          if (get().position) {
+            set({ position: null });
+            useNotificationStore.getState().notify('No active Option positions on broker. Cleared local position.', 'info');
+          }
+        }
+      }
+    } catch (err) {
+      console.warn('Failed to sync live positions', err);
     }
   },
 
@@ -982,6 +1038,12 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
     }
 
     if (isLiveMode && livePrice !== null) {
+      // If this is an Option trade, we cannot calculate PnL against the underlying Spot livePrice.
+      // E.g. Spot is 22000, Option was bought at 100 -> huge wrong PnL.
+      // So we use the fixed unrealizedPnL snapshot from the position sync.
+      if (position.liveOptionToken) {
+        return position.unrealizedPnL || 0;
+      }
       return (livePrice - position.averagePrice) * position.quantity;
     }
 
@@ -990,6 +1052,7 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
       return 0;
     }
 
+    // Historical replay mode
     return (currentCandle.close - position.averagePrice) * position.quantity;
   },
 

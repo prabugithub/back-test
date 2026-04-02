@@ -133,4 +133,19 @@ router.get('/atm-option', async (req: Request, res: Response) => {
     }
 });
 
+/**
+ * GET /api/live/positions
+ * Fetches actual positions from Dhan API
+ */
+router.get('/positions', async (req: Request, res: Response) => {
+    try {
+        const { getPositions } = await import('../services/dhan.service');
+        const positions = await getPositions();
+        res.json({ success: true, data: positions });
+    } catch (error: any) {
+        logger.error('Error fetching Dhan positions:', error.message);
+        res.status(500).json({ error: 'Server error', message: error.message });
+    }
+});
+
 export default router;

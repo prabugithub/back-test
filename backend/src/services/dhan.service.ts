@@ -392,6 +392,36 @@ export async function modifyOrder(orderId: string, params: {
 }
 
 /**
+ * Get all current positions from Dhan
+ */
+export async function getPositions() {
+    const accessToken = process.env.DHAN_ACCESS_TOKEN;
+    const clientID = process.env.DHAN_CLIENT_ID;
+    if (!accessToken || !clientID) {
+        throw new Error('DHAN_ACCESS_TOKEN and DHAN_CLIENT_ID are required');
+    }
+
+    try {
+        logger.info('Fetching positions from Dhan API');
+        const response = await axios.get('https://api.dhan.co/v2/positions', {
+            headers: {
+                'access-token': accessToken,
+                'client-id': clientID
+            }
+        });
+        
+        return response.data;
+    } catch (error: any) {
+        if (error.response) {
+            logger.error('Dhan Get Positions API error response:', error.response.data);
+            throw new Error(`Dhan API error: ${JSON.stringify(error.response.data)}`);
+        }
+        logger.error('Dhan Get Positions API error:', error.message);
+        throw new Error(`Dhan API error: ${error.message}`);
+    }
+}
+
+/**
  * Retry wrapper for API calls
  */
 export async function retryApiCall<T>(fn: () => Promise<T>, maxRetries = 3, baseDelay = 1000): Promise<T> {
