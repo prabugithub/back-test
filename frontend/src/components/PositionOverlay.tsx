@@ -9,6 +9,7 @@ export function PositionOverlay({ onOpenDetail }: { onOpenDetail?: () => void })
     const candles = useSessionStore((s) => s.candles);
     const currentIndex = useSessionStore((s) => s.currentIndex);
     const initiateTrade = useSessionStore((s) => s.initiateTrade);
+    const getUnrealizedPnL = useSessionStore((s) => s.getUnrealizedPnL);
 
     // State for dragging
     // We use offset to store the X/Y translation from the top-right corner or absolute position
@@ -75,7 +76,7 @@ export function PositionOverlay({ onOpenDetail }: { onOpenDetail?: () => void })
     const currentCandle = candles[currentIndex];
     if (!currentCandle) return null;
 
-    const unrealizedPnL = (currentCandle.close - position.averagePrice) * position.quantity;
+    const unrealizedPnL = getUnrealizedPnL();
 
     const direction = position.quantity > 0 ? "LONG" : "SHORT";
     const absQty = Math.abs(position.quantity);

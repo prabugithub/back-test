@@ -8,15 +8,11 @@ export function SessionStats() {
   const position = useSessionStore((s) => s.position);
   const candles = useSessionStore((s) => s.candles);
   const currentIndex = useSessionStore((s) => s.currentIndex);
+  const getUnrealizedPnL = useSessionStore((s) => s.getUnrealizedPnL);
   const [isOptionModalOpen, setIsOptionModalOpen] = useState(false);
 
-  // Calculate unrealized P&L inline
-  const unrealizedPnL = (() => {
-    if (!position || position.quantity === 0) return 0;
-    const currentCandle = candles[currentIndex];
-    if (!currentCandle) return 0;
-    return (currentCandle.close - position.averagePrice) * position.quantity;
-  })();
+  // Fetch unrealized P&L from store
+  const unrealizedPnL = getUnrealizedPnL();
 
   // Calculate realized P&L inline
   const realizedPnL = position?.realizedPnL || 0;

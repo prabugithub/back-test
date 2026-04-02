@@ -116,6 +116,8 @@ interface SessionStore {
   getRealizedPnL: () => number;
 }
 
+let syncIntervalId: ReturnType<typeof setInterval> | null = null;
+
 const generateTradeId = () => {
   return `${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
 };
@@ -184,6 +186,19 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
         set({ currentIndex: candles.length - 1 });
       }
       get().syncLivePositions();
+      
+      if (!syncIntervalId) {
+        syncIntervalId = setInterval(() => {
+          if (get().isLiveMode) {
+             get().syncLivePositions();
+          }
+        }, 3000);
+      }
+    } else {
+      if (syncIntervalId) {
+        clearInterval(syncIntervalId);
+        syncIntervalId = null;
+      }
     }
   },
 
@@ -227,7 +242,10 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
               hitFirst: currentStorePos?.hitFirst,
             }
           });
-          useNotificationStore.getState().notify(`Synced Option Position: ${openPosition.tradingSymbol} (Qty ${qty})`, 'info');
+          
+          if (!currentStorePos && qty !== 0) {
+              useNotificationStore.getState().notify(`Synced Option Position: ${openPosition.tradingSymbol} (Qty ${qty})`, 'info');
+          }
         } else {
           // If no active open option positions remotely, but we have one locally, clear it.
           if (get().position) {
