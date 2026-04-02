@@ -453,6 +453,11 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
     const currentPrice = priceOverride || currentCandle.close;
     const timestamp = currentCandle.timestamp;
 
+    const tradeSign = type === 'BUY' ? 1 : -1;
+    const currentQty = position ? position.quantity : 0;
+    const isReducing = (currentQty > 0 && tradeSign < 0) || (currentQty < 0 && tradeSign > 0);
+    const isSameDirection = (currentQty > 0 && tradeSign > 0) || (currentQty < 0 && tradeSign < 0);
+
     // Initial quantity calculation (will be refined for live index trades once lotSize is fetched)
     let finalQuantity = quantity;
 
@@ -472,10 +477,10 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
         
         if (isNiftyIndex || isBankNiftyIndex) {
             if (position && position.liveOptionToken) {
-               // CLOSING: Sell the same option we already hold
+               // CLOSING/REDUCING: Sell the option we already hold (Option Buyers always SELL to close)
                liveSecurityId = position.liveOptionToken;
                liveExchange = 'NSE_FNO';
-               liveTransactionType = type; // e.g. SELL to close a LONG
+               liveTransactionType = isReducing ? 'SELL' : 'BUY';
                
                 // Try to get current LTP for closing limit order
                 try {
@@ -585,13 +590,9 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
       }
     }
 
-    const tradeSign = type === 'BUY' ? 1 : -1;
-    const currentQty = position ? position.quantity : 0;
     const tradeQtySigned = finalQuantity * tradeSign;
     const newQty = currentQty + tradeQtySigned;
 
-    const isSameDirection = (currentQty > 0 && tradeSign > 0) || (currentQty < 0 && tradeSign < 0);
-    const isReducing = (currentQty > 0 && tradeSign < 0) || (currentQty < 0 && tradeSign > 0);
     const isSameSide = (currentQty > 0 && newQty > 0) || (currentQty < 0 && newQty < 0);
     const isFlip = isReducing && !isSameSide && newQty !== 0;
 
