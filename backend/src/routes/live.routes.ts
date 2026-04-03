@@ -1,7 +1,7 @@
 import { Router, Request, Response } from 'express';
-import { placeOrder } from '../services/dhan.service';
-import { getFeedStatus, emitTestTick } from '../services/dhanMarketFeed.service';
-import { getATMOptionForOrder } from '../services/optionChain.service';
+import { placeOrder } from '../adapters/dhan.adapter';
+import { getFeedStatus, emitTestTick } from '../adapters/dhanFeed.adapter';
+import { getATMOptionForOrder } from '../adapters/optionChain.adapter';
 import { executeSmartExit } from '../services/smartExit.service';
 import { registerPosition, unregisterPosition, getMonitoredPositions } from '../services/positionMonitor.service';
 import logger from '../utils/logger';
@@ -140,7 +140,7 @@ router.get('/atm-option', async (req: Request, res: Response) => {
  */
 router.get('/positions', async (req: Request, res: Response) => {
     try {
-        const { getPositions } = await import('../services/dhan.service');
+        const { getPositions } = await import('../adapters/dhan.adapter');
         const positions = await getPositions();
         res.json({ success: true, data: positions });
     } catch (error: any) {
@@ -162,7 +162,7 @@ router.get('/order/:orderId', async (req: Request, res: Response) => {
         if (!orderId) {
             return res.status(400).json({ error: 'orderId is required' });
         }
-        const { getOrderStatus } = await import('../services/dhan.service');
+        const { getOrderStatus } = await import('../adapters/dhan.adapter');
         const orderData = await getOrderStatus(orderId);
         res.json({ success: true, data: orderData });
     } catch (error: any) {

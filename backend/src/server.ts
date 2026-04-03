@@ -23,7 +23,6 @@ process.on('unhandledRejection', (reason, promise) => {
 });
 import { initDatabase } from './config/database';
 import { initAngelOneClient, loginAngelOne } from './services/angelone.service';
-import { initDhanClient } from './services/dhan.service';
 import dataRoutes from './routes/data.routes';
 import screenshotRoutes from './routes/screenshot.routes';
 import optionsRoutes from './routes/options.routes';
@@ -32,8 +31,7 @@ import liveRoutes from './routes/live.routes';
 import { Server } from 'socket.io';
 import http from 'http';
 
-import { initDhanMarketFeed, handleSocketSubscription, setInternalTickCallback } from './services/dhanMarketFeed.service';
-import { initSymbolMaster } from './services/symbolMaster.service';
+import { initDhanMarketFeed, handleSocketSubscription, setInternalTickCallback } from './adapters/dhanFeed.adapter';
 import { initPositionMonitor, onTick } from './services/positionMonitor.service';
 
 const app: Express = express();
@@ -127,18 +125,31 @@ async function startServer() {
       logger.warn('Angel One login background task failed:', error.message);
     });
 
-    // Initialize Dhan client
+    // Initialize broker services (real or simulation based on DHAN_SIMULATION env var)
+    const IS_SIM = process.env.DHAN_SIMULATION === 'true';
     try {
-      initDhanClient();
-      initSymbolMaster(); // Download and parse Scrip Master
-      // Initialize Market Feed
-      initDhanMarketFeed(io);
-      // Initialize position monitor — must come after market feed
-      initPositionMonitor(io);
-      // Wire every price tick into the position monitor so SL/TP works without the frontend
-      setInternalTickCallback((token, price) => { onTick(token, price); });
+      if (IS_SIM) {
+        logger.info('🧪 [SIMULATION MODE] DHAN_SIMULATION=true — using mock broker services');
+        const { initSymbolMaster: initMockMaster } = await import('./simulation/mockSymbolMaster');
+        await initMockMaster();
+        initDhanMarketFeed(io); // resolves to mockMarketFeed via adapter
+        initPositionMonitor(io);
+        setInternalTickCallback((token, price) => { onTick(token, price); });
+        // Mount scenario/dev routes (simulation only)
+        const { default: scenarioRoutes } = await import('./simulation/scenarioRoutes');
+        app.use('/api/dev', scenarioRoutes);
+        logger.info('🧪 [SIMULATION MODE] Scenario routes mounted at /api/dev');
+      } else {
+        const { initDhanClient: realInit } = await import('./services/dhan.service');
+        const { initSymbolMaster: realMaster } = await import('./services/symbolMaster.service');
+        realInit();
+        realMaster(); // Download and parse Scrip Master
+        initDhanMarketFeed(io);
+        initPositionMonitor(io);
+        setInternalTickCallback((token, price) => { onTick(token, price); });
+      }
     } catch (error: any) {
-      logger.warn('Dhan API client initialization failed:', error.message);
+      logger.warn('Broker service initialization failed:', error.message);
     }
   } catch (error) {
     logger.error('Failed to start server:', error);

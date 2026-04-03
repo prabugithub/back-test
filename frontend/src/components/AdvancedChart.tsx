@@ -45,6 +45,7 @@ export function AdvancedChart({
   const markersPrimitiveRef = useRef<any>(null);
   const indicatorSeriesRef = useRef<Map<string, any>>(new Map());
   const lastCandleRef = useRef<any>(null);
+  const prevCumulativeVolumeRef = useRef<number>(0);
 
   // Shared state from store
   const activeChartId = useSessionStore((s) => s.activeChartId);
@@ -529,12 +530,19 @@ export function AdvancedChart({
 
       console.debug(`[Chart${isSecondary ? '-2' : '-1'}] tick price=${tick.price} bucket=${bucketStart} last=${lastCandle.time}`);
       
+      // Dhan sends cumulative day volume — compute per-tick delta to avoid overflow
+      const cumVol = tick.volume || 0;
+      const deltaVol = cumVol > prevCumulativeVolumeRef.current
+        ? cumVol - prevCumulativeVolumeRef.current
+        : cumVol; // reset at day start or first tick
+      prevCumulativeVolumeRef.current = cumVol;
+
       if (bucketStart === lastCandle.time) {
         // ── Update active candle in-place ─────────────────────────────────
         lastCandle.close = tick.price;
         lastCandle.high = Math.max(lastCandle.high, tick.price);
         lastCandle.low = Math.min(lastCandle.low, tick.price);
-        lastCandle.volume = (lastCandle.volume || 0) + (tick.volume || 0);
+        lastCandle.volume = (lastCandle.volume || 0) + deltaVol;
         
         series.update({
            time: lastCandle.time,
@@ -576,7 +584,7 @@ export function AdvancedChart({
            high: Math.max(openPrice, tick.price),
            low: Math.min(openPrice, tick.price),
            close: tick.price,
-           volume: tick.volume || 0
+           volume: deltaVol
         };
         lastCandleRef.current = newCandle;
         

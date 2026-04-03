@@ -1,6 +1,6 @@
 import { executeSmartExit } from './smartExit.service';
-import { placeOrder } from './dhan.service';
-import { subscribeToInstrument } from './dhanMarketFeed.service';
+import { placeOrder } from '../adapters/dhan.adapter';
+import { subscribeToInstrument } from '../adapters/dhanFeed.adapter';
 import logger from '../utils/logger';
 import { Server } from 'socket.io';
 

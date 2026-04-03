@@ -1,4 +1,4 @@
-import { placeOrder, getOrderStatus, modifyOrder } from './dhan.service';
+import { placeOrder, getOrderStatus, modifyOrder } from '../adapters/dhan.adapter';
 import logger from '../utils/logger';
 
 interface SmartExitParams {
