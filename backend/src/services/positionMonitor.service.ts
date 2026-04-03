@@ -1,6 +1,7 @@
 import { executeSmartExit } from './smartExit.service';
 import { placeOrder } from '../adapters/dhan.adapter';
 import { subscribeToInstrument } from '../adapters/dhanFeed.adapter';
+import { getDatabase, saveDatabase } from '../config/database';
 import logger from '../utils/logger';
 import { Server } from 'socket.io';
 
@@ -37,11 +38,45 @@ let ioInstance: Server | null = null;
 
 /**
  * Must be called once at server startup (after initDhanMarketFeed).
- * Wires up the position monitor to receive price ticks.
+ * Wires up the position monitor to receive price ticks, and reloads
+ * any positions that were persisted before the last server restart.
  */
 export function initPositionMonitor(io: Server): void {
     ioInstance = io;
-    logger.info('[PositionMonitor] Initialized and ready.');
+
+    // Reload persisted positions from SQLite so SL/TP monitoring survives restarts
+    try {
+        const db = getDatabase();
+        const rows = db.exec('SELECT * FROM monitored_positions');
+        if (rows.length > 0 && rows[0].values.length > 0) {
+            const cols = rows[0].columns;
+            for (const row of rows[0].values) {
+                const r: any = {};
+                cols.forEach((c, i) => { r[c] = row[i]; });
+                const pos: MonitoredPosition = {
+                    id: r.id,
+                    spotToken: r.spot_token,
+                    spotSegment: r.spot_segment,
+                    direction: r.direction,
+                    stopLoss: r.stop_loss,
+                    target: r.target,
+                    optionSecurityId: r.option_security_id,
+                    optionExchangeSegment: r.option_exchange_segment,
+                    quantity: r.quantity,
+                    entryPrice: r.entry_price,
+                    exitTriggered: false,
+                    registeredAt: r.registered_at,
+                };
+                monitoredPositions.set(pos.id, pos);
+                subscribeToInstrument(pos.spotToken, pos.spotSegment);
+                logger.info(`[PositionMonitor] Restored from DB | id:${pos.id} | SL:${pos.stopLoss} | TP:${pos.target}`);
+            }
+        }
+    } catch (err: any) {
+        logger.error('[PositionMonitor] Failed to reload persisted positions:', err.message);
+    }
+
+    logger.info(`[PositionMonitor] Initialized. Monitoring ${monitoredPositions.size} position(s).`);
 }
 
 /**
@@ -55,6 +90,25 @@ export function registerPosition(params: Omit<MonitoredPosition, 'exitTriggered'
         registeredAt: Date.now(),
     };
     monitoredPositions.set(params.id, entry);
+
+    // Persist to SQLite so the position survives a server restart
+    try {
+        const db = getDatabase();
+        db.run(
+            `INSERT OR REPLACE INTO monitored_positions
+             (id, spot_token, spot_segment, direction, stop_loss, target,
+              option_security_id, option_exchange_segment, quantity, entry_price, registered_at)
+             VALUES (?,?,?,?,?,?,?,?,?,?,?)`,
+            [
+                entry.id, entry.spotToken, entry.spotSegment, entry.direction,
+                entry.stopLoss, entry.target, entry.optionSecurityId,
+                entry.optionExchangeSegment, entry.quantity, entry.entryPrice, entry.registeredAt,
+            ]
+        );
+        saveDatabase();
+    } catch (err: any) {
+        logger.error('[PositionMonitor] Failed to persist position to DB:', err.message);
+    }
 
     // Make sure the backend is subscribed to the spot index token so ticks keep flowing
     subscribeToInstrument(params.spotToken, params.spotSegment);
@@ -72,6 +126,13 @@ export function registerPosition(params: Omit<MonitoredPosition, 'exitTriggered'
 export function unregisterPosition(id: string): boolean {
     const existed = monitoredPositions.delete(id);
     if (existed) {
+        try {
+            const db = getDatabase();
+            db.run('DELETE FROM monitored_positions WHERE id = ?', [id]);
+            saveDatabase();
+        } catch (err: any) {
+            logger.error('[PositionMonitor] Failed to remove position from DB:', err.message);
+        }
         logger.info(`[PositionMonitor] Unregistered position: ${id}`);
     }
     return existed;
@@ -174,8 +235,15 @@ async function triggerExit(pos: MonitoredPosition, reason: 'SL' | 'TP', triggerP
             logger.info(`[PositionMonitor] TP MARKET exit placed for ${pos.id}`);
         }
 
-        // Clean up after successful exit
+        // Clean up after successful exit (in-memory + DB)
         monitoredPositions.delete(pos.id);
+        try {
+            const db = getDatabase();
+            db.run('DELETE FROM monitored_positions WHERE id = ?', [pos.id]);
+            saveDatabase();
+        } catch (err: any) {
+            logger.error('[PositionMonitor] Failed to remove exited position from DB:', err.message);
+        }
 
         // Notify clients that exit order was successfully placed
         ioInstance?.emit('position:exit-placed', {

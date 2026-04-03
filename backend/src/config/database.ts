@@ -93,6 +93,23 @@ function createSchema(database: Database): void {
     ON instruments(symbol, name)
   `);
 
+  // Positions being monitored for backend SL/TP firing (survives server restarts)
+  database.run(`
+    CREATE TABLE IF NOT EXISTS monitored_positions (
+      id TEXT PRIMARY KEY,
+      spot_token TEXT NOT NULL,
+      spot_segment TEXT NOT NULL,
+      direction TEXT NOT NULL,
+      stop_loss REAL NOT NULL DEFAULT 0,
+      target REAL NOT NULL DEFAULT 0,
+      option_security_id TEXT NOT NULL,
+      option_exchange_segment TEXT NOT NULL,
+      quantity INTEGER NOT NULL,
+      entry_price REAL NOT NULL,
+      registered_at INTEGER NOT NULL
+    )
+  `);
+
   logger.info('Database schema created successfully');
 }
 
