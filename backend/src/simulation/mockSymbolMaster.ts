@@ -1,8 +1,8 @@
 /**
  * Mock Symbol Master — Simulation Mode
  *
- * Provides static option fixtures for NIFTY (21700–22500, 50pt steps)
- * and BANKNIFTY (47000–48000, 100pt steps) so ATM resolution works
+ * Provides static option fixtures for NIFTY (21000–25000, 50pt steps)
+ * and BANKNIFTY (44000–54000, 100pt steps) so ATM resolution works
  * without downloading or parsing the Dhan CSV.
  *
  * Also fully replaces getATMOptionForOrder() so optionChain.service.ts
@@ -39,8 +39,8 @@ function buildFixtures(): DhanOptionSymbol[] {
     const weeklyExpiry = new Date('2026-04-10T14:30:00.000+05:30');
     const monthlyExpiry = new Date('2026-04-24T14:30:00.000+05:30');
 
-    // NIFTY: strikes 21700–22500 in 50pt steps (CE + PE)
-    for (let strike = 21700; strike <= 22500; strike += 50) {
+    // NIFTY: strikes 21000–25000 in 50pt steps (CE + PE)
+    for (let strike = 21000; strike <= 25000; strike += 50) {
         for (const optionType of ['CE', 'PE'] as const) {
             fixtures.push({
                 securityId: `SIM-NIF-${strike}-${optionType}`,
@@ -55,8 +55,8 @@ function buildFixtures(): DhanOptionSymbol[] {
         }
     }
 
-    // BANKNIFTY: strikes 47000–48000 in 100pt steps (CE + PE)
-    for (let strike = 47000; strike <= 48000; strike += 100) {
+    // BANKNIFTY: strikes 44000–54000 in 100pt steps (CE + PE)
+    for (let strike = 44000; strike <= 54000; strike += 100) {
         for (const optionType of ['CE', 'PE'] as const) {
             fixtures.push({
                 securityId: `SIM-BNF-${strike}-${optionType}`,
@@ -133,7 +133,7 @@ export async function getATMOptionForOrder(
     if (!entry) {
         throw new Error(
             `[MockSymbolMaster] No fixture found for ${instrumentName} ${optionType} @ ${atmStrike}. ` +
-            `Extend fixtures if spotPrice is outside 21700–22500 (NIFTY) or 47000–48000 (BANKNIFTY).`
+            `Extend fixtures if spotPrice is outside 21000–25000 (NIFTY) or 44000–54000 (BANKNIFTY).`
         );
     }
 
