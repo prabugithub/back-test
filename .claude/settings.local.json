@@ -25,7 +25,8 @@
       "Bash(timeout 3 bash:*)",
       "Bash(taskkill:*)",
       "Bash(curl:*)",
-      "Bash(node:*)"
+      "Bash(node:*)",
+      "Bash(ls \"f:/projects/personal project/back-test\"/*.md)"
     ]
   }
 }
