@@ -713,7 +713,7 @@ export function PlaybackControls({ onOpenHistory, onOpenDashboard }: { onOpenHis
 
       {/* Settings Panel */}
       {showSettings && (
-        <div className="absolute bottom-full right-0 mb-2 bg-white border-2 border-gray-300 rounded-lg shadow-2xl p-4 z-50 min-w-[320px]">
+        <div className="absolute bottom-full right-0 mb-2 bg-white border-2 border-gray-300 rounded-lg shadow-2xl p-4 z-50 min-w-[320px] max-h-[85vh] overflow-y-auto">
           <div className="flex items-center justify-between mb-3 pb-2 border-b">
             <h3 className="font-bold text-sm text-gray-800">Data Settings</h3>
             <button

@@ -294,6 +294,17 @@ export function AdvancedChart({
         secondsVisible: false,
         fixLeftEdge: true,
         lockVisibleTimeRangeOnResize: true,
+        tickMarkFormatter: (time: any, markType: number) => {
+          const date = new Date(time * 1000);
+          const dd = date.getDate().toString().padStart(2, '0');
+          const hh = date.getHours().toString().padStart(2, '0');
+          const min = date.getMinutes().toString().padStart(2, '0');
+          const monthNames = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+          // markType: 0=Year, 1=Month, 2=Day, 3=Time, 4=TimeWithSeconds
+          if (markType <= 1) return `${monthNames[date.getMonth()]} ${date.getFullYear()}`;
+          if (markType === 2) return `${dd} ${monthNames[date.getMonth()]}`;
+          return `${hh}:${min}`;
+        },
       },
       localization: {
         timeFormatter: (time: any) => {

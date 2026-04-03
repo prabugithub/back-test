@@ -50,7 +50,7 @@ function buildFixtures(): DhanOptionSymbol[] {
                 expiryDate: weeklyExpiry,
                 expiryFlag: 'W',
                 instrument: 'NIFTY',
-                lotSize: 75,
+                lotSize: 65,
             });
         }
     }
