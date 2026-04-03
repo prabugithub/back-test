@@ -21,6 +21,13 @@ let isReady = false;
 const CSV_URL = 'https://images.dhan.co/api-data/api-scrip-master.csv';
 const TEMP_FILE = path.join(__dirname, '../../data', 'master.csv');
 
+// Dhan updates their CSV each morning by ~8:00 AM IST.
+// Only treat the file as fresh if it was downloaded after that cutoff —
+// otherwise a server started before 8 AM IST would use stale data all day.
+// Using explicit IST offset makes this work correctly on any server timezone (UTC cloud included).
+const IST_OFFSET_MS = 5.5 * 60 * 60 * 1000; // UTC+5:30
+const CSV_FRESH_AFTER_HOUR_IST = 8; // 8:00 AM IST
+
 export async function initSymbolMaster(): Promise<void> {
     logger.info('Initializing Dhan Symbol Master...');
     try {
@@ -28,21 +35,62 @@ export async function initSymbolMaster(): Promise<void> {
         await parseScripMaster();
         isReady = true;
         logger.info(`Symbol Master ready! Cached ${optionCache.length} active Nifty option contracts.`);
+        scheduleMorningRefreshIfNeeded();
     } catch (error: any) {
         logger.error(`Failed to initialize Symbol Master: ${error.message}`);
     }
 }
 
+/**
+ * If the server started before 8 AM IST (before Dhan updates their CSV),
+ * schedule a one-time refresh exactly at 8:00 AM IST so the in-memory cache
+ * gets replaced with the fresh data automatically — no server restart needed.
+ * Works correctly on any server timezone (UTC cloud or local IST machine).
+ */
+let morningRefreshScheduled = false;
+
+function scheduleMorningRefreshIfNeeded(): void {
+    if (morningRefreshScheduled) return;
+
+    const nowIST = new Date(Date.now() + IST_OFFSET_MS);
+    const currentHourIST = nowIST.getUTCHours();
+
+    if (currentHourIST >= CSV_FRESH_AFTER_HOUR_IST) return; // already past 8 AM IST, nothing to do
+
+    // Calculate exact ms until 8:00:00 AM IST today
+    const refreshTimeIST = new Date(nowIST);
+    refreshTimeIST.setUTCHours(CSV_FRESH_AFTER_HOUR_IST, 0, 0, 0);
+    const msUntilRefresh = refreshTimeIST.getTime() - nowIST.getTime();
+    const minutesUntil = Math.round(msUntilRefresh / 60000);
+
+    logger.info(`Server started before 8 AM IST — scheduling Symbol Master refresh in ${minutesUntil} min (at 8:00 AM IST)`);
+    morningRefreshScheduled = true;
+
+    setTimeout(async () => {
+        logger.info('8:00 AM IST reached — re-downloading fresh Dhan CSV and refreshing Symbol Master...');
+        morningRefreshScheduled = false; // allow re-schedule if init is called again tomorrow
+        await initSymbolMaster();
+    }, msUntilRefresh);
+}
+
 function isDownloadedToday(): boolean {
     if (!fs.existsSync(TEMP_FILE)) return false;
     const stats = fs.statSync(TEMP_FILE);
-    const fileDate = new Date(stats.mtimeMs);
-    const today = new Date();
-    return (
-        fileDate.getFullYear() === today.getFullYear() &&
-        fileDate.getMonth() === today.getMonth() &&
-        fileDate.getDate() === today.getDate()
-    );
+    if (stats.size < 1024) return false; // guard against empty/corrupt file from a failed prior download
+
+    // Compare dates in IST to avoid local-timezone drift
+    const fileMtimeIST = new Date(stats.mtimeMs + IST_OFFSET_MS);
+    const nowIST = new Date(Date.now() + IST_OFFSET_MS);
+
+    const sameDay =
+        fileMtimeIST.getUTCFullYear() === nowIST.getUTCFullYear() &&
+        fileMtimeIST.getUTCMonth() === nowIST.getUTCMonth() &&
+        fileMtimeIST.getUTCDate() === nowIST.getUTCDate();
+
+    if (!sameDay) return false;
+
+    // Only consider fresh if downloaded after 8 AM IST (post Dhan CSV update)
+    return fileMtimeIST.getUTCHours() >= CSV_FRESH_AFTER_HOUR_IST;
 }
 
 function downloadScripMaster(): Promise<void> {
@@ -54,25 +102,50 @@ function downloadScripMaster(): Promise<void> {
         }
 
         logger.info(`Downloading master.csv from ${CSV_URL}...`);
-        
+
         // Ensure data dir exists
         const dir = path.dirname(TEMP_FILE);
         if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
 
-        const file = fs.createWriteStream(TEMP_FILE);
-        https.get(CSV_URL, (response) => {
-            if (response.statusCode !== 200) {
-                return reject(new Error(`Failed to download, status: ${response.statusCode}`));
-            }
-            response.pipe(file);
-            file.on('finish', () => {
-                file.close();
+        let settled = false;
+        const done = (err?: Error) => {
+            if (settled) return;
+            settled = true;
+            if (err) {
+                fs.unlink(TEMP_FILE, () => {});
+                reject(err);
+            } else {
                 resolve();
-            });
-        }).on('error', (err) => {
-            fs.unlink(TEMP_FILE, () => {});
-            reject(err);
-        });
+            }
+        };
+
+        const fetchUrl = (url: string, redirectsLeft = 3) => {
+            https.get(url, (response) => {
+                // Follow redirects (301 / 302)
+                if (response.statusCode === 301 || response.statusCode === 302) {
+                    const location = response.headers.location;
+                    if (!location || redirectsLeft === 0) {
+                        return done(new Error(`Too many redirects or missing location header (status ${response.statusCode})`));
+                    }
+                    response.resume(); // drain to free socket
+                    logger.info(`Redirected to ${location}`);
+                    return fetchUrl(location, redirectsLeft - 1);
+                }
+
+                if (response.statusCode !== 200) {
+                    return done(new Error(`Failed to download master.csv, HTTP status: ${response.statusCode}`));
+                }
+
+                const file = fs.createWriteStream(TEMP_FILE);
+
+                file.on('error', (err) => done(err));
+                file.on('finish', () => { file.close(); done(); });
+
+                response.pipe(file);
+            }).on('error', (err) => done(err));
+        };
+
+        fetchUrl(CSV_URL);
     });
 }
 
@@ -113,7 +186,7 @@ function parseScripMaster(): Promise<void> {
             }
 
             const cols = line.split(',');
-            if (cols.length < 12) return;
+            if (cols.length < 13) return;
 
             const instName = cols[3];
             if (instName !== 'OPTIDX') return;
