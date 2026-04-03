@@ -109,8 +109,16 @@ export function PositionOverlay({ onOpenDetail }: { onOpenDetail?: () => void })
                 <span className={`text-xs font-bold px-2 py-1 rounded ${direction === 'LONG' ? 'bg-green-500 text-white' : 'bg-red-500 text-white'}`}>
                     {direction}
                 </span>
-                <span className="text-xs text-gray-700 font-bold font-mono">
-                    {absQty} Qty
+                <span className="text-xs text-gray-700 font-bold font-mono flex items-center gap-1">
+                    {position.pendingOrderId ? (
+                        // Order placed but fill not yet confirmed
+                        <span className="text-orange-500 animate-pulse font-semibold">Pending…</span>
+                    ) : position.filledQty !== undefined && position.filledQty < absQty ? (
+                        // Partially filled
+                        <span className="text-yellow-600 font-semibold">{position.filledQty}/{absQty} Filled</span>
+                    ) : (
+                        <span>{absQty} Qty</span>
+                    )}
                 </span>
             </div>
 

@@ -111,3 +111,13 @@ export async function getLivePositions(): Promise<any> {
     const response = await apiClient.get('/api/live/positions');
     return response.data;
 }
+
+/**
+ * Fetch status of a specific order by ID.
+ * Used after order placement to verify fill status.
+ * Dhan response includes: orderStatus, tradedQuantity, remainingQuantity, rejectedReason, etc.
+ */
+export async function getOrderStatus(orderId: string): Promise<any> {
+    const response = await apiClient.get(`/api/live/order/${orderId}`);
+    return response.data;
+}

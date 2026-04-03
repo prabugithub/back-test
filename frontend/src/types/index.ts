@@ -66,6 +66,10 @@ export interface Position {
   trendReversedPnL?: number;
   withTrendSeen?: boolean;
   liveOptionToken?: string;
+  // Set immediately after order placement; cleared once fill is confirmed or order rejected
+  pendingOrderId?: string;
+  // Qty confirmed filled by broker (from order status poll); undefined means not yet verified
+  filledQty?: number;
 }
 
 // API request/response types

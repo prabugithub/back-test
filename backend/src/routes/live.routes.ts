@@ -148,4 +148,26 @@ router.get('/positions', async (req: Request, res: Response) => {
     }
 });
 
+/**
+ * GET /api/live/order/:orderId
+ * Fetch order status from Dhan — used by the frontend to verify fill after placement.
+ * Returns the raw Dhan order object which includes:
+ *   orderStatus: 'TRADED' | 'REJECTED' | 'PENDING' | 'PARTIALLY_TRADED' | ...
+ *   filledQty / tradedQuantity, remainingQuantity, rejectedReason (if rejected)
+ */
+router.get('/order/:orderId', async (req: Request, res: Response) => {
+    try {
+        const { orderId } = req.params;
+        if (!orderId) {
+            return res.status(400).json({ error: 'orderId is required' });
+        }
+        const { getOrderStatus } = await import('../services/dhan.service');
+        const orderData = await getOrderStatus(orderId);
+        res.json({ success: true, data: orderData });
+    } catch (error: any) {
+        logger.error('Error fetching order status:', error.message);
+        res.status(500).json({ error: 'Failed to fetch order status', message: error.message });
+    }
+});
+
 export default router;

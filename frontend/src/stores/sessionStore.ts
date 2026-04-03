@@ -119,6 +119,9 @@ interface SessionStore {
 }
 
 let syncIntervalId: ReturnType<typeof setInterval> | null = null;
+// Temporarily holds the orderId of the most recently placed live order so the position
+// builder can attach it for fill-status polling.
+let pendingLiveOrderId: string | undefined = undefined;
 
 const generateTradeId = () => {
   return `${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
@@ -190,13 +193,16 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
       }
       get().syncLivePositions();
       
-      if (!syncIntervalId) {
-        syncIntervalId = setInterval(() => {
-          if (get().isLiveMode) {
-             get().syncLivePositions();
-          }
-        }, 3000);
+      // Always clear any existing interval before starting a new one to prevent stacking
+      // when setLiveMode(true) is called more than once without an intervening false.
+      if (syncIntervalId) {
+        clearInterval(syncIntervalId);
       }
+      syncIntervalId = setInterval(() => {
+        if (get().isLiveMode) {
+           get().syncLivePositions();
+        }
+      }, 3000);
     } else {
       if (syncIntervalId) {
         clearInterval(syncIntervalId);
@@ -553,6 +559,17 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
         const isBankNiftyIndex = (typeof instrument === 'string' && instrument.toUpperCase().includes('BANKNIFTY')) || String(sessionConfig.securityId) === '25';
         
         if (isNiftyIndex || isBankNiftyIndex) {
+            // Guard: block adding to an already-open option position to prevent accidental doubles.
+            // isReducing = true means the trade closes/reduces the current position (allowed).
+            // isSameDirection = true means it would ADD to the current position (blocked).
+            if (position && position.liveOptionToken && isSameDirection) {
+               useNotificationStore.getState().notify(
+                 `Already in an open option position (${position.instrument}). Close it before opening a new one.`,
+                 'warning'
+               );
+               return;
+            }
+
             if (position && position.liveOptionToken) {
                // CLOSING/REDUCING: Sell the option we already hold (Option Buyers always SELL to close)
                liveSecurityId = position.liveOptionToken;
@@ -635,13 +652,29 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
         let orderResult;
 
         if (exitReason === 'SL' && position && position.liveOptionToken && isLiveMode) {
-             orderResult = await executeSmartExit({
-                 securityId: String(liveSecurityId),
-                 exchangeSegment: liveExchange,
-                 transactionType: liveTransactionType,
-                 quantity: finalQuantity,
-                 slPrice: Number(position.stopLoss)
-             });
+             if (limitPrice) {
+               // Use the option's current LTP (fetched above via getATMOption) as the Smart Exit
+               // anchor price. position.stopLoss is the SPOT level, not the option premium.
+               orderResult = await executeSmartExit({
+                   securityId: String(liveSecurityId),
+                   exchangeSegment: liveExchange,
+                   transactionType: liveTransactionType,
+                   quantity: finalQuantity,
+                   slPrice: limitPrice
+               });
+             } else {
+               // No LTP available — place market order immediately instead of chasing
+               useNotificationStore.getState().notify('No option LTP available for Smart Exit; placing MARKET order directly.', 'warning');
+               orderResult = await placeLiveOrder({
+                   securityId: String(liveSecurityId),
+                   exchangeSegment: liveExchange,
+                   transactionType: liveTransactionType,
+                   quantity: finalQuantity,
+                   price: 0,
+                   orderType: 'MARKET',
+                   productType: 'INTRADAY'
+               });
+             }
         } else {
              orderResult = await placeLiveOrder({
                securityId: String(liveSecurityId),
@@ -655,11 +688,19 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
         }
 
         if (orderResult && orderResult.success) {
+           const placedOrderId: string | undefined = orderResult.data?.orderId || orderResult.orderId;
            const logMsg = exitReason === 'SL' ? `Smart Exit Launched` : `Live Order Placed`;
-           useNotificationStore.getState().notify(`${logMsg}: ${liveTransactionType} ${finalQuantity} @ ₹${limitPrice?.toFixed(2) || 'auto'} (ID: ${orderResult.data?.orderId || orderResult.orderId || 'N/A'})`, 'info');
+           useNotificationStore.getState().notify(`${logMsg}: ${liveTransactionType} ${finalQuantity} @ ₹${limitPrice?.toFixed(2) || 'auto'} (ID: ${placedOrderId || 'N/A'})`, 'info');
+
+           // Store orderId for fill-status polling (cleared once confirmed/rejected)
+           if (placedOrderId) {
+             // Shallow update — position object is built below; store the id temporarily in a
+             // module-level variable so the position builder can attach it.
+             pendingLiveOrderId = placedOrderId;
+           }
         } else {
            useNotificationStore.getState().notify(`Live Order Failed: ${orderResult?.message || 'Unknown error'}`, 'error');
-           return; 
+           return;
         }
       } catch (error: any) {
         useNotificationStore.getState().notify(`Error placing live option order: ${error.message}`, 'error');
@@ -776,13 +817,67 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
       trendReversedPnL: isFlip ? undefined : position?.trendReversedPnL,
       withTrendSeen: trade.withTrendSeen,
       liveOptionToken: atmOptionToken || position?.liveOptionToken,
+      // Attach the most recently placed order ID so PositionOverlay can show fill status.
+      // pendingLiveOrderId is cleared below once we hand it off.
+      pendingOrderId: pendingLiveOrderId,
     };
+
+    // Reset module-level holder now that it's attached to the position object.
+    pendingLiveOrderId = undefined;
+
+    const nextPosition = newQty !== 0 ? newPositionState : null;
 
     set({
       trades: [...trades, trade],
-      position: newQty !== 0 ? newPositionState : null,
-      manualLevels: null, // Clear manual levels after executing a trade
+      position: nextPosition,
+      manualLevels: null,
     });
+
+    // After order placement, poll Dhan once (after ~2 s) to verify fill status.
+    // Updates position.filledQty and shows a toast on rejection.
+    if (newPositionState.pendingOrderId && get().isLiveMode) {
+      const orderIdToCheck = newPositionState.pendingOrderId;
+      setTimeout(async () => {
+        try {
+          const { getOrderStatus } = await import('../services/api');
+          const resp = await getOrderStatus(orderIdToCheck);
+          const order = resp?.data;
+          if (!order) return;
+
+          const status: string = order.orderStatus || '';
+          const filled: number = order.tradedQuantity ?? order.filledQty ?? 0;
+          const remaining: number = order.remainingQuantity ?? 0;
+
+          if (status === 'REJECTED') {
+            useNotificationStore.getState().notify(
+              `Order REJECTED: ${order.rejectedReason || 'Unknown reason'}. Clearing position.`,
+              'error'
+            );
+            // Position no longer valid — clear it
+            set((s) => ({
+              position: s.position?.pendingOrderId === orderIdToCheck ? null : s.position
+            }));
+          } else if (status === 'PARTIALLY_TRADED') {
+            useNotificationStore.getState().notify(
+              `Order PARTIAL FILL: ${filled} filled, ${remaining} pending.`,
+              'warning'
+            );
+            set((s) => {
+              if (!s.position || s.position.pendingOrderId !== orderIdToCheck) return s;
+              return { position: { ...s.position, filledQty: filled, pendingOrderId: undefined } };
+            });
+          } else {
+            // TRADED or any other terminal state — mark as confirmed
+            set((s) => {
+              if (!s.position || s.position.pendingOrderId !== orderIdToCheck) return s;
+              return { position: { ...s.position, filledQty: filled, pendingOrderId: undefined } };
+            });
+          }
+        } catch (e) {
+          console.warn('Order status poll failed:', e);
+        }
+      }, 2000);
+    }
   },
 
   resetSession: () => {
@@ -971,18 +1066,16 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
   },
 
   restoreSessionState: (trades, position, currentIndex, uiSettings) => {
-    set({
+    // Merge everything into a single set() so React only schedules one re-render.
+    // This ensures the chart's useEffect sees the restored indicators AND drawings
+    // in the same render cycle that it sees the new candle data.
+    set((state) => ({
+      ...state,
       trades,
       position,
-      currentIndex
-    });
-    
-    if (uiSettings) {
-      set((state) => ({
-        ...state,
-        ...uiSettings
-      }));
-    }
+      currentIndex,
+      ...(uiSettings || {})
+    }));
   },
 
   restoreRemoteBackup: async (historyId?: string) => {

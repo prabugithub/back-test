@@ -229,14 +229,12 @@ export function InstrumentSelector() {
         // Fetch using the restored config
         await handleFetch(config);
 
-        // Restore session state (trades, position)
-        // We do this AFTER fetch because loadCandles resets the store
-        // We need to ensure handleFetch finished successfully. 
-        // Note: handleFetch is async but loadCandles inside it is synchronous in zustand usually, 
-        // but let's be safe.
-        setTimeout(() => {
-          restoreSessionState(data.trades, data.position, data.currentIndex, data.uiSettings);
-        }, 100);
+        // Restore session state (trades, position, currentIndex, and UI settings like drawings /
+        // indicators) in one synchronous call right after handleFetch completes.
+        // loadCandles (called inside handleFetch) does NOT reset drawings or indicators, so
+        // applying uiSettings here in the same tick ensures a single React render cycle sees
+        // both the new candle data and the restored UI state.
+        restoreSessionState(data.trades, data.position, data.currentIndex, data.uiSettings);
       } else {
         setError("No saved session found.");
       }

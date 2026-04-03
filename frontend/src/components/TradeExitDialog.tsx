@@ -29,7 +29,15 @@ export function TradeExitDialog() {
     if (!pendingRequest) return null;
 
     const isTP = pendingRequest.type === 'TP';
-    const projectedPnL = position ? (pendingRequest.spotPrice - position.averagePrice) * position.quantity : 0;
+    // For live option positions the averagePrice is the option premium, not the spot price,
+    // so the spot-based formula produces a wildly wrong number. Use the broker-synced
+    // unrealizedPnL instead (kept current by syncLivePositions every 3 s).
+    const isLiveOption = !!(position?.liveOptionToken);
+    const projectedPnL = position
+        ? isLiveOption
+            ? (position.unrealizedPnL || 0)
+            : (pendingRequest.spotPrice - position.averagePrice) * position.quantity
+        : 0;
 
     const handleConfirm = () => {
         resolveRequest(true, {
