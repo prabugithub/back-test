@@ -1227,14 +1227,11 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
       return 0;
     }
 
-    if (isLiveMode && livePrice !== null) {
-      // If this is an Option trade, we cannot calculate PnL against the underlying Spot livePrice.
-      // E.g. Spot is 22000, Option was bought at 100 -> huge wrong PnL.
-      // So we use the fixed unrealizedPnL snapshot from the position sync.
-      if (position.liveOptionToken) {
-        return position.unrealizedPnL || 0;
-      }
-      return (livePrice - position.averagePrice) * position.quantity;
+    if (isLiveMode) {
+      // In live mode the frontend only receives spot/index ticks — never the option's own LTP.
+      // Computing (spotPrice - optionAvgEntry) * qty gives a wildly wrong P&L.
+      // Always use the broker-synced unrealizedPnL (refreshed every 3 s by syncLivePositions).
+      return position.unrealizedPnL || 0;
     }
 
     const currentCandle = candles[currentIndex];

@@ -41,9 +41,12 @@ export function resampleCandles(candles: Candle[], timeframeMinutes: number): Ca
     const resampled: Candle[] = [];
     const timeframeSeconds = timeframeMinutes * 60;
 
-    // Group candles into buckets
-    // We align to the timeframe boundaries (e.g. 09:15, 09:20, 09:25)
-    // Assuming timestamps are in seconds
+    // IST = UTC+5:30 = 19800 seconds ahead of UTC.
+    // Indian market session opens at 09:15 IST = 33300 seconds from IST midnight.
+    // We bucket relative to session open so that 60m candles start at 09:15, 10:15, ...
+    // and 1D candles carry the 09:15 timestamp of that trading day.
+    const IST_OFFSET = 19800;          // seconds
+    const SESSION_START = 9 * 3600 + 15 * 60; // 09:15 in seconds from IST midnight
 
     let currentBucketStart = -1;
     let bucketCandles: Candle[] = [];
@@ -51,11 +54,18 @@ export function resampleCandles(candles: Candle[], timeframeMinutes: number): Ca
     for (const candle of candles) {
         const timestamp = candle.timestamp;
 
-        // Find bucket start
-        // If timestamp is 09:16:00 (secs), and timeframe is 5 min (300s)
-        // 09:15 is the bucket start.
-        // floor(time / 300) * 300
-        const bucketStart = Math.floor(timestamp / timeframeSeconds) * timeframeSeconds;
+        // Convert to IST, split into day and intra-day parts
+        const tsIst = timestamp + IST_OFFSET;
+        const timeInDay = tsIst % 86400;           // seconds past IST midnight
+        const istDayStart = tsIst - timeInDay;     // IST midnight (epoch seconds in IST)
+
+        // Seconds elapsed since session open (09:15 IST)
+        const sincOpen = timeInDay - SESSION_START;
+        // Which bucket within the session (negative means pre-market, treated as bucket 0)
+        const bucketIdx = Math.max(0, Math.floor(sincOpen / timeframeSeconds));
+
+        // Bucket start in UTC epoch seconds
+        const bucketStart = (istDayStart + SESSION_START + bucketIdx * timeframeSeconds) - IST_OFFSET;
 
         if (currentBucketStart === -1) {
             currentBucketStart = bucketStart;

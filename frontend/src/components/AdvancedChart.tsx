@@ -46,6 +46,7 @@ export function AdvancedChart({
   const indicatorSeriesRef = useRef<Map<string, any>>(new Map());
   const lastCandleRef = useRef<any>(null);
   const prevCumulativeVolumeRef = useRef<number>(0);
+  const seenFirstTickRef = useRef<boolean>(false);
 
   // Shared state from store
   const activeChartId = useSessionStore((s) => s.activeChartId);
@@ -205,12 +206,19 @@ export function AdvancedChart({
       const timeScale = chart.timeScale();
       let syncTime = crosshairPosition.time;
 
-      // Align time for HTF chart if incoming time is from LTF
+      // Align time for HTF chart if incoming time is from LTF (session-aligned, same as resampler)
       if (isSecondary && secondaryTimeframe) {
         let tfMinutes = parseInt(secondaryTimeframe);
         if (secondaryTimeframe === '1D') tfMinutes = 1440;
         const timeframeSeconds = tfMinutes * 60;
-        syncTime = Math.floor(syncTime / timeframeSeconds) * timeframeSeconds;
+        const IST_OFFSET = 19800;
+        const SESSION_START = 9 * 3600 + 15 * 60;
+        const tsIst = syncTime + IST_OFFSET;
+        const timeInDay = tsIst % 86400;
+        const istDayStart = tsIst - timeInDay;
+        const sincOpen = timeInDay - SESSION_START;
+        const bucketIdx = Math.max(0, Math.floor(sincOpen / timeframeSeconds));
+        syncTime = (istDayStart + SESSION_START + bucketIdx * timeframeSeconds) - IST_OFFSET;
       }
 
       const x = timeScale.timeToCoordinate(syncTime as any);
@@ -535,18 +543,35 @@ export function AdvancedChart({
       let tfMinutes = parseInt(chartInterval || '5');
       if (chartInterval === '1D') tfMinutes = 1440;
       const timeframeSeconds = tfMinutes * 60;
-      
-      const bucketStart = Math.floor(tick.timestamp / timeframeSeconds) * timeframeSeconds;
+
+      // Align to session open (09:15 IST) — same logic as resampler.ts
+      const IST_OFFSET = 19800;
+      const SESSION_START = 9 * 3600 + 15 * 60;
+      const tsIst = tick.timestamp + IST_OFFSET;
+      const timeInDay = tsIst % 86400;
+      const istDayStart = tsIst - timeInDay;
+      const sincOpen = timeInDay - SESSION_START;
+      const bucketIdx = Math.max(0, Math.floor(sincOpen / timeframeSeconds));
+      const bucketStart = (istDayStart + SESSION_START + bucketIdx * timeframeSeconds) - IST_OFFSET;
       const lastCandle = lastCandleRef.current;
 
       console.debug(`[Chart${isSecondary ? '-2' : '-1'}] tick price=${tick.price} bucket=${bucketStart} last=${lastCandle.time}`);
       
-      // Dhan sends cumulative day volume — compute per-tick delta to avoid overflow
+      // Dhan sends cumulative day volume — compute per-tick delta to avoid overflow.
+      // On the very first tick (e.g. secondary chart mounted mid-session), seed the
+      // baseline without adding any volume so the huge cumulative value never reaches
+      // the histogram (which has a ±9e13 hard limit in lightweight-charts).
       const cumVol = tick.volume || 0;
-      const deltaVol = cumVol > prevCumulativeVolumeRef.current
-        ? cumVol - prevCumulativeVolumeRef.current
-        : cumVol; // reset at day start or first tick
-      prevCumulativeVolumeRef.current = cumVol;
+      let deltaVol = 0;
+      if (!seenFirstTickRef.current) {
+        seenFirstTickRef.current = true;
+        prevCumulativeVolumeRef.current = cumVol; // seed — no delta on first tick
+      } else {
+        deltaVol = cumVol > prevCumulativeVolumeRef.current
+          ? cumVol - prevCumulativeVolumeRef.current
+          : cumVol; // reset at day start
+        prevCumulativeVolumeRef.current = cumVol;
+      }
 
       if (bucketStart === lastCandle.time) {
         // ── Update active candle in-place ─────────────────────────────────
