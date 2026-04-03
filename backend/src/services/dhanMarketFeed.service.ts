@@ -11,6 +11,17 @@ const subscribedTokens: Set<string> = new Set();
 const pendingSubscriptions: Array<{ token: string; segment: string }> = [];
 let feedConnected = false;
 
+/** Internal tick callback — used by positionMonitor to receive prices without Socket.io */
+let internalTickCallback: ((token: string, price: number) => void) | null = null;
+
+/**
+ * Register a callback that fires on every price tick (both WS and REST polling).
+ * Used by positionMonitor.service to check SL/TP without needing a socket connection.
+ */
+export function setInternalTickCallback(cb: (token: string, price: number) => void): void {
+    internalTickCallback = cb;
+}
+
 // Map string segments to Dhan numeric codes
 const SEGMENT_MAP: Record<string, number> = {
     'INDEX': 0,     // Nifty/Bank Nifty Spot (IDX)
@@ -83,14 +94,16 @@ async function performRestPoll(clientID: string, accessToken: string) {
 
                 if (times.length > 0 && closes.length > 0) {
                     const lastTs = times[times.length - 1];
-                    const lastClose = closes[closes.length - 1];
+                    const lastClose = Number(closes[closes.length - 1]);
                     logger.debug(`[REST Poll] token:${token} price:${lastClose} ts:${lastTs}`);
                     io?.to(`instrument:${token}`).emit('tick', {
                         token,
-                        price: Number(lastClose),
+                        price: lastClose,
                         timestamp: Number(lastTs),
                         volume: 0,
                     });
+                    // Notify position monitor (runs even when no frontend is connected)
+                    internalTickCallback?.(token, lastClose);
                 }
             } catch (err: any) {
                 logger.warn(`[REST Poll] Failed for token ${token}: ${err.message}`);
@@ -160,13 +173,16 @@ export function initDhanMarketFeed(serverIo: Server) {
                 const token = message.securityId !== undefined ? String(message.securityId) : null;
                 const ltp = message.ltp ?? message.LTP ?? message.last_price ?? message.price;
                 if (token && ltp !== undefined && ltp !== null) {
-                    logger.info(`[WS Tick] token:${token} ltp:${ltp}`);
+                    const numericPrice = Number(ltp);
+                    logger.info(`[WS Tick] token:${token} ltp:${numericPrice}`);
                     io?.to(`instrument:${token}`).emit('tick', {
                         token,
-                        price: Number(ltp),
+                        price: numericPrice,
                         timestamp: Math.floor(Date.now() / 1000),
                         volume: message.volume ?? message.Vol ?? 0
                     });
+                    // Notify position monitor (runs even when no frontend is connected)
+                    internalTickCallback?.(token, numericPrice);
                 } else {
                     logger.info('Dhan Feed message (non-ticker):', JSON.stringify(message));
                 }

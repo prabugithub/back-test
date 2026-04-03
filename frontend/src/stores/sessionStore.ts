@@ -6,7 +6,7 @@ import { saveSession, loadSession, restoreBackup, saveSnapshot, listSnapshots, l
 import { useNotificationStore } from './notificationStore';
 import { calculatePivotPoints } from '../utils/indicators';
 import { analyzeMarketStructure } from '../utils/pivotAnalysis';
-import { placeLiveOrder, getATMOption, executeSmartExit, getLivePositions } from '../services/api';
+import { placeLiveOrder, getATMOption, executeSmartExit, getLivePositions, registerPositionMonitor, unregisterPositionMonitor } from '../services/api';
 
 export interface SessionConfig {
   securityId: string;
@@ -832,6 +832,35 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
       position: nextPosition,
       manualLevels: null,
     });
+
+    // Register / unregister backend position monitor so SL/TP fires even if browser is closed
+    if (get().isLiveMode) {
+      const sessionCfg = get().sessionConfig;
+      if (nextPosition === null) {
+        // Position fully closed — remove from backend monitor
+        const closedToken = position?.liveOptionToken;
+        if (closedToken) {
+          unregisterPositionMonitor(closedToken).catch((e) =>
+            console.warn('[Monitor] Unregister failed:', e)
+          );
+        }
+      } else if (nextPosition.liveOptionToken && sessionCfg) {
+        // New / updated live option position — register (or re-register) with backend
+        const isLongPos = nextPosition.quantity > 0;
+        registerPositionMonitor({
+          id: nextPosition.liveOptionToken,
+          spotToken: String(sessionCfg.securityId),
+          spotSegment: sessionCfg.exchangeSegment || 'IDX_I',
+          direction: isLongPos ? 'LONG' : 'SHORT',
+          stopLoss: nextPosition.stopLoss ?? 0,
+          target: nextPosition.target ?? 0,
+          optionSecurityId: nextPosition.liveOptionToken,
+          optionExchangeSegment: 'NSE_FNO',
+          quantity: Math.abs(nextPosition.quantity),
+          entryPrice: nextPosition.averagePrice,
+        }).catch((e) => console.warn('[Monitor] Register failed:', e));
+      }
+    }
 
     // After order placement, poll Dhan once (after ~2 s) to verify fill status.
     // Updates position.filledQty and shows a toast on rejection.

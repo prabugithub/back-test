@@ -3,6 +3,7 @@ import { placeOrder } from '../services/dhan.service';
 import { getFeedStatus, emitTestTick } from '../services/dhanMarketFeed.service';
 import { getATMOptionForOrder } from '../services/optionChain.service';
 import { executeSmartExit } from '../services/smartExit.service';
+import { registerPosition, unregisterPosition, getMonitoredPositions } from '../services/positionMonitor.service';
 import logger from '../utils/logger';
 
 const router = Router();
@@ -168,6 +169,66 @@ router.get('/order/:orderId', async (req: Request, res: Response) => {
         logger.error('Error fetching order status:', error.message);
         res.status(500).json({ error: 'Failed to fetch order status', message: error.message });
     }
+});
+
+/**
+ * POST /api/live/monitor
+ * Register a position for backend SL/TP monitoring.
+ * Called by frontend immediately after a live option order is placed.
+ * Once registered, the backend will fire the exit order even if the browser is closed.
+ */
+router.post('/monitor', (req: Request, res: Response) => {
+    try {
+        const { id, spotToken, spotSegment, direction, stopLoss, target, optionSecurityId, optionExchangeSegment, quantity, entryPrice } = req.body;
+
+        if (!id || !spotToken || !direction || !optionSecurityId || !quantity) {
+            return res.status(400).json({
+                error: 'Missing required parameters',
+                required: ['id', 'spotToken', 'direction', 'optionSecurityId', 'quantity'],
+            });
+        }
+        if (!stopLoss && !target) {
+            return res.status(400).json({ error: 'At least one of stopLoss or target must be provided' });
+        }
+
+        registerPosition({
+            id,
+            spotToken: String(spotToken),
+            spotSegment: spotSegment || 'IDX_I',
+            direction,
+            stopLoss: Number(stopLoss) || 0,
+            target: Number(target) || 0,
+            optionSecurityId: String(optionSecurityId),
+            optionExchangeSegment: optionExchangeSegment || 'NSE_FNO',
+            quantity: Number(quantity),
+            entryPrice: Number(entryPrice) || 0,
+        });
+
+        res.json({ success: true, message: `Position ${id} registered for backend monitoring` });
+    } catch (error: any) {
+        logger.error('Error registering position monitor:', error.message);
+        res.status(500).json({ error: 'Failed to register position monitor', message: error.message });
+    }
+});
+
+/**
+ * DELETE /api/live/monitor/:id
+ * Unregister a position from backend monitoring.
+ * Called by frontend when the user manually closes a position.
+ */
+router.delete('/monitor/:id', (req: Request, res: Response) => {
+    const { id } = req.params;
+    const removed = unregisterPosition(id);
+    res.json({ success: true, removed, message: removed ? `Position ${id} unregistered` : `Position ${id} was not monitored` });
+});
+
+/**
+ * GET /api/live/monitor
+ * List all currently monitored positions.
+ * Used by the frontend on reconnect to re-sync its local state.
+ */
+router.get('/monitor', (_req: Request, res: Response) => {
+    res.json({ success: true, data: getMonitoredPositions() });
 });
 
 export default router;

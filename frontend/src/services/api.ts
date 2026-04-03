@@ -121,3 +121,41 @@ export async function getOrderStatus(orderId: string): Promise<any> {
     const response = await apiClient.get(`/api/live/order/${orderId}`);
     return response.data;
 }
+
+/**
+ * Register a live option position with the backend position monitor.
+ * Once registered, the backend fires the exit order independently of the frontend —
+ * so SL/TP will trigger even if the browser is closed.
+ */
+export async function registerPositionMonitor(params: {
+    id: string;
+    spotToken: string;
+    spotSegment: string;
+    direction: 'LONG' | 'SHORT';
+    stopLoss: number;
+    target: number;
+    optionSecurityId: string;
+    optionExchangeSegment: string;
+    quantity: number;
+    entryPrice: number;
+}): Promise<any> {
+    const response = await apiClient.post('/api/live/monitor', params);
+    return response.data;
+}
+
+/**
+ * Remove a position from backend monitoring (call after manual close).
+ */
+export async function unregisterPositionMonitor(id: string): Promise<any> {
+    const response = await apiClient.delete(`/api/live/monitor/${id}`);
+    return response.data;
+}
+
+/**
+ * Fetch all positions currently being monitored by the backend.
+ * Used on frontend reconnect to re-sync local state with backend.
+ */
+export async function getMonitoredPositions(): Promise<any> {
+    const response = await apiClient.get('/api/live/monitor');
+    return response.data;
+}

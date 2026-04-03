@@ -2,6 +2,7 @@ import { create } from 'zustand';
 import { io, Socket } from 'socket.io-client';
 import { useSessionStore } from './sessionStore';
 import { useNotificationStore } from './notificationStore';
+import { getMonitoredPositions } from '../services/api';
 
 interface LiveTick {
     token: string;
@@ -74,6 +75,28 @@ export const useLiveStore = create<LiveState>((set, get) => ({
                     socket.emit('subscribe:instrument', { token: securityId, segment: exchangeSegment });
                 }
             }
+
+            // On reconnect, check if the backend already triggered an exit while we were offline
+            if (isLiveMode) {
+                getMonitoredPositions().then((resp) => {
+                    const session = useSessionStore.getState();
+                    if (!session.position) return;
+
+                    const currentToken = session.position.liveOptionToken;
+                    if (!currentToken) return;
+
+                    const stillMonitored = resp?.data?.some((p: any) => p.id === currentToken);
+                    if (!stillMonitored) {
+                        // Backend already exited this position while we were offline
+                        useNotificationStore.getState().notify(
+                            'Backend exited your position (SL/TP hit while offline). Syncing state.',
+                            'warning'
+                        );
+                        // Clear local position — syncLivePositions will reconcile with broker next tick
+                        session.syncLivePositions();
+                    }
+                }).catch((e) => console.warn('[LiveStore] Monitor sync on reconnect failed:', e));
+            }
         });
 
         socket.on('disconnect', (reason) => {
@@ -95,6 +118,36 @@ export const useLiveStore = create<LiveState>((set, get) => ({
             if (get().isLiveMode) {
                 useSessionStore.getState().updateLivePrice(tick.price);
             }
+        });
+
+        // Backend fired an exit order (SL or TP hit while frontend may have been offline)
+        socket.on('position:exit-triggered', (data: { positionId: string; reason: 'SL' | 'TP'; triggerPrice: number; stopLoss: number; target: number }) => {
+            console.log('[LiveStore] Backend exit triggered:', data);
+            const level = data.reason === 'SL' ? data.stopLoss : data.target;
+            useNotificationStore.getState().notify(
+                `${data.reason} Hit at ${level.toFixed(2)} — Backend is exiting position automatically.`,
+                data.reason === 'SL' ? 'warning' : 'success'
+            );
+        });
+
+        // Backend confirmed the exit order was placed with the broker
+        socket.on('position:exit-placed', (data: { positionId: string; reason: 'SL' | 'TP'; triggerPrice: number }) => {
+            console.log('[LiveStore] Backend exit placed:', data);
+            useNotificationStore.getState().notify(
+                `${data.reason} exit order placed by backend at ${data.triggerPrice.toFixed(2)}. Syncing position.`,
+                'info'
+            );
+            // Sync local state with broker to reflect the closed position
+            useSessionStore.getState().syncLivePositions();
+        });
+
+        // Backend exit order failed — alert user to act manually
+        socket.on('position:exit-failed', (data: { positionId: string; reason: 'SL' | 'TP'; error: string }) => {
+            console.error('[LiveStore] Backend exit failed:', data);
+            useNotificationStore.getState().notify(
+                `CRITICAL: Backend ${data.reason} exit FAILED (${data.error}). Please close position manually!`,
+                'error'
+            );
         });
 
         set({ socket });

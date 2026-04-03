@@ -32,8 +32,9 @@ import liveRoutes from './routes/live.routes';
 import { Server } from 'socket.io';
 import http from 'http';
 
-import { initDhanMarketFeed, handleSocketSubscription } from './services/dhanMarketFeed.service';
+import { initDhanMarketFeed, handleSocketSubscription, setInternalTickCallback } from './services/dhanMarketFeed.service';
 import { initSymbolMaster } from './services/symbolMaster.service';
+import { initPositionMonitor, onTick } from './services/positionMonitor.service';
 
 const app: Express = express();
 const PORT = process.env.PORT || 3001;
@@ -132,6 +133,10 @@ async function startServer() {
       initSymbolMaster(); // Download and parse Scrip Master
       // Initialize Market Feed
       initDhanMarketFeed(io);
+      // Initialize position monitor — must come after market feed
+      initPositionMonitor(io);
+      // Wire every price tick into the position monitor so SL/TP works without the frontend
+      setInternalTickCallback((token, price) => { onTick(token, price); });
     } catch (error: any) {
       logger.warn('Dhan API client initialization failed:', error.message);
     }
