@@ -215,14 +215,27 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
     try {
       const resp = await getLivePositions();
       if (resp?.success && Array.isArray(resp.data)) {
-        // Find the active position. 
+        // Find the active position.
         // We only care about active options or index positions for the current session.
         // Specifically, ignore equity/stocks and only pick FNO.
-        const openPosition = resp.data.find((p: any) => 
-           p.positionType !== 'CLOSED' && 
-           (p.buyQty !== p.sellQty) && 
+        const openFnoPositions = resp.data.filter((p: any) =>
+           p.positionType !== 'CLOSED' &&
+           (p.buyQty !== p.sellQty) &&
            p.exchangeSegment === 'NSE_FNO'
         );
+
+        const currentStoreToken = get().position?.liveOptionToken;
+
+        // Prefer exact match by securityId to avoid picking up unrelated FNO positions
+        // (e.g. futures or a different option that happens to be open).
+        let openPosition: any;
+        if (currentStoreToken) {
+          openPosition = openFnoPositions.find((p: any) =>
+            String(p.securityId) === String(currentStoreToken)
+          );
+        } else {
+          openPosition = openFnoPositions[0];
+        }
         
         if (openPosition) {
           const qty = openPosition.positionType === 'LONG' 
@@ -291,7 +304,7 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
           close: candle.close,
           high: Math.max(lastCandle.high, candle.high),
           low: Math.min(lastCandle.low, candle.low),
-          volume: (lastCandle.volume || 0) + (candle.volume || 0),
+          volume: candle.volume ?? lastCandle.volume ?? 0,
         },
       ];
     } else {
