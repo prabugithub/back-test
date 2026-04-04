@@ -6,7 +6,7 @@ import { saveSession, loadSession, restoreBackup, saveSnapshot, listSnapshots, l
 import { useNotificationStore } from './notificationStore';
 import { calculatePivotPoints } from '../utils/indicators';
 import { analyzeMarketStructure } from '../utils/pivotAnalysis';
-import { placeLiveOrder, getATMOption, executeSmartExit, getLivePositions, registerPositionMonitor, unregisterPositionMonitor } from '../services/api';
+import { placeLiveOrder, getATMOption, executeSmartExit, getLivePositions, registerPositionMonitor, unregisterPositionMonitor, updatePositionMonitor } from '../services/api';
 
 export interface SessionConfig {
   securityId: string;
@@ -99,6 +99,7 @@ interface SessionStore {
   setTargetRR: (rr: number) => void;
   setAutoExitTarget: (auto: boolean) => void;
   setManualLevels: (levels: { sl: number, target: number } | null) => void;
+  updatePositionTarget: (newTarget: number) => Promise<void>;
   checkTrendReversal: (index: number) => void;
   toggleAtrForSignals: () => void;
   togglePivotRR: () => void;
@@ -391,22 +392,28 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
 
     if (isLong) {
       if (sl > 0 && (isLiveOption ? effectiveLow : effectiveClose) <= sl && !nextSlDialogShown) {
-        if (isLiveOption) autoExitSL = true;
-        else dialogToTrigger = 'SL';
+        // In live option mode, backend positionMonitor owns SL exit — don't double-fire here
+        if (!isLiveOption) dialogToTrigger = 'SL';
         nextSlDialogShown = true;
       } else if (tp > 0 && (isLiveOption ? effectiveHigh : effectiveClose) >= tp && !nextTpDialogShown) {
-        if (isLiveOption && autoExitTarget) autoExitTP = true;
-        else dialogToTrigger = 'TP';
+        // In live option mode, backend positionMonitor owns TP exit — don't double-fire here
+        if (!isLiveOption) {
+          if (autoExitTarget) autoExitTP = true;
+          else dialogToTrigger = 'TP';
+        }
         nextTpDialogShown = true;
       }
     } else {
       if (sl > 0 && (isLiveOption ? effectiveHigh : effectiveClose) >= sl && !nextSlDialogShown) {
-        if (isLiveOption) autoExitSL = true;
-        else dialogToTrigger = 'SL';
+        // In live option mode, backend positionMonitor owns SL exit — don't double-fire here
+        if (!isLiveOption) dialogToTrigger = 'SL';
         nextSlDialogShown = true;
       } else if (tp > 0 && (isLiveOption ? effectiveLow : effectiveClose) <= tp && !nextTpDialogShown) {
-        if (isLiveOption && autoExitTarget) autoExitTP = true;
-        else dialogToTrigger = 'TP';
+        // In live option mode, backend positionMonitor owns TP exit — don't double-fire here
+        if (!isLiveOption) {
+          if (autoExitTarget) autoExitTP = true;
+          else dialogToTrigger = 'TP';
+        }
         nextTpDialogShown = true;
       }
     }
@@ -1344,6 +1351,29 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
   setTradeQuantity: (tradeQuantity) => set({ tradeQuantity }),
   setRiskPerTrade: (riskPerTrade) => set({ riskPerTrade }),
   setManualLevels: (manualLevels) => set({ manualLevels }),
+
+  updatePositionTarget: async (newTarget: number) => {
+    const { position, isLiveMode } = get();
+    if (!position) return;
+    const isLong = position.quantity > 0;
+    if (isLong && newTarget <= position.averagePrice) {
+      useNotificationStore.getState().notify('Target must be above entry price for a LONG position', 'warning');
+      return;
+    }
+    if (!isLong && newTarget >= position.averagePrice) {
+      useNotificationStore.getState().notify('Target must be below entry price for a SHORT position', 'warning');
+      return;
+    }
+    // Update frontend state — reset tpHit/tpDialogShown so the new level can trigger
+    set({ position: { ...position, target: newTarget, tpHit: false, tpDialogShown: false } });
+    // Sync to backend monitor if live
+    if (isLiveMode && position.liveOptionToken) {
+      await updatePositionMonitor(position.liveOptionToken, { target: newTarget })
+        .catch((e) => console.warn('[Monitor] Update target failed:', e));
+    }
+    useNotificationStore.getState().notify(`Target updated to ${newTarget.toFixed(2)}`, 'success');
+  },
+
   toggleAtrForSignals: () => set((state) => ({ useAtrForSignals: !state.useAtrForSignals })),
   togglePivotRR: () => set((state) => ({ showPivotRR: !state.showPivotRR })),
 

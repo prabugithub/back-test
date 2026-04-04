@@ -3,7 +3,7 @@ import { placeOrder } from '../adapters/dhan.adapter';
 import { getFeedStatus, emitTestTick } from '../adapters/dhanFeed.adapter';
 import { getATMOptionForOrder } from '../adapters/optionChain.adapter';
 import { executeSmartExit } from '../services/smartExit.service';
-import { registerPosition, unregisterPosition, getMonitoredPositions } from '../services/positionMonitor.service';
+import { registerPosition, unregisterPosition, getMonitoredPositions, updatePositionTarget } from '../services/positionMonitor.service';
 import logger from '../utils/logger';
 
 const router = Router();
@@ -220,6 +220,24 @@ router.delete('/monitor/:id', (req: Request, res: Response) => {
     const { id } = req.params;
     const removed = unregisterPosition(id);
     res.json({ success: true, removed, message: removed ? `Position ${id} unregistered` : `Position ${id} was not monitored` });
+});
+
+/**
+ * PATCH /api/live/monitor/:id
+ * Update the target level for a monitored position.
+ * Stop loss is strict and cannot be modified via this endpoint.
+ */
+router.patch('/monitor/:id', (req: Request, res: Response) => {
+    const { id } = req.params;
+    const { target } = req.body;
+    if (target === undefined || isNaN(Number(target))) {
+        return res.status(400).json({ error: 'target must be a valid number' });
+    }
+    const updated = updatePositionTarget(id, Number(target));
+    if (!updated) {
+        return res.status(404).json({ error: `Position ${id} not found or already exited` });
+    }
+    res.json({ success: true, message: `Target updated to ${target} for position ${id}` });
 });
 
 /**

@@ -152,6 +152,15 @@ export async function unregisterPositionMonitor(id: string): Promise<any> {
 }
 
 /**
+ * Update the target level for a monitored position.
+ * Only target can be changed — stop loss is strict and immutable.
+ */
+export async function updatePositionMonitor(id: string, params: { target: number }): Promise<any> {
+    const response = await apiClient.patch(`/api/live/monitor/${id}`, params);
+    return response.data;
+}
+
+/**
  * Fetch all positions currently being monitored by the backend.
  * Used on frontend reconnect to re-sync local state with backend.
  */

@@ -139,6 +139,26 @@ export function unregisterPosition(id: string): boolean {
 }
 
 /**
+ * Update the target level for an actively monitored position.
+ * Only target can be modified — stop loss is strict and immutable.
+ * Returns false if the position doesn't exist or has already triggered an exit.
+ */
+export function updatePositionTarget(id: string, target: number): boolean {
+    const pos = monitoredPositions.get(id);
+    if (!pos || pos.exitTriggered) return false;
+    pos.target = target;
+    try {
+        const db = getDatabase();
+        db.run('UPDATE monitored_positions SET target = ? WHERE id = ?', [target, id]);
+        saveDatabase();
+    } catch (err: any) {
+        logger.error('[PositionMonitor] Failed to update target in DB:', err.message);
+    }
+    logger.info(`[PositionMonitor] Target updated | id:${id} | newTarget:${target}`);
+    return true;
+}
+
+/**
  * Return a sanitized snapshot of all monitored positions (no internal flags leaked).
  */
 export function getMonitoredPositions(): Array<Omit<MonitoredPosition, 'exitTriggered'>> {

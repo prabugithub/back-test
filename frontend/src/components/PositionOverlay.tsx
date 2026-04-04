@@ -1,7 +1,7 @@
 import { useState, useRef, useEffect } from 'react';
 import { useSessionStore } from '../stores/sessionStore';
 import { formatCurrency } from '../utils/formatters';
-import { AlertCircle, X } from 'lucide-react';
+import { AlertCircle, X, Pencil, Check } from 'lucide-react';
 
 
 export function PositionOverlay({ onOpenDetail }: { onOpenDetail?: () => void }) {
@@ -10,10 +10,15 @@ export function PositionOverlay({ onOpenDetail }: { onOpenDetail?: () => void })
     const currentIndex = useSessionStore((s) => s.currentIndex);
     const initiateTrade = useSessionStore((s) => s.initiateTrade);
     const getUnrealizedPnL = useSessionStore((s) => s.getUnrealizedPnL);
+    const updatePositionTarget = useSessionStore((s) => s.updatePositionTarget);
 
     // State for dragging
     // We use offset to store the X/Y translation from the top-right corner or absolute position
     const [offset, setOffset] = useState<{ x: number, y: number } | null>(null);
+
+    // State for inline target editing
+    const [editingTarget, setEditingTarget] = useState(false);
+    const [targetInput, setTargetInput] = useState('');
 
     const isDragging = useRef(false);
     const dragStart = useRef({ x: 0, y: 0 });
@@ -71,6 +76,26 @@ export function PositionOverlay({ onOpenDetail }: { onOpenDetail?: () => void })
         initiateTrade(type, Math.abs(position.quantity));
     };
 
+    const handleStartEditTarget = (e: React.MouseEvent) => {
+        e.stopPropagation();
+        setTargetInput(position?.target ? String(position.target) : '');
+        setEditingTarget(true);
+    };
+
+    const handleConfirmTarget = (e: React.MouseEvent) => {
+        e.stopPropagation();
+        const val = Number(targetInput);
+        if (!isNaN(val) && val > 0) {
+            updatePositionTarget(val);
+        }
+        setEditingTarget(false);
+    };
+
+    const handleCancelEdit = (e: React.MouseEvent) => {
+        e.stopPropagation();
+        setEditingTarget(false);
+    };
+
     if (!position || position.quantity === 0) return null;
 
     const currentCandle = candles[currentIndex];
@@ -98,6 +123,9 @@ export function PositionOverlay({ onOpenDetail }: { onOpenDetail?: () => void })
         top: '60px',
         position: 'absolute' as const
     };
+
+    const hasSL = position.stopLoss && position.stopLoss > 0;
+    const hasTP = position.target && position.target > 0;
 
     return (
         <div
@@ -127,6 +155,56 @@ export function PositionOverlay({ onOpenDetail }: { onOpenDetail?: () => void })
                     <span className="text-gray-600 font-medium">Avg Price:</span>
                     <span className="font-bold text-gray-900">{formatCurrency(position.averagePrice)}</span>
                 </div>
+
+                {/* SL — read-only, strict */}
+                {hasSL && (
+                    <div className="flex justify-between text-xs items-center">
+                        <span className="text-gray-600 font-medium">SL:</span>
+                        <span className="font-bold text-red-600 font-mono">{position.stopLoss!.toFixed(2)}</span>
+                    </div>
+                )}
+
+                {/* Target — editable */}
+                {(hasTP || !hasSL) && (
+                    <div className="flex justify-between text-xs items-center gap-1">
+                        <span className="text-gray-600 font-medium">Target:</span>
+                        {editingTarget ? (
+                            <div className="flex items-center gap-1" onMouseDown={(e) => e.stopPropagation()}>
+                                <input
+                                    type="number"
+                                    value={targetInput}
+                                    onChange={(e) => setTargetInput(e.target.value)}
+                                    className="w-20 px-1 py-0.5 text-xs border border-green-400 rounded focus:outline-none focus:ring-1 focus:ring-green-500 font-mono"
+                                    autoFocus
+                                    onKeyDown={(e) => {
+                                        if (e.key === 'Enter') handleConfirmTarget(e as any);
+                                        if (e.key === 'Escape') handleCancelEdit(e as any);
+                                    }}
+                                />
+                                <button onClick={handleConfirmTarget} className="text-green-600 hover:text-green-800" title="Confirm">
+                                    <Check size={13} />
+                                </button>
+                                <button onClick={handleCancelEdit} className="text-gray-500 hover:text-gray-700" title="Cancel">
+                                    <X size={13} />
+                                </button>
+                            </div>
+                        ) : (
+                            <div className="flex items-center gap-1">
+                                <span className="font-bold text-green-600 font-mono">
+                                    {hasTP ? position.target!.toFixed(2) : '—'}
+                                </span>
+                                <button
+                                    onClick={handleStartEditTarget}
+                                    className="text-gray-400 hover:text-green-600"
+                                    title="Update target"
+                                >
+                                    <Pencil size={11} />
+                                </button>
+                            </div>
+                        )}
+                    </div>
+                )}
+
                 <div className="flex justify-between text-sm mt-1 items-end">
                     <div>
                         <span className="font-semibold text-gray-600 block text-[10px] leading-tight mb-0.5">Unrealized P&L</span>
