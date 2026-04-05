@@ -26,7 +26,11 @@
       "Bash(taskkill:*)",
       "Bash(curl:*)",
       "Bash(node:*)",
-      "Bash(ls \"f:/projects/personal project/back-test\"/*.md)"
+      "Bash(ls \"f:/projects/personal project/back-test\"/*.md)",
+      "Read(//f/projects/personal project/back-test/$\\(pwd\\)/frontend/**)",
+      "Read(//f/projects/personal project/back-test/$\\(pwd\\)/frontend/src/**)",
+      "Read(//f/projects/personal project/back-test/$\\(pwd\\)/frontend/src/components/**)",
+      "Bash(xargs grep:*)"
     ]
   }
 }

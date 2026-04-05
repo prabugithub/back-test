@@ -1,42 +1,48 @@
-# Manual Backtesting System for Indian Stock Market
+# Manual Backtesting System — Indian Stock Market
 
-A web-based manual backtesting application for Indian stock market (NSE/BSE) that allows you to replay historical price data and manually execute trades. Built with Node.js, Express, React, and integrated with **Angel One SmartAPI (FREE)** for fetching historical candle data.
+A full-stack web application for manual backtesting and live trading of Indian equities and derivatives (NSE/BSE). Replay historical candlestick data candle-by-candle, execute simulated trades, and optionally route live orders through Dhan.
 
-## Features
-
-### Current (MVP)
-- 📊 **Visual Candlestick Charts** - TradingView Lightweight Charts integration
-- ▶️ **Playback Controls** - Play/Pause, Step forward/backward, Speed control (0.5x to 10x)
-- 💹 **Manual Trading** - Execute BUY/SELL orders at current candle close price
-- 📈 **Position Tracking** - Real-time position and P&L calculation (FIFO method)
-- 📋 **Trade History** - Complete session trade log with P&L per trade
-- 💾 **Data Caching** - SQLite caching for fast data reload
-- ⌨️ **Keyboard Shortcuts** - Space (Play/Pause), Arrow keys (Step)
-- 🔄 **5-Minute Candles** - Primary timeframe support
-
-### Supported Instruments
-- Stocks (NSE/BSE Equity)
-- Nifty Index
-- Bank Nifty Index
-- Index Futures
-- Stock Futures
+---
 
 ## Tech Stack
 
-### Backend
-- **Node.js** + **Express.js** + **TypeScript**
-- **SQLite** (sql.js) for data caching
-- **Angel One SmartAPI** (FREE) for historical data
-- **Winston** for logging
-- **date-fns** for date manipulation
+| Layer | Technology |
+|-------|-----------|
+| Frontend | React 19 + TypeScript + Vite |
+| State | Zustand 5 |
+| Charts | TradingView Lightweight Charts 5 |
+| Styling | Tailwind CSS 4 |
+| Backend | Node.js + Express 4 + TypeScript |
+| Database | SQLite (sql.js, file-persisted) |
+| Real-time | Socket.io 4 |
+| Session Persistence | Firebase Firestore |
+| Market Data | Angel One SmartAPI (historical) + Dhan API (live) |
+| Cloud Storage | Google Drive API (screenshots) |
 
-### Frontend
-- **React 18** + **Vite** + **TypeScript**
-- **Zustand** for state management
-- **TanStack Query** (React Query) for data fetching
-- **Lightweight Charts** (TradingView) for candlestick charts
-- **Tailwind CSS** for styling
-- **Lucide React** for icons
+---
+
+## Architecture
+
+```
+Browser (React SPA)
+       │
+       │  HTTP REST + Socket.io WebSocket
+       ▼
+Express API Server  (:3001)
+       │
+       ├── SQLite cache  (backtesting.db — candles only)
+       │
+       ├── Angel One SmartAPI  (historical candle data)
+       ├── Dhan API            (live orders, WebSocket tick feed)
+       └── Google Drive API    (screenshot upload)
+
+Session Persistence (client → cloud, no backend):
+  Browser ──► Firebase Firestore  (trades, position, drawings, settings)
+```
+
+All trade execution logic (FIFO, P&L) runs **client-side** in Zustand. The backend handles data fetching, caching, and live order routing only.
+
+---
 
 ## Project Structure
 
@@ -45,395 +51,151 @@ back-test/
 ├── backend/
 │   ├── src/
 │   │   ├── config/
-│   │   │   └── database.ts          # SQLite configuration
-│   │   ├── services/
-│   │   │   ├── angelone.service.ts  # Angel One API wrapper
-│   │   │   ├── data.service.ts      # Data fetching & caching
-│   │   │   └── backtest.engine.ts   # Trade execution engine
+│   │   │   └── database.ts              # SQLite init, schema, auto-save
 │   │   ├── routes/
-│   │   │   └── data.routes.ts       # API endpoints
-│   │   ├── types/
-│   │   │   └── index.ts             # TypeScript types
+│   │   │   ├── data.routes.ts           # GET /api/data/candles, cache clear
+│   │   │   ├── live.routes.ts           # Orders, smart-exit, positions, ATM option
+│   │   │   ├── options.routes.ts        # POST /api/options/backtest
+│   │   │   └── screenshot.routes.ts     # POST /api/screenshot/upload
+│   │   ├── services/
+│   │   │   ├── angelone.service.ts      # Angel One SmartAPI auth + candle fetch
+│   │   │   ├── data.service.ts          # Cache-aware candle fetching
+│   │   │   ├── dhan.service.ts          # Dhan REST (orders, positions)
+│   │   │   ├── dhanMarketFeed.service.ts# Dhan WebSocket tick feed
+│   │   │   ├── smartExit.service.ts     # 3-step order chaser loop
+│   │   │   ├── optionChain.service.ts   # ATM option lookup
+│   │   │   ├── symbolMaster.service.ts  # Dhan scrip master CSV
+│   │   │   ├── backtest.options.service.ts # Options P&L simulation
+│   │   │   └── googleDrive.service.ts   # OAuth2 Drive upload
+│   │   ├── types/index.ts
 │   │   ├── utils/
-│   │   │   ├── logger.ts            # Winston logger
-│   │   │   └── date-helpers.ts      # Date utilities
-│   │   └── server.ts                # Express app
-│   ├── data/
-│   │   └── backtesting.db           # SQLite database
+│   │   │   ├── logger.ts                # Winston logger
+│   │   │   └── date-helpers.ts
+│   │   └── server.ts                    # Express entry point
+│   ├── data/backtesting.db              # SQLite file (auto-created)
 │   └── package.json
+│
 ├── frontend/
 │   ├── src/
-│   │   ├── components/
-│   │   │   ├── CandlestickChart.tsx
-│   │   │   ├── PlaybackControls.tsx
-│   │   │   ├── TradingPanel.tsx
-│   │   │   ├── SessionStats.tsx
-│   │   │   └── InstrumentSelector.tsx
+│   │   ├── components/                  # ~20 React components
 │   │   ├── stores/
-│   │   │   └── sessionStore.ts      # Zustand session state
+│   │   │   ├── sessionStore.ts          # Core backtesting state (critical)
+│   │   │   ├── liveStore.ts             # Live trading state
+│   │   │   └── notificationStore.ts     # Toast queue
 │   │   ├── services/
-│   │   │   └── api.ts               # Backend API client
-│   │   ├── types/
-│   │   │   └── index.ts             # TypeScript types
+│   │   │   ├── api.ts                   # Axios HTTP client
+│   │   │   └── firebaseSessionService.ts# Firestore save/restore
+│   │   ├── hooks/
+│   │   │   └── useChartDrawings.ts      # Canvas drawing interaction
 │   │   ├── utils/
-│   │   │   └── formatters.ts        # Formatting utilities
-│   │   └── App.tsx
+│   │   │   ├── indicators.ts            # SMA, EMA, Pivot, Al Brooks, ATR
+│   │   │   ├── pivotAnalysis.ts         # LLHH-Pivot + PivotPosition detection
+│   │   │   ├── tradeAnalysis.ts         # P&L stats, position grouping
+│   │   │   ├── resampler.ts             # Multi-timeframe candle resampling
+│   │   │   ├── formatters.ts            # Currency, date formatters
+│   │   │   └── tradeStorage.ts          # localStorage fallback
+│   │   ├── config/firebase.ts
+│   │   ├── types/index.ts               # Candle, Trade, Position, Drawing, etc.
+│   │   └── App.tsx                      # Root layout, dialog orchestration
 │   └── package.json
-└── README.md
+│
+├── README.md                            # This file
+├── CLAUDE.md                            # Claude Code instructions
+├── IMPACT.md                            # Component dependency + impact map
+├── FEATURES_GUIDE.md                    # Complete user-facing feature reference
+├── INDICATORS_LOGIC.md                  # Indicator math + pivot position logic
+├── ANGELONE_SETUP.md                    # Angel One API credentials setup
+├── ANGEL_ONE_TOKENS.md                  # Symbol token lookup
+├── FIREBASE_SETUP.md                    # Firebase project setup
+└── GOOGLE_DRIVE_SETUP.md                # Google Drive service account setup
 ```
-
-## Setup Instructions
-
-### Prerequisites
-- **Node.js** v18+ (LTS recommended)
-- **npm** (comes with Node.js)
-- **Angel One Account** with SmartAPI access (FREE)
-
-### Step 1: Clone the Repository
-
-```bash
-git clone <repository-url>
-cd back-test
-```
-
-### Step 2: Get Angel One API Credentials
-
-**See [ANGELONE_SETUP.md](ANGELONE_SETUP.md) for detailed setup instructions.**
-
-Quick steps:
-1. Register at [SmartAPI Portal](https://smartapi.angelbroking.com/)
-2. Create an app and get your **API Key**
-3. Note your **Client Code** (trading account ID)
-4. Your Angel One **Password**
-5. Enable TOTP and save the **TOTP Secret**
-
-### Step 3: Backend Setup
-
-```bash
-cd backend
-
-# Install dependencies
-npm install
-
-# Create .env file
-cp .env.example .env
-
-# Edit .env and add your Angel One credentials:
-# ANGELONE_API_KEY=your_api_key_here
-# ANGELONE_CLIENT_CODE=your_client_code_here
-# ANGELONE_PASSWORD=your_password_here
-# ANGELONE_TOTP=your_totp_secret_here
-# PORT=3001
-# NODE_ENV=development
-```
-
-### Step 4: Frontend Setup
-
-```bash
-cd frontend
-
-# Install dependencies
-npm install
-```
-
-### Step 5: Run the Application
-
-Open two terminal windows:
-
-**Terminal 1 - Backend:**
-```bash
-cd backend
-npm run dev
-```
-
-Backend will start on `http://localhost:3001`
-
-**Terminal 2 - Frontend:**
-```bash
-cd frontend
-npm run dev
-```
-
-Frontend will start on `http://localhost:5173`
-
-### Step 6: Access the Application
-
-Open your browser and navigate to: `http://localhost:5173`
-
-## Usage Guide
-
-### 1. Loading Data
-
-1. Enter **Symbol Token** (e.g., `2885` for RELIANCE, `1594` for INFY, `3045` for SBIN)
-2. Select **Exchange Segment** (NSE_EQ, NSE_FNO, BSE_EQ)
-3. Choose **Instrument Type** (EQUITY, INDEX, FUTIDX, FUTSTK)
-4. Set **Interval** (1, 5, 15, or 60 minutes)
-5. Select **Date Range** (Max 90 days per request due to API limits)
-6. Click **Fetch Data**
-
-Common Symbol Tokens (Angel One):
-- RELIANCE: `2885`
-- INFOSYS: `1594`
-- TCS: `11536`
-- SBIN: `3045`
-- HDFC BANK: `1333`
-- NIFTY 50: `99926000`
-- BANK NIFTY: `99926009`
-
-**Find more tokens**: Download [Instrument Master](https://margincalculator.angelbroking.com/OpenAPI_File/files/OpenAPIScripMaster.json)
-
-### 2. Backtesting Controls
-
-**Playback Controls:**
-- **Play/Pause Button** - Start/stop automatic candle progression
-- **Step Backward (←)** - Go back one candle
-- **Step Forward (→)** - Advance one candle
-- **Speed Selector** - Control playback speed (0.5x, 1x, 2x, 5x, 10x)
-- **Progress Bar** - Shows current position in the dataset
-
-**Keyboard Shortcuts:**
-- `Space` - Play/Pause
-- `←` - Step backward
-- `→` - Step forward
-
-### 3. Trading
-
-**Executing Trades:**
-1. Set **Quantity** (number of shares)
-2. Click **BUY** to buy at current candle's close price
-3. Click **SELL** to sell at current candle's close price
-
-**Position Tracking:**
-- Average Price calculated using weighted average
-- P&L updated in real-time
-- FIFO (First In First Out) method for position management
-
-### 4. Session Statistics
-
-The right panel shows:
-- **Current Position** - Quantity and average price
-- **Unrealized P&L** - Mark-to-market profit/loss
-- **Realized P&L** - Profit/loss from closed trades
-- **Win Rate** - Percentage of profitable trades
-- **Trade History** - Complete log of all trades with P&L
-
-### 5. Resetting Session
-
-Click **Reset Session** to:
-- Clear all trades
-- Reset position to zero
-- Return to first candle
-- Keep loaded candle data
-
-Click **Load Different Data** to fetch new data.
-
-## API Endpoints
-
-### Backend API
-
-**Base URL:** `http://localhost:3001`
-
-#### GET /api/data/candles
-Fetch candles with caching.
-
-**Query Parameters:**
-- `securityId` - Symbol Token (e.g., "2885" for RELIANCE)
-- `exchangeSegment` - Exchange segment (e.g., "NSE_EQ")
-- `instrument` - Instrument type (e.g., "EQUITY")
-- `interval` - Candle interval (e.g., "5")
-- `fromDate` - Start date (YYYY-MM-DD)
-- `toDate` - End date (YYYY-MM-DD)
-
-**Response:**
-```json
-{
-  "success": true,
-  "data": [
-    {
-      "timestamp": 1704096900,
-      "open": 2456.50,
-      "high": 2458.75,
-      "low": 2455.00,
-      "close": 2457.80,
-      "volume": 125000
-    }
-  ],
-  "count": 1000,
-  "cached": false
-}
-```
-
-#### DELETE /api/data/cache
-Clear cached data.
-
-#### GET /health
-Health check endpoint.
-
-## Development
-
-### Backend Development
-
-```bash
-cd backend
-npm run dev    # Start with hot reload
-npm run build  # Build TypeScript
-npm start      # Run production build
-```
-
-### Frontend Development
-
-```bash
-cd frontend
-npm run dev    # Start dev server with hot reload
-npm run build  # Build for production
-npm run preview # Preview production build
-```
-
-## Architecture
-
-### Data Flow
-
-1. **Loading Candles:**
-   - Frontend → Backend API → Check SQLite cache
-   - If not cached → Fetch from Angel One API → Store in cache
-   - Return candles → Frontend stores in Zustand + React Query
-
-2. **Backtesting Session:**
-   - User clicks Play → Timer advances `currentCandleIndex`
-   - Chart displays `candles[0...currentIndex]`
-   - User executes trade → Execute at `candles[currentIndex].close`
-   - Update position in Zustand → Recalculate P&L
-
-### State Management
-
-**Zustand Store** (frontend/src/stores/sessionStore.ts):
-- Manages all session state (candles, trades, position, playback)
-- Client-side only (no persistence)
-- Computed getters for P&L calculations
-
-### Database Schema
-
-**SQLite Tables:**
-
-```sql
--- Candles cache
-CREATE TABLE candles (
-  security_id TEXT,
-  exchange_segment TEXT,
-  interval TEXT,
-  timestamp INTEGER,
-  open REAL,
-  high REAL,
-  low REAL,
-  close REAL,
-  volume INTEGER,
-  UNIQUE(security_id, exchange_segment, interval, timestamp)
-);
-
--- Instruments (future use)
-CREATE TABLE instruments (
-  security_id TEXT PRIMARY KEY,
-  exchange_segment TEXT,
-  symbol TEXT,
-  name TEXT
-);
-```
-
-## Troubleshooting
-
-### Backend Issues
-
-**"Angel One API client initialization failed"**
-- Check if `.env` file exists in backend directory
-- Verify `ANGELONE_API_KEY`, `ANGELONE_CLIENT_CODE`, `ANGELONE_PASSWORD`, and `ANGELONE_TOTP` are set correctly
-- Ensure TOTP secret is the base32 secret key, not the 6-digit OTP code
-- See [ANGELONE_SETUP.md](ANGELONE_SETUP.md) for detailed troubleshooting
-
-**"Database not initialized"**
-- Ensure `backend/data/` directory exists
-- Check file permissions
-
-### Frontend Issues
-
-**"Failed to fetch data"**
-- Verify backend is running on port 3001
-- Check browser console for CORS errors
-- Ensure backend URL is correct in `frontend/src/services/api.ts`
-
-**Chart not displaying**
-- Ensure data is loaded successfully
-- Check browser console for JavaScript errors
-- Verify `lightweight-charts` package is installed
-
-### Angel One API Issues
-
-**"No data received"**
-- Verify Symbol Token is correct (check [Instrument Master](https://margincalculator.angelbroking.com/OpenAPI_File/files/OpenAPIScripMaster.json))
-- Check date range (max 90 days)
-- Ensure market was open on selected dates (Mon-Fri, not holidays)
-- Verify exchange is correct (NSE vs BSE)
-- Try a different interval or instrument
-
-**"Login failed" or "TOTP validation failed"**
-- TOTP secret must be the base32 secret key, not the 6-digit OTP code
-- Verify your Angel One password is correct
-- Check Client Code matches your trading account ID
-- Re-enable TOTP and save the new secret if issues persist
-
-## Future Enhancements
-
-Planned features (not in MVP):
-
-### Phase 2.0 - Multi-Timeframe
-- Support for 1min, 15min, 1hour, daily candles
-- Dynamic timeframe switching during replay
-- Multi-timeframe synchronization
-
-### Phase 2.1 - Advanced Trading
-- Limit orders, Stop loss, Take profit
-- Slippage modeling
-- Brokerage and tax calculation
-- Position sizing calculator
-
-### Phase 2.2 - Automated Backtesting
-- Code custom strategies (JavaScript DSL)
-- Batch testing across instruments
-- Performance metrics (Sharpe ratio, max drawdown)
-- Equity curve visualization
-
-### Phase 2.3 - Technical Indicators
-- Moving averages (SMA, EMA)
-- Oscillators (RSI, MACD, Stochastic)
-- Drawing tools (trendlines, support/resistance)
-- Multi-chart layouts
-
-### Phase 2.4 - Persistence & Analytics
-- Save/load backtesting sessions
-- Export reports (PDF, CSV)
-- Session replay feature
-- Performance analytics dashboard
-
-## License
-
-MIT
-
-## Contributing
-
-Contributions are welcome! Please open an issue or submit a pull request.
-
-## Support
-
-For issues or questions:
-- Open an issue on GitHub
-- Check Angel One API documentation: https://smartapi.angelbroking.com/docs
-- Email Angel One support: smartapi@angelbroking.com
-
-## Acknowledgments
-
-- **Angel One** for providing FREE API access to historical data
-- **TradingView** for Lightweight Charts library
-- **Indian Stock Market** community
 
 ---
 
-**Happy Backtesting! 📈**
+## Setup
+
+### Prerequisites
+
+- Node.js v18+
+- Angel One account with SmartAPI access (for historical data)
+- Firebase project (for session persistence) — see `FIREBASE_SETUP.md`
+- Dhan account with API access (optional — for live trading only)
+- Google Cloud service account (optional — for screenshot upload)
+
+### Backend
+
+```bash
+cd backend
+npm install
+cp .env.example .env   # fill in credentials (see Environment section below)
+npm run dev            # dev server with hot-reload on :3001
+```
+
+### Frontend
+
+```bash
+cd frontend
+npm install
+# create frontend/.env with VITE_API_URL and Firebase vars
+npm run dev            # Vite dev server on :5173
+```
+
+### Verify
+
+1. `GET http://localhost:3001/health` → should return `{ status: "ok" }`
+2. Open `http://localhost:5173`
+3. Select a symbol, date range, and click Load Data
+
+---
+
+## Environment Variables
+
+### `backend/.env`
+
+```env
+# Angel One (required for historical data)
+ANGELONE_API_KEY=
+ANGELONE_CLIENT_CODE=
+ANGELONE_PASSWORD=
+ANGELONE_TOTP=
+
+# Dhan (required for live trading)
+DHAN_ACCESS_TOKEN=
+DHAN_CLIENT_ID=
+
+# Server
+PORT=3001
+NODE_ENV=development
+
+# Google Drive (optional — screenshot upload)
+GOOGLE_DRIVE_FOLDER_ID=
+```
+
+### `frontend/.env`
+
+```env
+VITE_API_URL=http://127.0.0.1:3001
+
+# Firebase (required for session persistence)
+VITE_FIREBASE_API_KEY=
+VITE_FIREBASE_AUTH_DOMAIN=
+VITE_FIREBASE_PROJECT_ID=
+VITE_FIREBASE_STORAGE_BUCKET=
+VITE_FIREBASE_MESSAGING_SENDER_ID=
+VITE_FIREBASE_APP_ID=
+```
+
+---
+
+## Documentation
+
+| Document | Purpose |
+|----------|---------|
+| `FEATURES_GUIDE.md` | Every user-facing feature — what it does, which component owns it |
+| `IMPACT.md` | What breaks when you change X — read before any non-trivial change |
+| `INDICATORS_LOGIC.md` | Math for SMA, EMA, Al Brooks, ATR, Pivot Position detection |
+| `CLAUDE.md` | Instructions for Claude Code (AI assistant) |
+| `ANGELONE_SETUP.md` | Step-by-step Angel One SmartAPI credential setup |
+| `ANGEL_ONE_TOKENS.md` | Security ID lookup for popular NSE/BSE instruments |
+| `FIREBASE_SETUP.md` | Firebase project + Firestore rules setup |
+| `GOOGLE_DRIVE_SETUP.md` | Service account setup for screenshot upload |

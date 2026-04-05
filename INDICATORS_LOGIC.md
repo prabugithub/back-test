@@ -174,3 +174,43 @@ The bar that **starts** a pullback (arms the system) **cannot** also fire the si
 ### Optional Depth Filter
 - When `usePullbackDepth` is enabled, H signals only fire if `c.low <= EMA21 + ATR * multiplier` and L signals only fire if `c.high >= EMA21 - ATR * multiplier`.
 
+---
+
+## Pivot Position Detection (Trade Journal)
+
+Determines where the entry candle sits relative to the EMA at the time of trade entry. Looks at the 3 candles preceding entry.
+
+### Detection Priority (asymmetric)
+
+**For LONG trades:**
+
+| Priority | Label | Rule |
+|----------|-------|------|
+| 1 (highest) | `gap-opposite` | ALL 3 candle **closes** are below the MA |
+| 2 | `on-MA` | ANY candle's **wick (low)** touches or crosses the MA from above |
+| 3 (default) | `gap` | Neither above condition met — all candles above MA without touching it |
+
+**For SHORT trades:**
+
+| Priority | Label | Rule |
+|----------|-------|------|
+| 1 (highest) | `gap-opposite` | ALL 3 candle **closes** are above the MA |
+| 2 | `on-MA` | ANY candle's **wick (high)** touches or crosses the MA from below |
+| 3 (default) | `gap` | Neither above condition met |
+
+### Key Principles
+
+- **Gap-Opposite** uses close prices only, all 3 must satisfy — strict because it's a counter-trend entry
+- **On-MA** uses wicks, only 1 candle needs to touch — lenient because pullbacks to MA are common
+- Priority is checked in order; first match wins
+
+### Visual Examples
+
+```
+LONG - gap-opposite:  Close1=100, Close2=102, Close3=101, MA=105  → all closes < MA ✓
+LONG - on-MA:         Candle with Low=104, MA=105, High=110       → wick touches MA ✓
+LONG - gap:           All closes and lows above MA                 → default ✓
+
+SHORT - gap-opposite: Close1=110, Close2=112, Close3=111, MA=105  → all closes > MA ✓
+SHORT - on-MA:        Candle with High=106, MA=105, Low=100       → wick touches MA ✓
+```
