@@ -283,14 +283,14 @@ export function useChartDrawings({
 
     // Check resize handle
     if (activeToolRef.current === 'select' && selectedDrawingIdRef.current) {
-      const drawing = drawings.find(d => d.id === selectedDrawingIdRef.current);
+      const drawing = useSessionStore.getState().drawings.find(d => d.id === selectedDrawingIdRef.current);
       if (drawing) {
         const hIdx = getResizeHandleAtPoint(point, drawing);
         if (hIdx !== -1) { setIsResizing(true); setResizeHandleIndex(hIdx); return true; }
       }
     }
 
-    const found = findDrawingAtPoint(point, drawings);
+    const found = findDrawingAtPoint(point, useSessionStore.getState().drawings);
     if (found && activeToolRef.current === 'select') {
       setSelectedDrawingId(found.id);
       const pts = found.points.map(p => convertLogicalToPixel(p));
@@ -314,7 +314,7 @@ export function useChartDrawings({
     setIsDrawing(true);
     isDrawingRef.current = true;
     return true;
-  }, [drawings, getChartCoordinates, convertLogicalToPixel, onTextToolTrigger, addTextDrawing, getDrawingColor, onToolComplete]);
+  }, [getChartCoordinates, convertLogicalToPixel, onTextToolTrigger, addTextDrawing, getDrawingColor, onToolComplete]);
 
   const handleMouseMove = useCallback((event: MouseEvent) => {
     if (!canvasRef.current || !chartApi || !seriesApi) return;
@@ -372,7 +372,7 @@ export function useChartDrawings({
     }
 
     if (!isDrawingRef.current || activeToolRef.current === 'none') {
-      const found = findDrawingAtPoint(point, drawings);
+      const found = findDrawingAtPoint(point, useSessionStore.getState().drawings);
       if (canvasRef.current) canvasRef.current.style.cursor = found ? (activeToolRef.current === 'select' ? 'pointer' : 'crosshair') : 'default';
       return;
     }
@@ -389,7 +389,7 @@ export function useChartDrawings({
       }
       return [prev[0], point];
     });
-  }, [drawings, getChartCoordinates, convertLogicalToPixel, chartApi, seriesApi, riskPerTrade, setTradeQuantity, setManualLevels]);
+  }, [getChartCoordinates, convertLogicalToPixel, chartApi, seriesApi, riskPerTrade, setTradeQuantity, setManualLevels]);
 
   const handleMouseUp = useCallback(() => {
     if (isResizingRef.current) { setIsResizing(false); setResizeHandleIndex(-1); return; }
@@ -550,7 +550,7 @@ export function useChartDrawings({
     if (!ctx) return;
     ctx.clearRect(0, 0, canvasRef.current.width, canvasRef.current.height);
     const cIdx = useSessionStore.getState().currentIndex;
-    drawings.forEach(d => {
+    useSessionStore.getState().drawings.forEach(d => {
       if (d.points[0]?.time !== undefined && d.points[0].time > cIdx) return;
       const pts = d.points.map(p => convertLogicalToPixel(p));
       const isSel = d.id === selectedDrawingId;
@@ -582,12 +582,15 @@ export function useChartDrawings({
       }
     }
     onCustomRender?.(ctx);
-  }, [chartApi, seriesApi, drawings, currentDrawing, selectedDrawingId, activeTool, getDrawingColor, convertLogicalToPixel, canvasRef, onCustomRender]);
+  }, [chartApi, seriesApi, currentDrawing, selectedDrawingId, activeTool, getDrawingColor, convertLogicalToPixel, canvasRef, onCustomRender]);
 
   useEffect(() => { renderCanvas(); }, [renderCanvas]);
 
   const renderCanvasRef = useRef(renderCanvas);
   renderCanvasRef.current = renderCanvas;
+
+  // Redraw when drawings change without recreating renderCanvas on every drag frame
+  useEffect(() => { renderCanvasRef.current?.(); }, [drawings]);
 
   useEffect(() => {
     if (!chartApi || !seriesApi) return;
