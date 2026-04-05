@@ -1,5 +1,8 @@
 # Features Documentation
 
+> **Deprecated.** This file is no longer maintained.
+> The single source of truth is [FEATURES_GUIDE.md](FEATURES_GUIDE.md).
+
 ## Overview
 
 This manual backtesting system allows you to replay historical market data candle-by-candle and practice your trading strategies with a comprehensive set of charting tools and technical indicators.

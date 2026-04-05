@@ -184,6 +184,35 @@ When `autoExitTarget` is enabled in settings, the chart checks on every candle a
 - The candle's low/high breaches the set Stop Loss → auto-executes exit at SL price
 - The candle's high/low breaches the Target → auto-executes exit at TP price
 
+### Settings Panels
+
+Two separate panels are accessible from the control bar:
+
+#### Data Settings (gear icon ⚙️)
+
+Requires **"Load Data"** to apply.
+
+| Field | Description |
+|-------|-------------|
+| Timeframe | 1 min / 5 min / 15 min / 30 min / 60 min / 4H / Daily |
+| From Date | Start of data range |
+| To Date | End of data range |
+| Jump To Date | Loads full range but starts playback at this date |
+
+#### Trade Settings (sliders icon ▤)
+
+All changes apply **immediately** — no button needed.
+
+| Setting | Description |
+|---------|-------------|
+| Target RR Ratio (1:X) | Risk-reward multiplier for TP calculation (default: 2) |
+| Auto Exit Target (TP) | When enabled, auto-exits position when TP is hit; when disabled, shows dialog |
+| Show Parallel Timeframe | Toggle secondary chart + select its timeframe |
+
+**Mid-trade RR adjustment:** Changing Target RR while a position is open recalculates `position.target` in real-time, so the TP line on the overlay and the auto-exit check both update immediately. This is intentional — you can raise the RR if price action is stronger than expected.
+
+> Guard: if SL/TP were set via the drawing tool (manual levels), changing RR does **not** overwrite them.
+
 ---
 
 ## 6. Trade Execution (Backtesting)
@@ -572,3 +601,7 @@ Dialogs (open on demand):
 - Backup History
 - Screenshot Save
 - Performance Dashboard (Live Trading)
+
+---
+
+*Last updated: 2026-04-05*
