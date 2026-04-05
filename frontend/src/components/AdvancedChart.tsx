@@ -90,12 +90,12 @@ export function AdvancedChart({
   const visibleCandles = useMemo(() => {
     // In live mode, show all candles (don't slice by currentIndex)
     const primaryVisible = isLiveMode ? candles : candles.slice(0, currentIndex + 1);
-    
+
     if (isSecondary && secondaryTimeframe) {
       // Map interval string to minutes for resampling
       let tfMinutes = parseInt(secondaryTimeframe);
       if (secondaryTimeframe === '1D') tfMinutes = 1440;
-      
+
       // Return HTF candles formed by the primary candles up to current LTF index
       return resampleCandles(primaryVisible, tfMinutes);
     }
@@ -138,11 +138,11 @@ export function AdvancedChart({
       if (allPivots.length > 0) {
         const recentPivot = allPivots[allPivots.length - 1];
         const pivotCandle = visibleCandles.find(c => c.timestamp === recentPivot.time);
-        
+
         if (pivotCandle) {
           const timeScale = chart.timeScale();
           const pivotX = timeScale.timeToCoordinate(recentPivot.time);
-          
+
           if (pivotX !== null) {
             const entryPrice = pivotCandle.close;
             const slDistance = recentPivot.slDistance;
@@ -181,7 +181,7 @@ export function AdvancedChart({
                 ctx.moveTo(startX, y);
                 ctx.lineTo(endX, y);
                 ctx.stroke();
-                
+
                 ctx.font = 'bold 11px Inter, sans-serif';
                 ctx.fillStyle = color;
                 ctx.textAlign = 'left';
@@ -307,7 +307,7 @@ export function AdvancedChart({
           const dd = date.getDate().toString().padStart(2, '0');
           const hh = date.getHours().toString().padStart(2, '0');
           const min = date.getMinutes().toString().padStart(2, '0');
-          const monthNames = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+          const monthNames = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
           // markType: 0=Year, 1=Month, 2=Day, 3=Time, 4=TimeWithSeconds
           if (markType <= 1) return `${monthNames[date.getMonth()]} ${date.getFullYear()}`;
           if (markType === 2) return `${dd} ${monthNames[date.getMonth()]}`;
@@ -415,7 +415,7 @@ export function AdvancedChart({
       }
 
       const price = param.seriesData.get(series)?.close || param.seriesData.get(series)?.value || null;
-      
+
       // Optimization: Only update store if the crosshair actually moved to a new candle or price level
       if (param.time !== lastHandledTime || price !== lastHandledPrice) {
         lastHandledTime = param.time as number;
@@ -450,11 +450,11 @@ export function AdvancedChart({
     if (!series) return;
 
     const count = visibleCandles.length;
-    const lastTime = count > 0 ? (visibleCandles[count-1].timestamp as number) : 0;
-    
+    const lastTime = count > 0 ? (visibleCandles[count - 1].timestamp as number) : 0;
+
     // Check if this is just a live update or 1-candle extension
     // We can skip setData because the imperative tick handler already updated the chart
-    const isLiveExtension = isLiveMode && 
+    const isLiveExtension = isLiveMode &&
       (count === lastSetDataCountRef.current || count === lastSetDataCountRef.current + 1) &&
       lastTime >= lastSetDataTimeRef.current &&
       !isFirstLoadRef.current;
@@ -506,17 +506,17 @@ export function AdvancedChart({
   // Keep a mutable ref of the last candle for live ticking without full re-renders
   useEffect(() => {
     if (visibleCandles.length > 0) {
-       const last = visibleCandles[visibleCandles.length - 1];
-       lastCandleRef.current = {
-         time: last.timestamp as any,
-         open: last.open,
-         high: last.high,
-         low: last.low,
-         close: last.close,
-         volume: last.volume,
-       };
+      const last = visibleCandles[visibleCandles.length - 1];
+      lastCandleRef.current = {
+        time: last.timestamp as any,
+        open: last.open,
+        high: last.high,
+        low: last.low,
+        close: last.close,
+        volume: last.volume,
+      };
     } else {
-       lastCandleRef.current = null;
+      lastCandleRef.current = null;
     }
   }, [visibleCandles]);
 
@@ -526,7 +526,7 @@ export function AdvancedChart({
   // Live Tick Subscription (Bypasses React State for Performance)
   useEffect(() => {
     if (!series || !chart) return;
-    
+
     const unsubscribe = useLiveStore.subscribe((state, prevState) => {
       const tick = state.lastTick;
       const isLive = state.isLiveMode;
@@ -538,7 +538,7 @@ export function AdvancedChart({
         console.warn('[Chart] Tick received but no candles loaded yet');
         return;
       }
-        
+
       const chartInterval = isSecondary ? secondaryTimeframe : sessionConfig?.interval;
       let tfMinutes = parseInt(chartInterval || '5');
       if (chartInterval === '1D') tfMinutes = 1440;
@@ -556,7 +556,7 @@ export function AdvancedChart({
       const lastCandle = lastCandleRef.current;
 
       console.debug(`[Chart${isSecondary ? '-2' : '-1'}] tick price=${tick.price} bucket=${bucketStart} last=${lastCandle.time}`);
-      
+
       // Dhan sends cumulative day volume — compute per-tick delta to avoid overflow.
       // On the very first tick (e.g. secondary chart mounted mid-session), seed the
       // baseline without adding any volume so the huge cumulative value never reaches
@@ -579,21 +579,21 @@ export function AdvancedChart({
         lastCandle.high = Math.max(lastCandle.high, tick.price);
         lastCandle.low = Math.min(lastCandle.low, tick.price);
         lastCandle.volume = (lastCandle.volume || 0) + deltaVol;
-        
+
         series.update({
-           time: lastCandle.time,
-           open: lastCandle.open,
-           high: lastCandle.high,
-           low: lastCandle.low,
-           close: lastCandle.close
+          time: lastCandle.time,
+          open: lastCandle.open,
+          high: lastCandle.high,
+          low: lastCandle.low,
+          close: lastCandle.close
         });
-        
+
         if (volumeSeries) {
-           volumeSeries.update({
-              time: lastCandle.time,
-              value: lastCandle.volume,
-              color: lastCandle.close >= lastCandle.open ? '#26a69a40' : '#ef535040'
-           });
+          volumeSeries.update({
+            time: lastCandle.time,
+            value: lastCandle.volume,
+            color: lastCandle.close >= lastCandle.open ? '#26a69a40' : '#ef535040'
+          });
         }
 
         // Keep session store in sync
@@ -615,42 +615,42 @@ export function AdvancedChart({
         // as the open gives correct OHLC instead of a mid-bucket price.
         const openPrice = lastCandle.close;
         const newCandle = {
-           time: bucketStart as any,
-           open: openPrice,
-           high: Math.max(openPrice, tick.price),
-           low: Math.min(openPrice, tick.price),
-           close: tick.price,
-           volume: deltaVol
+          time: bucketStart as any,
+          open: openPrice,
+          high: Math.max(openPrice, tick.price),
+          low: Math.min(openPrice, tick.price),
+          close: tick.price,
+          volume: deltaVol
         };
         lastCandleRef.current = newCandle;
-        
+
         // series.update() appends the bar WITHOUT resetting scroll/zoom ✓
         series.update({
-           time: newCandle.time,
-           open: newCandle.open,
-           high: newCandle.high,
-           low: newCandle.low,
-           close: newCandle.close
+          time: newCandle.time,
+          open: newCandle.open,
+          high: newCandle.high,
+          low: newCandle.low,
+          close: newCandle.close
         });
-        
+
         if (volumeSeries) {
-           volumeSeries.update({
-              time: newCandle.time,
-              value: newCandle.volume,
-              color: newCandle.close >= newCandle.open ? '#26a69a40' : '#ef535040'
-           });
+          volumeSeries.update({
+            time: newCandle.time,
+            value: newCandle.volume,
+            color: newCandle.close >= newCandle.open ? '#26a69a40' : '#ef535040'
+          });
         }
 
         // Persist new candle to session store
         if (!isSecondary) {
-           useSessionStore.getState().addLiveCandle({
-              timestamp: bucketStart,
-              open: newCandle.open,
-              high: newCandle.high,
-              low: newCandle.low,
-              close: newCandle.close,
-              volume: newCandle.volume
-           });
+          useSessionStore.getState().addLiveCandle({
+            timestamp: bucketStart,
+            open: newCandle.open,
+            high: newCandle.high,
+            low: newCandle.low,
+            close: newCandle.close,
+            volume: newCandle.volume
+          });
         }
       } else {
         console.warn('[Chart] Stale tick ignored: bucket', bucketStart, '< lastCandle.time', lastCandle.time);
@@ -670,11 +670,11 @@ export function AdvancedChart({
     if (!chart) return;
 
     const indicatorsToKeep = new Set(activeIndicators);
-    
+
     // Remove series that are no longer active
     indicatorSeriesRef.current.forEach((s, name) => {
       if (!indicatorsToKeep.has(name as Indicator)) {
-        try { chart.removeSeries(s); } catch (e) {}
+        try { chart.removeSeries(s); } catch (e) { }
         indicatorSeriesRef.current.delete(name);
       }
     });
@@ -717,7 +717,7 @@ export function AdvancedChart({
         if (tf === '1D') return 1440;
         return parseInt(tf) || 5;
       };
-      
+
       const chartInterval = isSecondary ? secondaryTimeframe : sessionConfig?.interval;
       const chartTfMins = getTfMins(chartInterval);
 
@@ -1024,21 +1024,19 @@ export function AdvancedChart({
       {/* Chart focus indicator in dual mode */}
       {showSecondaryChart && (
         <div
-          className={`absolute inset-0 pointer-events-none z-50 rounded-sm transition-all duration-150 ${
-            isActiveChart
+          className={`absolute inset-0 pointer-events-none z-50 rounded-sm transition-all duration-150 ${isActiveChart
               ? 'ring-2 ring-inset ring-blue-500'
               : 'ring-1 ring-inset ring-transparent'
-          }`}
+            }`}
         />
       )}
 
       {/* Active chart label in dual mode */}
       {showSecondaryChart && (
-        <div className={`absolute top-2 left-4 z-10 px-3 py-1.5 rounded-lg border shadow-sm flex items-center gap-2 transition-all duration-150 ${
-          isActiveChart
+        <div className={`absolute top-2 left-4 z-10 px-3 py-1.5 rounded-lg border shadow-sm flex items-center gap-2 transition-all duration-150 ${isActiveChart
             ? 'bg-blue-600 text-white border-blue-700'
             : 'bg-white/80 backdrop-blur-sm text-gray-700 border-gray-200'
-        }`}>
+          }`}>
           <span className="text-xs font-bold">
             {isSecondary ? `HTF: ${secondaryTimeframe}m` : 'LTF Chart'}
           </span>

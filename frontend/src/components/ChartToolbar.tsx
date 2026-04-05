@@ -269,3 +269,5 @@ export function ChartToolbar({
     </div>
   );
 }
+
+export type { DrawingTool };

@@ -630,3 +630,5 @@ export function useChartDrawings({
     addTextDrawing, addCalloutDrawing, deleteSelectedDrawing, selectedDrawingId, isHoveringSelected, handleMouseDown, handleMouseMove, handleMouseUp, renderCanvas
   };
 }
+
+export type { Point };
