@@ -1,5 +1,5 @@
 import { useState, useEffect, useMemo, useCallback, useRef } from 'react';
-import { Play, Pause, ChevronLeft, ChevronRight, FastForward, CalendarClock, Settings, X, Calendar, Activity } from 'lucide-react';
+import { Play, Pause, ChevronLeft, ChevronRight, FastForward, CalendarClock, Settings, X, Calendar, Activity, SlidersHorizontal } from 'lucide-react';
 import { useSessionStore } from '../stores/sessionStore';
 import { useNotificationStore } from '../stores/notificationStore';
 import { formatTimestamp } from '../utils/formatters';
@@ -222,6 +222,8 @@ export function PlaybackControls({ onOpenHistory, onOpenDashboard }: { onOpenHis
 
   const [customJump, setCustomJump] = useState('10');
   const [showSettings, setShowSettings] = useState(false);
+  const [showTradeSettings, setShowTradeSettings] = useState(false);
+  const rrDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [showDatePicker, setShowDatePicker] = useState(false);
   const [jumpToDate, setJumpToDate] = useState('2021-02-01');
 
@@ -695,7 +697,14 @@ export function PlaybackControls({ onOpenHistory, onOpenDashboard }: { onOpenHis
             <Activity size={16} />
           </button>
           <button
-            onClick={() => setShowSettings(!showSettings)}
+            onClick={() => { setShowTradeSettings(!showTradeSettings); setShowSettings(false); }}
+            className="p-1.5 text-gray-700 bg-gray-50 hover:bg-gray-100 rounded border border-gray-200"
+            title="Trade Settings"
+          >
+            <SlidersHorizontal size={16} />
+          </button>
+          <button
+            onClick={() => { setShowSettings(!showSettings); setShowTradeSettings(false); }}
             className="p-1.5 text-gray-700 bg-gray-50 hover:bg-gray-100 rounded border border-gray-200"
             title="Data Settings"
           >
@@ -796,15 +805,30 @@ export function PlaybackControls({ onOpenHistory, onOpenDashboard }: { onOpenHis
               disabled={isReloading}
               className="w-full px-3 py-2 bg-blue-600 text-white rounded font-medium text-sm hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed mb-2"
             >
-              {isReloading ? 'Loading...' : 'Apply Changes'}
+              {isReloading ? 'Loading...' : 'Load Data'}
             </button>
+          </div>
+        </div>
+      )}
 
+      {/* Trade Settings Panel */}
+      {showTradeSettings && (
+        <div className="absolute bottom-full right-0 mb-2 bg-white border-2 border-gray-300 rounded-lg shadow-2xl p-4 z-50 min-w-[280px]">
+          <div className="flex items-center justify-between mb-3 pb-2 border-b">
+            <h3 className="font-bold text-sm text-gray-800">Trade Settings</h3>
+            <button
+              onClick={() => setShowTradeSettings(false)}
+              className="text-gray-400 hover:text-gray-600"
+            >
+              <X size={16} />
+            </button>
+          </div>
+          <p className="text-[10px] text-green-600 bg-green-50 rounded px-2 py-1 mb-3">Changes apply immediately</p>
+
+          <div className="space-y-3">
             {/* Risk Settings */}
-            <div className="pt-2 border-t mt-2">
-              <label className="block text-xs font-medium text-gray-700 mb-2">
-                Risk Settings
-              </label>
-              
+            <div>
+              <label className="block text-xs font-medium text-gray-700 mb-2">Risk</label>
               <div className="flex items-center justify-between mb-2">
                 <span className="text-xs text-gray-600">Target RR Ratio (1:X)</span>
                 <input
@@ -812,12 +836,15 @@ export function PlaybackControls({ onOpenHistory, onOpenDashboard }: { onOpenHis
                   min="1"
                   step="0.5"
                   value={targetRR}
-                  onChange={(e) => setTargetRR(Number(e.target.value))}
+                  onChange={(e) => {
+                    const val = Number(e.target.value);
+                    if (rrDebounceRef.current) clearTimeout(rrDebounceRef.current);
+                    rrDebounceRef.current = setTimeout(() => setTargetRR(val), 400);
+                  }}
                   className="w-16 px-2 py-1 text-sm border border-gray-300 rounded focus:outline-none focus:ring-1 focus:ring-blue-500"
                 />
               </div>
-
-              <label className="flex items-center gap-2 cursor-pointer group mb-2">
+              <label className="flex items-center gap-2 cursor-pointer group">
                 <input
                   type="checkbox"
                   checked={autoExitTarget}
@@ -839,7 +866,6 @@ export function PlaybackControls({ onOpenHistory, onOpenDashboard }: { onOpenHis
                 />
                 <span className="text-xs font-bold text-gray-700 group-hover:text-blue-700 transition-colors">Show Parallel Timeframe</span>
               </label>
-
               {showSecondaryChart && (
                 <div className="animate-in slide-in-from-left-2 duration-200">
                   <label className="block text-[10px] font-medium text-gray-500 mb-1 ml-6 uppercase">

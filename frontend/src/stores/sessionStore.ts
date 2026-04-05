@@ -180,7 +180,21 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
     });
   },
 
-  setTargetRR: (rr) => set({ targetRR: rr }),
+  setTargetRR: (rr) => {
+    set({ targetRR: rr });
+    // Skip TP recalculation when manual levels are active — user set SL/TP explicitly via the drawing tool
+    const { position, manualLevels } = get();
+    if (manualLevels) return;
+    // If a position is active with a valid SL, recalculate TP from the new RR
+    if (position && position.stopLoss && position.stopLoss > 0 && position.averagePrice) {
+      const isLong = position.quantity > 0;
+      const slDist = Math.abs(position.averagePrice - position.stopLoss);
+      const newTarget = isLong
+        ? position.averagePrice + slDist * rr
+        : position.averagePrice - slDist * rr;
+      get().updatePositionTarget(newTarget);
+    }
+  },
 
   setAutoExitTarget: (auto) => set({ autoExitTarget: auto }),
 
