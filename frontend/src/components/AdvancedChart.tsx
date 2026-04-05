@@ -555,7 +555,6 @@ export function AdvancedChart({
       const bucketStart = (istDayStart + SESSION_START + bucketIdx * timeframeSeconds) - IST_OFFSET;
       const lastCandle = lastCandleRef.current;
 
-      console.debug(`[Chart${isSecondary ? '-2' : '-1'}] tick price=${tick.price} bucket=${bucketStart} last=${lastCandle.time}`);
 
       // Dhan sends cumulative day volume — compute per-tick delta to avoid overflow.
       // On the very first tick (e.g. secondary chart mounted mid-session), seed the

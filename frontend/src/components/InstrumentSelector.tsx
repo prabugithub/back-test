@@ -189,7 +189,6 @@ export function InstrumentSelector() {
           const resampledCandles = timeframeMinutes === 5 ? allCandles : resampleCandles(allCandles, timeframeMinutes);
 
           if (resampledCandles.length > 0) {
-            console.log(`Loaded ${resampledCandles.length} candles (Resampled: ${intv})`);
             loadCandles(resampledCandles, `NIFTY 50 (Local ${intv})`, cfg);
 
             // Apply initial jump if requested

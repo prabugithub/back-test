@@ -111,7 +111,6 @@ export const saveSnapshot = async (state: SessionState, snapshotName: string) =>
             isSnapshot: true
         });
         await setDoc(snapshotRef, dataToSave);
-        console.log('Manual snapshot saved:', snapshotName);
     } catch (error) {
         console.error('Error saving snapshot:', error);
         throw error;
@@ -125,7 +124,6 @@ export const deleteSnapshot = async (snapshotId: string) => {
         }
         const snapshotRef = doc(db, 'sessions', snapshotId);
         await deleteDoc(snapshotRef);
-        console.log('Snapshot deleted:', snapshotId);
     } catch (error) {
         console.error('Error deleting snapshot:', error);
         throw error;

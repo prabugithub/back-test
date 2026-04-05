@@ -44,11 +44,10 @@ export const useLiveStore = create<LiveState>((set, get) => ({
 
         // Reuse existing socket if it just isn't connected yet (avoid double-connect)
         if (existing) {
-            console.log('[LiveStore] Socket exists but not yet connected — will subscribe on connect event');
             return;
         }
 
-        console.log('[LiveStore] Creating new Socket.IO connection...');
+
         const socket = io(SOCKET_URL, {
             transports: ['websocket'],
             reconnection: true,
@@ -57,13 +56,11 @@ export const useLiveStore = create<LiveState>((set, get) => ({
         });
 
         socket.on('connect', () => {
-            console.log('[LiveStore] Socket connected:', socket.id);
             set({ isConnected: true });
 
             // Flush any pending subscription
             const { pendingSubscription, isLiveMode } = get();
             if (isLiveMode && pendingSubscription) {
-                console.log('[LiveStore] Flushing pending subscription:', pendingSubscription);
                 socket.emit('subscribe:instrument', pendingSubscription);
                 set({ pendingSubscription: null });
             } else if (isLiveMode) {
@@ -71,7 +68,6 @@ export const useLiveStore = create<LiveState>((set, get) => ({
                 const session = useSessionStore.getState();
                 if (session.sessionConfig) {
                     const { securityId, exchangeSegment } = session.sessionConfig;
-                    console.log('[LiveStore] Re-subscribing on reconnect:', securityId);
                     socket.emit('subscribe:instrument', { token: securityId, segment: exchangeSegment });
                 }
             }
@@ -109,7 +105,6 @@ export const useLiveStore = create<LiveState>((set, get) => ({
         });
 
         socket.on('tick', (tick: LiveTick) => {
-            console.log('[LiveStore] Tick received:', tick);
             set({
                 livePrice: tick.price,
                 lastTick: { ...tick }, // New object reference to trigger zustand subscribers
@@ -122,7 +117,6 @@ export const useLiveStore = create<LiveState>((set, get) => ({
 
         // Backend fired an exit order (SL or TP hit while frontend may have been offline)
         socket.on('position:exit-triggered', (data: { positionId: string; reason: 'SL' | 'TP'; triggerPrice: number; stopLoss: number; target: number }) => {
-            console.log('[LiveStore] Backend exit triggered:', data);
             const level = data.reason === 'SL' ? data.stopLoss : data.target;
             useNotificationStore.getState().notify(
                 `${data.reason} Hit at ${level.toFixed(2)} — Backend is exiting position automatically.`,
@@ -132,7 +126,6 @@ export const useLiveStore = create<LiveState>((set, get) => ({
 
         // Backend confirmed the exit order was placed with the broker
         socket.on('position:exit-placed', (data: { positionId: string; reason: 'SL' | 'TP'; triggerPrice: number }) => {
-            console.log('[LiveStore] Backend exit placed:', data);
             useNotificationStore.getState().notify(
                 `${data.reason} exit order placed by backend at ${data.triggerPrice.toFixed(2)}. Syncing position.`,
                 'info'
@@ -181,7 +174,6 @@ export const useLiveStore = create<LiveState>((set, get) => ({
             const { socket, isConnected } = get();
             if (socket && isConnected && get().pendingSubscription) {
                 const pending = get().pendingSubscription!;
-                console.log('[LiveStore] Already connected — subscribing immediately:', pending);
                 socket.emit('subscribe:instrument', pending);
                 set({ pendingSubscription: null });
             }
@@ -204,10 +196,7 @@ export const useLiveStore = create<LiveState>((set, get) => ({
         const { socket, isConnected } = get();
         if (socket && isConnected) {
             socket.emit('subscribe:instrument', { token, segment });
-            console.log('[LiveStore] Subscribed to:', token);
         } else {
-            // Queue it
-            console.log('[LiveStore] Not connected yet — queueing subscription for:', token);
             set({ pendingSubscription: { token, segment } });
         }
     },
@@ -216,7 +205,6 @@ export const useLiveStore = create<LiveState>((set, get) => ({
         const { socket, isConnected } = get();
         if (socket && isConnected) {
             socket.emit('unsubscribe:instrument', { token });
-            console.log('[LiveStore] Unsubscribed from:', token);
         }
     }
 }));
