@@ -654,11 +654,15 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
                   if (optData.data.lotSize) {
                      const lotSize = optData.data.lotSize;
                      const fraction = quantity / lotSize;
-                     // Rounding logic: more than 0.1 of a lot rounds UP (1.1 lots -> 2 lots)
-                     // This ensures a 1-lot minimum even for small risk amounts.
-                     const decimal = fraction - Math.floor(fraction);
-                     const lots = decimal > 0.1 ? Math.ceil(fraction) : Math.floor(fraction);
-                     finalQuantity = Math.max(1, lots) * lotSize;
+                     const lots = Math.round(fraction);
+                     if (lots === 0) {
+                        useNotificationStore.getState().notify(
+                          `Cannot place order: calculated quantity (${quantity}) is less than half a lot (lot size: ${lotSize}). Increase risk amount or reduce SL distance.`,
+                          'error'
+                        );
+                        return;
+                     }
+                     finalQuantity = lots * lotSize;
                   }
 
                   useNotificationStore.getState().notify(
