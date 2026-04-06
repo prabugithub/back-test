@@ -53,6 +53,25 @@ export function InstrumentSelector() {
     }
   }, [dataSource, useDateBasedLoading]);
 
+  // Auto-bind defaults for API mode
+  useEffect(() => {
+    if (dataSource === 'api') {
+      const nifty = SYMBOLS.find(s => s.symbol === 'NIFTY 50');
+      if (nifty && (!selectedSymbol || selectedSymbol.symbol !== 'NIFTY 50')) {
+        setSelectedSymbol(nifty);
+        setSecurityId(nifty.token);           // '13'
+        setExchangeSegment(nifty.exchange);   // 'IDX_I'
+        setInstrument(nifty.instrumentType);  // 'INDEX'
+      }
+
+      const to = new Date();
+      const from = new Date();
+      from.setMonth(from.getMonth() - 3);
+      setFromDate(from.toISOString().split('T')[0]);
+      setToDate(to.toISOString().split('T')[0]);
+    }
+  }, [dataSource]);
+
   // Symbol search states
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedCategory, setSelectedCategory] = useState('All');
@@ -429,7 +448,7 @@ export function InstrumentSelector() {
                     value={securityId}
                     onChange={(e) => setSecurityId(e.target.value)}
                     className="w-full px-3 py-2 border rounded focus:outline-none focus:ring-2 focus:ring-blue-500"
-                    placeholder="e.g., 2885 for RELIANCE"
+                    placeholder="e.g., 13 for NIFTY 50"
                   />
                 </div>
 
@@ -624,7 +643,7 @@ export function InstrumentSelector() {
             <strong>Available Symbols:</strong> Nifty 50, Bank Nifty, Finnifty indices + All Nifty 50 stocks
           </div>
           <div className="text-blue-600">
-            Using Angel One API (FREE) • {SYMBOLS.length} symbols available
+            Using Dhan API • {SYMBOLS.length} symbols available
           </div>
         </div>
       )}
