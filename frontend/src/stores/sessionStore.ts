@@ -2,7 +2,7 @@ import { create } from 'zustand';
 import type { Candle, Trade, Position, TradeJournal, Drawing } from '../types';
 import { saveTradeSession } from '../utils/tradeStorage';
 import { groupTradesIntoPositions, calculatePerformanceStats, recalculateTradesPnL } from '../utils/tradeAnalysis';
-import { saveSession, loadSession, restoreBackup, saveSnapshot, listSnapshots, listHistory, deleteSnapshot, type SessionState } from '../services/firebaseSessionService';
+import { saveSession, loadSession, restoreBackup, saveSnapshot, listSnapshots, listHistory, deleteSnapshot, updateCurrentSessionDrawings, type SessionState } from '../services/firebaseSessionService';
 import { useNotificationStore } from './notificationStore';
 import { calculatePivotPoints } from '../utils/indicators';
 import { analyzeMarketStructure } from '../utils/pivotAnalysis';
@@ -61,9 +61,11 @@ interface SessionStore {
   primaryIndicators: string[];
   secondaryIndicators: string[];
   drawings: Drawing[];
+  secondaryDrawings: Drawing[];
 
   // Actions
   setDrawings: (drawings: Drawing[]) => void;
+  setSecondaryDrawings: (drawings: Drawing[]) => void;
   loadCandles: (candles: Candle[], instrument: string, config?: SessionConfig) => void;
   setLiveMode: (isLive: boolean) => void;
   syncLivePositions: () => Promise<void>;
@@ -128,6 +130,10 @@ const generateTradeId = () => {
   return `${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
 };
 
+// Module-level timers for debounced drawings auto-save (avoids archiving history on every change)
+let _drawingsSaveTimer: ReturnType<typeof setTimeout> | null = null;
+let _secondaryDrawingsSaveTimer: ReturnType<typeof setTimeout> | null = null;
+
 export const useSessionStore = create<SessionStore>((set, get) => ({
   // Initial state
   candles: [],
@@ -161,10 +167,23 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
   primaryIndicators: ['ema21', 'pivotPoints', 'alBrooks'],
   secondaryIndicators: ['ema21', 'pivotPoints', 'alBrooks'],
   drawings: [],
-
+  secondaryDrawings: [],
 
   // Actions
-  setDrawings: (drawings) => set({ drawings }),
+  setDrawings: (drawings) => {
+    set({ drawings });
+    if (_drawingsSaveTimer) clearTimeout(_drawingsSaveTimer);
+    _drawingsSaveTimer = setTimeout(() => {
+      updateCurrentSessionDrawings(drawings, 'drawings').catch(() => {/* swallow — no session doc yet */});
+    }, 2000);
+  },
+  setSecondaryDrawings: (drawings) => {
+    set({ secondaryDrawings: drawings });
+    if (_secondaryDrawingsSaveTimer) clearTimeout(_secondaryDrawingsSaveTimer);
+    _secondaryDrawingsSaveTimer = setTimeout(() => {
+      updateCurrentSessionDrawings(drawings, 'secondaryDrawings').catch(() => {/* swallow */});
+    }, 2000);
+  },
   loadCandles: (candles, instrument, config) => {
     set({
       candles,
@@ -1031,9 +1050,9 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
   },
 
   saveRemoteSession: async () => {
-    const { 
+    const {
       instrument, trades, position, currentIndex, sessionConfig,
-      drawings, primaryIndicators, secondaryIndicators, secondaryTimeframe,
+      drawings, secondaryDrawings, primaryIndicators, secondaryIndicators, secondaryTimeframe,
       showSecondaryChart, tradeQuantity, riskPerTrade, targetRR,
       autoExitTarget, useAtrForSignals, showPivotRR
     } = get();
@@ -1067,6 +1086,7 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
       position,
       uiSettings: {
         drawings,
+        secondaryDrawings,
         primaryIndicators,
         secondaryIndicators,
         secondaryTimeframe,
@@ -1178,9 +1198,9 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
   },
 
   saveRemoteSnapshot: async (name: string) => {
-    const { 
+    const {
       instrument, trades, position, currentIndex, sessionConfig,
-      drawings, primaryIndicators, secondaryIndicators, secondaryTimeframe,
+      drawings, secondaryDrawings, primaryIndicators, secondaryIndicators, secondaryTimeframe,
       showSecondaryChart, tradeQuantity, riskPerTrade, targetRR,
       autoExitTarget, useAtrForSignals, showPivotRR
     } = get();
@@ -1202,6 +1222,7 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
       position,
       uiSettings: {
         drawings,
+        secondaryDrawings,
         primaryIndicators,
         secondaryIndicators,
         secondaryTimeframe,

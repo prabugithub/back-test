@@ -266,6 +266,7 @@ export function AdvancedChart({
     onTextToolTrigger: handleTextToolTrigger,
     onCalloutTrigger: handleCalloutTrigger,
     onCustomRender: handleCustomRender,
+    isSecondary,
   });
 
   const handleTextSubmit = (text: string) => {

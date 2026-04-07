@@ -11,6 +11,7 @@ interface UseChartDrawingsProps {
   onTextToolTrigger?: (point: Point) => void;
   onCalloutTrigger?: (p1: Point, p2: Point) => void;
   onCustomRender?: (ctx: CanvasRenderingContext2D) => void;
+  isSecondary?: boolean;
 }
 
 export function useChartDrawings({
@@ -22,18 +23,24 @@ export function useChartDrawings({
   onTextToolTrigger,
   onCalloutTrigger,
   onCustomRender,
+  isSecondary = false,
 }: UseChartDrawingsProps) {
   const setTradeQuantity = useSessionStore((s) => s.setTradeQuantity);
   const riskPerTrade = useSessionStore((s) => s.riskPerTrade);
   const setManualLevels = useSessionStore((s) => s.setManualLevels);
 
-  const drawings = useSessionStore((s) => s.drawings);
-  const setDrawingsState = useSessionStore((s) => s.setDrawings);
+  const drawings = useSessionStore((s) => isSecondary ? s.secondaryDrawings : s.drawings);
+  const setDrawingsState = useSessionStore((s) => isSecondary ? s.setSecondaryDrawings : s.setDrawings);
+
+  // Returns the current drawings array for this chart without triggering a re-render
+  const getDrawings = (): Drawing[] => isSecondary
+    ? useSessionStore.getState().secondaryDrawings
+    : useSessionStore.getState().drawings;
 
   // Helper to maintain compatibility with functional set state
   const setDrawings = useCallback((action: Drawing[] | ((prev: Drawing[]) => Drawing[])) => {
     if (typeof action === 'function') {
-      setDrawingsState(action(useSessionStore.getState().drawings));
+      setDrawingsState(action(getDrawings()));
     } else {
       setDrawingsState(action);
     }
@@ -47,6 +54,13 @@ export function useChartDrawings({
   const [isHoveringSelected] = useState(false);
   const [isResizing, setIsResizing] = useState(false);
   const [resizeHandleIndex, setResizeHandleIndex] = useState<number>(-1);
+
+  // Undo history — stores up to 5 previous drawings states
+  const drawingHistoryRef = useRef<Drawing[][]>([]);
+
+  const pushToHistory = useCallback(() => {
+    drawingHistoryRef.current = [...drawingHistoryRef.current, [...getDrawings()]].slice(-5);
+  }, [isSecondary]);
 
   // Use refs to track current values without causing re-renders
   const activeToolRef = useRef(activeTool);
@@ -221,10 +235,11 @@ export function useChartDrawings({
 
   const deleteSelectedDrawing = useCallback(() => {
     if (!selectedDrawingId) return;
+    pushToHistory();
     setDrawings(prev => prev.filter(d => d.id !== selectedDrawingId));
     setSelectedDrawingId(null);
     setManualLevels(null);
-  }, [selectedDrawingId]);
+  }, [selectedDrawingId, pushToHistory]);
 
   const getDrawingColor = useCallback((tool: DrawingTool): string => {
     switch (tool) {
@@ -242,18 +257,20 @@ export function useChartDrawings({
   }, []);
 
   const addTextDrawing = useCallback((point: Point, text: string) => {
+    pushToHistory();
     const newId = `drawing-${Date.now()}`;
     setDrawings(p => [...p, { id: newId, type: 'text', points: [point], text, color: getDrawingColor('text') }]);
     setSelectedDrawingId(newId);
     onToolComplete?.();
-  }, [getDrawingColor, onToolComplete]);
+  }, [getDrawingColor, onToolComplete, pushToHistory]);
 
   const addCalloutDrawing = useCallback((p1: Point, p2: Point, text: string) => {
+    pushToHistory();
     const newId = `drawing-${Date.now()}`;
     setDrawings(p => [...p, { id: newId, type: 'callout', points: [p1, p2], text, color: getDrawingColor('callout') }]);
     setSelectedDrawingId(newId);
     onToolComplete?.();
-  }, [getDrawingColor, onToolComplete]);
+  }, [getDrawingColor, onToolComplete, pushToHistory]);
 
   const handleMouseDown = useCallback((event: MouseEvent) => {
     if (!canvasRef.current || event.button !== 0) return false;
@@ -270,6 +287,7 @@ export function useChartDrawings({
         return true;
       } else if (pts.length === 3) {
         // Third click: Complete the drawing
+        pushToHistory();
         const newId = `drawing-${Date.now()}`;
         setDrawings(p => [...p, { id: newId, type: 'channel', points: [pts[0], pts[1], point], color: getDrawingColor('channel') }]);
         setSelectedDrawingId(newId);
@@ -283,15 +301,16 @@ export function useChartDrawings({
 
     // Check resize handle
     if (activeToolRef.current === 'select' && selectedDrawingIdRef.current) {
-      const drawing = useSessionStore.getState().drawings.find(d => d.id === selectedDrawingIdRef.current);
+      const drawing = getDrawings().find(d => d.id === selectedDrawingIdRef.current);
       if (drawing) {
         const hIdx = getResizeHandleAtPoint(point, drawing);
-        if (hIdx !== -1) { setIsResizing(true); setResizeHandleIndex(hIdx); return true; }
+        if (hIdx !== -1) { pushToHistory(); setIsResizing(true); setResizeHandleIndex(hIdx); return true; }
       }
     }
 
-    const found = findDrawingAtPoint(point, useSessionStore.getState().drawings);
+    const found = findDrawingAtPoint(point, getDrawings());
     if (found && activeToolRef.current === 'select') {
+      pushToHistory();
       setSelectedDrawingId(found.id);
       const pts = found.points.map(p => convertLogicalToPixel(p));
       setDragOffset({ x: point.x - pts[0].x, y: point.y - pts[0].y });
@@ -314,7 +333,7 @@ export function useChartDrawings({
     setIsDrawing(true);
     isDrawingRef.current = true;
     return true;
-  }, [getChartCoordinates, convertLogicalToPixel, onTextToolTrigger, addTextDrawing, getDrawingColor, onToolComplete]);
+  }, [getChartCoordinates, convertLogicalToPixel, onTextToolTrigger, addTextDrawing, getDrawingColor, onToolComplete, pushToHistory]);
 
   const handleMouseMove = useCallback((event: MouseEvent) => {
     if (!canvasRef.current || !chartApi || !seriesApi) return;
@@ -372,7 +391,7 @@ export function useChartDrawings({
     }
 
     if (!isDrawingRef.current || activeToolRef.current === 'none') {
-      const found = findDrawingAtPoint(point, useSessionStore.getState().drawings);
+      const found = findDrawingAtPoint(point, getDrawings());
       if (canvasRef.current) canvasRef.current.style.cursor = found ? (activeToolRef.current === 'select' ? 'pointer' : 'crosshair') : 'default';
       return;
     }
@@ -415,6 +434,7 @@ export function useChartDrawings({
         else { const t = prompt('Text:'); if (t) addCalloutDrawing(pts[0], pts[1], t); }
         setCurrentDrawing([]); setIsDrawing(false); return;
       }
+      pushToHistory();
       const newId = `drawing-${Date.now()}`;
       setDrawings(prev => [...prev, { id: newId, type: activeToolRef.current, points: pts, color: getDrawingColor(activeToolRef.current) }]);
       setSelectedDrawingId(newId);
@@ -435,7 +455,31 @@ export function useChartDrawings({
       isDrawingRef.current = false;
       onToolComplete?.(); 
     }
-  }, [onToolComplete, getDrawingColor, riskPerTrade, setTradeQuantity, setManualLevels, onCalloutTrigger, addCalloutDrawing]);
+  }, [onToolComplete, getDrawingColor, riskPerTrade, setTradeQuantity, setManualLevels, onCalloutTrigger, addCalloutDrawing, pushToHistory]);
+
+  const handleUndo = useCallback(() => {
+    if (drawingHistoryRef.current.length === 0) return;
+    const prev = drawingHistoryRef.current[drawingHistoryRef.current.length - 1];
+    drawingHistoryRef.current = drawingHistoryRef.current.slice(0, -1);
+    setDrawings(prev);
+    setSelectedDrawingId(null);
+  }, [setDrawings]);
+
+  useEffect(() => {
+    const handler = (e: KeyboardEvent) => {
+      if ((e.ctrlKey || e.metaKey) && e.key === 'z') {
+        // Don't intercept undo inside text inputs / textareas / contenteditable
+        const tag = (e.target as HTMLElement)?.tagName;
+        const isEditable = tag === 'INPUT' || tag === 'TEXTAREA' ||
+          (e.target as HTMLElement)?.isContentEditable;
+        if (isEditable) return;
+        e.preventDefault();
+        handleUndo();
+      }
+    };
+    document.addEventListener('keydown', handler);
+    return () => document.removeEventListener('keydown', handler);
+  }, [handleUndo]);
 
   const drawLine = (ctx: CanvasRenderingContext2D, p1: Point, p2: Point, color: string, w = 2) => {
     ctx.strokeStyle = color; ctx.lineWidth = w; ctx.beginPath(); ctx.moveTo(p1.x, p1.y); ctx.lineTo(p2.x, p2.y); ctx.stroke();
@@ -550,7 +594,7 @@ export function useChartDrawings({
     if (!ctx) return;
     ctx.clearRect(0, 0, canvasRef.current.width, canvasRef.current.height);
     const cIdx = useSessionStore.getState().currentIndex;
-    useSessionStore.getState().drawings.forEach(d => {
+    getDrawings().forEach(d => {
       if (d.points[0]?.time !== undefined && d.points[0].time > cIdx) return;
       const pts = d.points.map(p => convertLogicalToPixel(p));
       const isSel = d.id === selectedDrawingId;

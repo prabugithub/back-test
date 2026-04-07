@@ -148,6 +148,25 @@ All drawings persist in the Zustand store and save with the session.
 - **Clear All** button removes all drawings from active chart
 - Drawings are saved with session and restored on reload
 
+### Auto-save
+
+Drawings are automatically saved to Firestore **2 seconds after any change** (add, move, resize, delete) using a lightweight patch (`updateDoc`) that does not rotate the session history. This means drawings survive a page refresh or live chart reload without requiring a manual Save.
+
+> **Note:** The auto-save patch requires a session document to already exist in Firestore. If you have never manually saved a session, drawings will not persist across page reloads until the first manual save is done.
+
+### Undo (Ctrl+Z)
+
+Up to **5 drawing actions** can be undone with `Ctrl+Z` (or `Cmd+Z` on Mac). Each of the following counts as one undo step:
+
+| Action | Undoable |
+|--------|---------|
+| Draw a new shape | Yes |
+| Delete a drawing | Yes |
+| Move (drag) a drawing | Yes — captures state before drag |
+| Resize a drawing | Yes — captures state before resize |
+
+Ctrl+Z is ignored when the cursor is inside a text input or textarea (native browser undo still works there).
+
 ---
 
 ## 5. Playback & Navigation
@@ -569,6 +588,7 @@ Step 3 — Market Order
 | `B` | Quick BUY at current price |
 | `S` | Quick SELL at current price |
 | `Delete` | Delete selected drawing |
+| `Ctrl+Z` / `Cmd+Z` | Undo last drawing action (up to 5) |
 | `Esc` | Cancel current drawing tool |
 
 ---

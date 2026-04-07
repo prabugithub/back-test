@@ -153,10 +153,23 @@ export function InstrumentSelector() {
 
         if (response.success && response.data.length > 0) {
           loadCandles(response.data, `${cfg.securityId}-${cfg.exchangeSegment}`, cfg);
-          
+
           if (cfg.dataSource === 'live') {
               setLiveModeInSession(true);
               setLiveMode(true);
+              // Restore drawings from the last saved session so they survive a live chart reload
+              try {
+                const saved = await loadRemoteSession();
+                const ui = saved?.data.uiSettings as any;
+                if (ui?.drawings?.length) {
+                  useSessionStore.getState().setDrawings(ui.drawings);
+                }
+                if (ui?.secondaryDrawings?.length) {
+                  useSessionStore.getState().setSecondaryDrawings(ui.secondaryDrawings);
+                }
+              } catch (_) {
+                // No prior session — silently ignore
+              }
           }
 
           // Apply initial jump if requested

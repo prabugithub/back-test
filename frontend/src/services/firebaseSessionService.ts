@@ -1,5 +1,5 @@
 import { db } from '../config/firebase';
-import { doc, setDoc, getDoc, writeBatch, deleteDoc } from 'firebase/firestore';
+import { doc, setDoc, getDoc, writeBatch, deleteDoc, updateDoc } from 'firebase/firestore';
 import type { Trade, Position, Drawing } from '../types';
 
 export interface SessionState {
@@ -16,6 +16,7 @@ export interface SessionState {
     position: Position | null;
     uiSettings?: {
         drawings?: Drawing[];
+        secondaryDrawings?: Drawing[];
         primaryIndicators?: string[];
         secondaryIndicators?: string[];
         secondaryTimeframe?: string | null;
@@ -127,6 +128,23 @@ export const deleteSnapshot = async (snapshotId: string) => {
     } catch (error) {
         console.error('Error deleting snapshot:', error);
         throw error;
+    }
+};
+
+/**
+ * Patches only the drawings field in the current session without rotating history.
+ * Used for debounced auto-save on every drawing change.
+ */
+export const updateCurrentSessionDrawings = async (
+    drawings: Drawing[],
+    field: 'drawings' | 'secondaryDrawings' = 'drawings'
+) => {
+    try {
+        const sessionRef = doc(db, 'sessions', CONSTANT_SESSION_ID);
+        await updateDoc(sessionRef, { [`uiSettings.${field}`]: sanitizeData(drawings) });
+    } catch (error) {
+        // Session doc may not exist yet (first load before any manual save) — swallow silently
+        console.warn('Drawings auto-save skipped:', error);
     }
 };
 

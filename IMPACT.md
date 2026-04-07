@@ -20,7 +20,8 @@ The central store. Changes here have the widest blast radius.
 | `manualLevels` | handleExecuteTrade in PlaybackControls, setTargetRR (guard) | useChartDrawings RR tool, clearManualLevels | HIGH — guards TP recalculation |
 | `candles` | AdvancedChart, SessionStats, PlaybackControls | setCandles (data load), restoreSessionState | MEDIUM |
 | `trades` | TradeHistoryDialog, SessionStats, PerformanceDashboard | executeTrade, deleteTrade, editTrade | MEDIUM |
-| `drawings` | useChartDrawings, AdvancedChart canvas | addDrawing, clearDrawings | LOW |
+| `drawings` | useChartDrawings (primary), AdvancedChart (primary) | setDrawings (auto-patches Firestore 2s debounce) | LOW |
+| `secondaryDrawings` | useChartDrawings (secondary), AdvancedChart (secondary) | setSecondaryDrawings (auto-patches Firestore 2s debounce) | LOW |
 | `sessionConfig` | PlaybackControls (Data Settings form) | performDataReload | MEDIUM |
 
 ### Store actions — impact chains
@@ -132,6 +133,8 @@ sessionConfig
 
 **Known gap:** `targetRR` (in uiSettings) and `position.target` are persisted separately — restoring an old snapshot can produce a mismatch.
 
+**`updateCurrentSessionDrawings(drawings)`** — new lightweight patch function. Uses `updateDoc` to patch only `uiSettings.drawings` without rotating history. Called by `setDrawings` (2s debounce). Silently no-ops if the session document does not yet exist.
+
 ---
 
 ## useChartDrawings.ts (hook)
@@ -139,6 +142,9 @@ sessionConfig
 - **RR tool** sets `manualLevels` in store — this disables `setTargetRR` TP recalculation
 - Drawings are written to store `drawings[]` and saved with session
 - Does NOT affect trade execution directly — only sets `manualLevels` for the next trade
+- **Per-chart drawings:** `isSecondary` prop controls which store field (`drawings` vs `secondaryDrawings`) and which setter the hook reads/writes. Clear All and Undo only affect the active chart.
+- **Undo history:** maintains up to 5 previous snapshots per chart instance in a local ref; Ctrl+Z restores them via the chart-specific setter (which also triggers the auto-save debounce).
+- **Known gap:** undoing an RR drawing deletion restores the drawing visually but does NOT restore `manualLevels`. The user must nudge the RR drawing to re-trigger `setManualLevels`.
 
 ---
 
