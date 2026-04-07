@@ -459,12 +459,12 @@ export function useChartDrawings({
   const drawRiskReward = (ctx: CanvasRenderingContext2D, p1: Point, p2: Point) => {
     const eY = p1.y, rY = p2.y, dy = rY - eY, minX = Math.min(p1.x, p2.x), maxX = Math.max(p1.x, p2.x);
     ctx.strokeStyle = '#FFC107'; ctx.lineWidth = 2; ctx.beginPath(); ctx.moveTo(minX, eY); ctx.lineTo(maxX, eY); ctx.stroke();
-    ctx.font = 'bold 12px Inter, sans-serif'; ctx.fillStyle = '#FFC107'; ctx.fillText('ENTRY', maxX + 5, eY + 4);
+    ctx.font = 'bold 12px Inter, sans-serif'; ctx.fillStyle = '#FFC107'; ctx.fillText('E', maxX + 5, eY + 4);
     ctx.strokeStyle = '#F44336'; ctx.beginPath(); ctx.moveTo(minX, rY); ctx.lineTo(maxX, rY); ctx.stroke();
-    ctx.fillStyle = '#F44336'; ctx.fillText('STOP', maxX + 5, rY + 4);
+    ctx.fillStyle = '#F44336'; ctx.fillText('S', maxX + 5, rY + 4);
     [{ r: 1, c: '#4CAF50' }, { r: 2, c: '#4CAF50' }, { r: 3, c: '#2E7D32' }].forEach(o => {
       const y = eY - dy * o.r; ctx.strokeStyle = o.c; ctx.setLineDash([5, 5]); ctx.beginPath(); ctx.moveTo(minX, y); ctx.lineTo(maxX, y); ctx.stroke(); ctx.setLineDash([]);
-      ctx.fillStyle = o.c; ctx.fillText(`TP 1:${o.r}`, maxX + 5, y + 4);
+      ctx.fillStyle = o.c; ctx.fillText(`${o.r}`, maxX + 5, y + 4);
     });
   };
 
