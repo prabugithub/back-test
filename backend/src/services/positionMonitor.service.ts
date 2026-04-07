@@ -273,6 +273,8 @@ async function triggerExit(pos: MonitoredPosition, reason: 'SL' | 'TP', triggerP
         });
     } catch (err: any) {
         logger.error(`[PositionMonitor] Exit order failed for ${pos.id}: ${err.message}`);
+        // Reset flag so the next tick can retry — prevents silent permanent failure
+        pos.exitTriggered = false;
         // Re-throw so the caller can emit position:exit-failed
         throw err;
     }
