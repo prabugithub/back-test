@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import {
-  X, TrendingUp, TrendingDown, Activity, Target,
+  ArrowLeft, TrendingUp, TrendingDown, Activity, Target,
   BarChart3, Filter, Download as DownloadIcon,
   Layers, ArrowUpRight, ArrowDownRight, Info,
   Search, ArrowUpDown, ChevronRight, ChevronDown, Link as LinkIcon,
@@ -13,14 +13,11 @@ import {
 import { listSnapshots, type SessionState } from '../services/firebaseSessionService';
 import { groupTradesIntoPositions, calculatePerformanceStats, type GroupedPosition } from '../utils/tradeAnalysis';
 import { formatCurrency, formatTimestamp } from '../utils/formatters';
-import type { Trade } from '../types';
 import { OptionBacktestModal } from './OptionBacktestModal';
 import { ShieldCheck } from 'lucide-react';
 
 interface PerformanceDashboardProps {
-    isOpen: boolean;
-    onClose: () => void;
-    liveTrades?: Trade[];
+    onBack: () => void;
     liveInstrument?: string;
 }
 
@@ -29,10 +26,10 @@ const MARKET_STRUCTURES = [
     'Bull-Reversal', 'Bear-Trending-range', 'Bull-Trending-range'
 ];
 
-export function PerformanceDashboard({ isOpen, onClose, liveTrades, liveInstrument }: PerformanceDashboardProps) {
+export function PerformanceDashboard({ onBack, liveInstrument }: PerformanceDashboardProps) {
     const [snapshots, setSnapshots] = useState<SessionState[]>([]);
     const [loadingSnapshots, setLoadingSnapshots] = useState(false);
-    const [selectedSnapshotIds, setSelectedSnapshotIds] = useState<Set<string>>(new Set());
+    const [selectedSnapshotIds, setSelectedSnapshotIds] = useState<Set<string> | null>(null); // null = all
     const [selectedInstrument, setSelectedInstrument] = useState<string>('All');
     const [selectedCategory, setSelectedCategory] = useState<string>('All');
     const [activeTab, setActiveTab] = useState<'dashboard' | 'log'>('dashboard');
@@ -40,21 +37,20 @@ export function PerformanceDashboard({ isOpen, onClose, liveTrades, liveInstrume
     const [isOptionModalOpen, setIsOptionModalOpen] = useState(false);
 
     useEffect(() => {
-        if (!isOpen) return;
         if (liveInstrument) setSelectedInstrument(liveInstrument);
         setLoadingSnapshots(true);
         listSnapshots().then(snaps => {
             setSnapshots(snaps);
-            setSelectedSnapshotIds(new Set()); // empty = all included
+            setSelectedSnapshotIds(null); // null = all included
         }).finally(() => setLoadingSnapshots(false));
-    }, [isOpen, liveInstrument]);
+    }, [liveInstrument]);
 
     // Consolidate trades from selected snapshots
     const filteredPositions = useMemo(() => {
         let allPos: GroupedPosition[] = [];
 
-        // Process selected snapshots (empty set = all included)
-        const activeSnapshots = selectedSnapshotIds.size === 0
+        // null = all included; empty Set = none; non-empty Set = only those IDs
+        const activeSnapshots = selectedSnapshotIds === null
             ? snapshots
             : snapshots.filter(s => selectedSnapshotIds.has(s.id!));
         activeSnapshots.forEach(s => {
@@ -249,45 +245,42 @@ export function PerformanceDashboard({ isOpen, onClose, liveTrades, liveInstrume
         a.click();
     };
 
-    if (!isOpen) return null;
-
     return (
-        <div className="fixed inset-0 bg-slate-900/40 backdrop-blur-sm flex items-center justify-center z-[2500] p-4 font-sans">
-            <div className="bg-slate-50 rounded-2xl shadow-2xl w-full max-w-7xl h-[95vh] flex flex-col overflow-hidden border border-white/20">
-                {/* Header */}
-                <div className="flex items-center justify-between p-6 bg-white border-b border-slate-200">
-                    <div className="flex items-center gap-4">
-                        <div className="bg-blue-600 p-2.5 rounded-xl text-white shadow-lg shadow-blue-200">
-                            <Activity size={24} />
-                        </div>
-                        <div>
-                            <h2 className="text-2xl font-bold text-slate-800 tracking-tight">Performance Analytics</h2>
-                            <p className="text-slate-500 text-sm font-medium">Detailed insights into your backtesting strategy</p>
-                        </div>
+        <div className="h-full w-full bg-slate-50 flex flex-col overflow-hidden font-sans">
+            {/* Header */}
+            <div className="flex items-center justify-between px-6 py-4 bg-white border-b border-slate-200 shrink-0">
+                <div className="flex items-center gap-4">
+                    <button
+                        onClick={onBack}
+                        className="flex items-center gap-2 text-sm font-semibold text-slate-500 hover:text-slate-800 transition-colors"
+                    >
+                        <ArrowLeft size={18} />
+                        Back to Chart
+                    </button>
+                    <div className="w-px h-6 bg-slate-200" />
+                    <div className="bg-blue-600 p-2 rounded-xl text-white shadow-lg shadow-blue-200">
+                        <Activity size={20} />
                     </div>
-                    <div className="flex items-center gap-3">
-                        <div className="flex bg-slate-100 p-1 rounded-lg border border-slate-200">
-                            <button 
-                                onClick={() => setActiveTab('dashboard')}
-                                className={`px-4 py-1.5 text-sm font-bold rounded-md transition-all ${activeTab === 'dashboard' ? 'text-blue-700 bg-white shadow-sm' : 'text-slate-500 hover:text-slate-700'}`}
-                            >
-                                Dashboard
-                            </button>
-                            <button 
-                                onClick={() => setActiveTab('log')}
-                                className={`px-4 py-1.5 text-sm font-bold rounded-md transition-all ${activeTab === 'log' ? 'text-blue-700 bg-white shadow-sm' : 'text-slate-500 hover:text-slate-700'}`}
-                            >
-                                Detailed Log
-                            </button>
-                        </div>
-                        <button 
-                            onClick={onClose}
-                            className="p-2 hover:bg-slate-100 rounded-full transition-colors text-slate-400"
-                        >
-                            <X size={24} />
-                        </button>
+                    <div>
+                        <h2 className="text-xl font-bold text-slate-800 tracking-tight">Performance Analytics</h2>
+                        <p className="text-slate-500 text-xs font-medium">Detailed insights into your backtesting strategy</p>
                     </div>
                 </div>
+                <div className="flex bg-slate-100 p-1 rounded-lg border border-slate-200">
+                    <button
+                        onClick={() => setActiveTab('dashboard')}
+                        className={`px-4 py-1.5 text-sm font-bold rounded-md transition-all ${activeTab === 'dashboard' ? 'text-blue-700 bg-white shadow-sm' : 'text-slate-500 hover:text-slate-700'}`}
+                    >
+                        Dashboard
+                    </button>
+                    <button
+                        onClick={() => setActiveTab('log')}
+                        className={`px-4 py-1.5 text-sm font-bold rounded-md transition-all ${activeTab === 'log' ? 'text-blue-700 bg-white shadow-sm' : 'text-slate-500 hover:text-slate-700'}`}
+                    >
+                        Detailed Log
+                    </button>
+                </div>
+            </div>
 
                 {/* Main Content */}
                 <div className="flex-1 flex overflow-hidden">
@@ -333,12 +326,12 @@ export function PerformanceDashboard({ isOpen, onClose, liveTrades, liveInstrume
                                             <div className="flex gap-2 text-[10px] font-bold">
                                                 <button
                                                     className="text-blue-500 hover:text-blue-700"
-                                                    onClick={() => setSelectedSnapshotIds(new Set())}
+                                                    onClick={() => setSelectedSnapshotIds(null)}
                                                 >All</button>
                                                 <span className="text-slate-300">|</span>
                                                 <button
                                                     className="text-blue-500 hover:text-blue-700"
-                                                    onClick={() => setSelectedSnapshotIds(new Set(snapshots.map(s => s.id!)))}
+                                                    onClick={() => setSelectedSnapshotIds(new Set())}
                                                 >None</button>
                                             </div>
                                         )}
@@ -358,19 +351,21 @@ export function PerformanceDashboard({ isOpen, onClose, liveTrades, liveInstrume
                                                         <input
                                                             type="checkbox"
                                                             className="mt-0.5 accent-blue-600 shrink-0"
-                                                            checked={selectedSnapshotIds.size === 0 || selectedSnapshotIds.has(s.id!)}
+                                                            checked={selectedSnapshotIds === null || selectedSnapshotIds.has(s.id!)}
                                                             onChange={() => {
                                                                 setSelectedSnapshotIds(prev => {
-                                                                    const next = new Set(prev);
-                                                                    if (prev.size === 0) {
-                                                                        // "all" mode — unchecking this one: include all except this
-                                                                        snapshots.forEach(sn => { if (sn.id !== s.id) next.add(sn.id!); });
-                                                                    } else if (next.has(s.id!)) {
+                                                                    if (prev === null) {
+                                                                        // All mode → uncheck this one: include all except this
+                                                                        const next = new Set(snapshots.map(sn => sn.id!));
                                                                         next.delete(s.id!);
-                                                                        if (next.size === 0) return new Set(); // back to "all"
+                                                                        return next;
+                                                                    }
+                                                                    const next = new Set(prev);
+                                                                    if (next.has(s.id!)) {
+                                                                        next.delete(s.id!);
                                                                     } else {
                                                                         next.add(s.id!);
-                                                                        if (next.size === snapshots.length) return new Set(); // all checked = "all" mode
+                                                                        if (next.size === snapshots.length) return null; // all checked → back to "all" mode
                                                                     }
                                                                     return next;
                                                                 });
@@ -753,7 +748,6 @@ export function PerformanceDashboard({ isOpen, onClose, liveTrades, liveInstrume
                         )}
                     </div>
                 </div>
-            </div>
         </div>
     );
 }
