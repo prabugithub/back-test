@@ -3,12 +3,18 @@ dotenv.config();
 
 import logger from './utils/logger';
 
-logger.info('--- DEBUG ENV ---');
-logger.info(`DHAN_ACCESS_TOKEN exists: ${!!process.env.DHAN_ACCESS_TOKEN}`);
-if (process.env.DHAN_ACCESS_TOKEN) {
-  logger.info(`DHAN_ACCESS_TOKEN length: ${process.env.DHAN_ACCESS_TOKEN.length}`);
+// ── Startup environment validation ──────────────────────────────────────────
+function validateEnv(): void {
+  const IS_SIM = process.env.DHAN_SIMULATION === 'true';
+  logger.info(`[ENV] NODE_ENV=${process.env.NODE_ENV || 'development'} | SIMULATION=${IS_SIM}`);
+  if (!IS_SIM) {
+    if (!process.env.DHAN_CLIENT_ID)
+      logger.warn('[ENV] DHAN_CLIENT_ID is not set — live trading will be disabled');
+    if (!process.env.DHAN_ACCESS_TOKEN)
+      logger.warn('[ENV] DHAN_ACCESS_TOKEN is not set — live trading will be disabled');
+  }
 }
-logger.info('------------------');
+validateEnv();
 
 import express, { Express, Request, Response } from 'express';
 import cors from 'cors';
@@ -21,7 +27,7 @@ process.on('uncaughtException', (err) => {
 process.on('unhandledRejection', (reason, promise) => {
   logger.error('CRITICAL: Unhandled Rejection at:', promise, 'reason:', reason);
 });
-import { initDatabase } from './config/database';
+import { initDatabase, closeDatabase } from './config/database';
 import { initAngelOneClient, loginAngelOne } from './services/angelone.service';
 import dataRoutes from './routes/data.routes';
 import screenshotRoutes from './routes/screenshot.routes';
@@ -36,17 +42,18 @@ import { initPositionMonitor, onTick } from './services/positionMonitor.service'
 
 const app: Express = express();
 const PORT = process.env.PORT || 3001;
+const CORS_ORIGIN = process.env.CORS_ORIGIN || '*';
 const httpServer = http.createServer(app);
 const io = new Server(httpServer, {
   cors: {
-    origin: '*',
+    origin: CORS_ORIGIN,
     methods: ['GET', 'POST'],
   },
 });
 
 // Middleware
-app.use(cors());
-app.use(express.json({ limit: '10mb' })); 
+app.use(cors({ origin: CORS_ORIGIN }));
+app.use(express.json({ limit: '10mb' }));
 
 // Request logging middleware
 app.use((req: Request, res: Response, next) => {
@@ -104,18 +111,48 @@ app.use((err: Error, req: Request, res: Response, next: any) => {
   });
 });
 
-// Initialize database and start server
+// ── Graceful shutdown ────────────────────────────────────────────────────────
+let shuttingDown = false;
+function gracefulShutdown(signal: string) {
+  if (shuttingDown) return;
+  shuttingDown = true;
+  logger.info(`[Shutdown] Received ${signal} — closing gracefully...`);
+
+  // Force-kill after 30 s in case something hangs
+  const forceExitTimer = setTimeout(() => {
+    logger.error('[Shutdown] Forced exit after 30s timeout');
+    process.exit(1);
+  }, 30_000);
+  forceExitTimer.unref(); // don't keep the process alive just for this timer
+
+  // Close HTTP server (stops accepting new connections; waits for in-flight requests)
+  httpServer.close(() => {
+    logger.info('[Shutdown] HTTP server closed');
+    closeDatabase();
+    logger.info('[Shutdown] Database closed — exiting');
+    process.exit(0);
+  });
+}
+process.on('SIGTERM', () => gracefulShutdown('SIGTERM'));
+process.on('SIGINT',  () => gracefulShutdown('SIGINT'));
+
+// ── Server startup ───────────────────────────────────────────────────────────
 async function startServer() {
   try {
     // Initialize database
     await initDatabase();
     logger.info('Database initialized successfully');
 
-    // Start server immediately 
-    httpServer.listen(PORT, () => {
-      logger.info(`Server running on http://localhost:${PORT}`);
-      logger.info(`Environment: ${process.env.NODE_ENV || 'development'}`);
-    });
+    // Start server
+    httpServer
+      .listen(PORT, () => {
+        logger.info(`Server running on http://localhost:${PORT}`);
+        logger.info(`Environment: ${process.env.NODE_ENV || 'development'}`);
+      })
+      .on('error', (err: NodeJS.ErrnoException) => {
+        logger.error('[Startup] HTTP server failed to bind:', err.message);
+        process.exit(1);
+      });
 
     // Initialize Angel One client and login (Concurrent background task)
     initAngelOneClient();

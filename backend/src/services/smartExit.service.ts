@@ -97,7 +97,9 @@ export async function executeSmartExit(params: SmartExitParams): Promise<{ succe
 
     // Launch the chaser loop asynchronously so we don't block the API response
     // Return success immediately to let frontend proceed
-    chaseOrderLoop(currentOrderId, params);
+    chaseOrderLoop(currentOrderId, params).catch((err: any) => {
+        logger.error(`[SmartExit] Unhandled error in chaseOrderLoop for order ${currentOrderId}:`, err.message);
+    });
 
     return { success: true, message: "Smart Exit loop started", orderId: currentOrderId };
 }

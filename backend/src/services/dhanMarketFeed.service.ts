@@ -50,7 +50,9 @@ function flushPendingSubscriptions() {
 
 // Control for REST polling to avoid overlapping requests
 let isPollingInProgress = false;
-let restPollInterval: any = null;
+// Holds the pending setTimeout handle for the next REST poll iteration.
+// null = polling is stopped; truthy = polling loop is active (waiting or running).
+let restPollHandle: ReturnType<typeof setTimeout> | null = null;
 
 /**
  * Poll the Dhan intraday chart API for the latest price.
@@ -111,24 +113,24 @@ async function performRestPoll(clientID: string, accessToken: string) {
         }
     } finally {
         isPollingInProgress = false;
-        // Schedule next poll ONLY after this one is finished
-        if (restPollInterval) { // reuse the variable for the timeout handle
-            restPollInterval = setTimeout(() => performRestPoll(clientID, accessToken), 2000) as any;
+        // Schedule next poll ONLY after this one is finished; stop if handle was cleared by stopRestPolling()
+        if (restPollHandle !== null) {
+            restPollHandle = setTimeout(() => performRestPoll(clientID, accessToken), 2000);
         }
     }
 }
 
 function startRestPolling(clientID: string, accessToken: string) {
-    if (restPollInterval) return; // already running
+    if (restPollHandle !== null) return; // already running
 
     logger.info('🔄 Starting REST polling fallback (Safe loop, 2s delay)');
-    restPollInterval = setTimeout(() => performRestPoll(clientID, accessToken), 100) as any;
+    restPollHandle = setTimeout(() => performRestPoll(clientID, accessToken), 100);
 }
 
 function stopRestPolling() {
-    if (restPollInterval) {
-        clearTimeout(restPollInterval as any);
-        restPollInterval = null;
+    if (restPollHandle !== null) {
+        clearTimeout(restPollHandle);
+        restPollHandle = null;
         isPollingInProgress = false;
         logger.info('REST polling stopped (WS connected)');
     }

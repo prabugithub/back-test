@@ -16,12 +16,10 @@ export function initAngelOneClient(): any {
   const apiKey = process.env.ANGELONE_API_KEY;
   const clientCode = process.env.ANGELONE_CLIENT_CODE;
   const password = process.env.ANGELONE_PASSWORD;
-  const totp = process.env.ANGELONE_TOTP;
 
   if (!apiKey || !clientCode || !password) {
-    throw new Error(
-      'ANGELONE_API_KEY, ANGELONE_CLIENT_CODE, and ANGELONE_PASSWORD must be set in environment variables'
-    );
+    logger.warn('Angel One credentials not configured — Angel One features disabled');
+    return null;
   }
 
   smartApi = new SmartAPI({

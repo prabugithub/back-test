@@ -1,57 +1,39 @@
-import initSqlJs, { Database } from 'sql.js';
+import BetterSqlite3 from 'better-sqlite3';
 import fs from 'fs';
 import path from 'path';
 import logger from '../utils/logger';
 
-let db: Database | null = null;
+let db: BetterSqlite3.Database | null = null;
 const DB_PATH = path.join(__dirname, '../../data/backtesting.db');
 
 /**
- * Initialize the SQLite database
+ * Initialize the SQLite database (synchronous via better-sqlite3).
+ * Kept async so existing callers can await it without changes.
  */
-export async function initDatabase(): Promise<Database> {
-  if (db) {
-    return db;
+export async function initDatabase(): Promise<void> {
+  if (db) return;
+
+  // Ensure data directory exists
+  const dataDir = path.dirname(DB_PATH);
+  if (!fs.existsSync(dataDir)) {
+    fs.mkdirSync(dataDir, { recursive: true });
   }
 
-  try {
-    const SQL = await initSqlJs();
+  db = new BetterSqlite3(DB_PATH);
 
-    // Ensure data directory exists
-    const dataDir = path.dirname(DB_PATH);
-    if (!fs.existsSync(dataDir)) {
-      fs.mkdirSync(dataDir, { recursive: true });
-    }
+  // WAL mode: allows concurrent reads while writing, safer on crashes
+  db.pragma('journal_mode = WAL');
+  db.pragma('synchronous = NORMAL');
 
-    // Load existing database or create new one
-    if (fs.existsSync(DB_PATH)) {
-      const buffer = fs.readFileSync(DB_PATH);
-      db = new SQL.Database(buffer);
-      logger.info('Loaded existing database from file');
-    } else {
-      db = new SQL.Database();
-      logger.info('Created new database');
-    }
-
-    // Create schema
-    createSchema(db);
-
-    // Save database to file
-    saveDatabase();
-
-    return db;
-  } catch (error) {
-    logger.error('Failed to initialize database:', error);
-    throw error;
-  }
+  createSchema(db);
+  logger.info('Database initialized (better-sqlite3, WAL mode)');
 }
 
 /**
  * Create database schema
  */
-function createSchema(database: Database): void {
-  // Create candles table
-  database.run(`
+function createSchema(database: BetterSqlite3.Database): void {
+  database.exec(`
     CREATE TABLE IF NOT EXISTS candles (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       security_id TEXT NOT NULL,
@@ -66,17 +48,11 @@ function createSchema(database: Database): void {
       volume INTEGER NOT NULL,
       created_at INTEGER DEFAULT (strftime('%s', 'now')),
       UNIQUE(security_id, exchange_segment, interval, timestamp)
-    )
-  `);
+    );
 
-  // Create index for faster lookups
-  database.run(`
     CREATE INDEX IF NOT EXISTS idx_candles_lookup
-    ON candles(security_id, exchange_segment, interval, timestamp)
-  `);
+    ON candles(security_id, exchange_segment, interval, timestamp);
 
-  // Create instruments table
-  database.run(`
     CREATE TABLE IF NOT EXISTS instruments (
       security_id TEXT PRIMARY KEY,
       exchange_segment TEXT NOT NULL,
@@ -84,17 +60,11 @@ function createSchema(database: Database): void {
       symbol TEXT NOT NULL,
       name TEXT,
       lot_size INTEGER
-    )
-  `);
+    );
 
-  // Create index for instrument search
-  database.run(`
     CREATE INDEX IF NOT EXISTS idx_instruments_search
-    ON instruments(symbol, name)
-  `);
+    ON instruments(symbol, name);
 
-  // Positions being monitored for backend SL/TP firing (survives server restarts)
-  database.run(`
     CREATE TABLE IF NOT EXISTS monitored_positions (
       id TEXT PRIMARY KEY,
       spot_token TEXT NOT NULL,
@@ -107,34 +77,17 @@ function createSchema(database: Database): void {
       quantity INTEGER NOT NULL,
       entry_price REAL NOT NULL,
       registered_at INTEGER NOT NULL
-    )
+    );
   `);
 
-  logger.info('Database schema created successfully');
+  logger.info('Database schema ready');
 }
 
 /**
- * Save database to file
+ * Get the database instance.
+ * Throws if initDatabase() was not called first.
  */
-export function saveDatabase(): void {
-  if (!db) {
-    return;
-  }
-
-  try {
-    const data = db.export();
-    const buffer = Buffer.from(data);
-    fs.writeFileSync(DB_PATH, buffer);
-    logger.debug('Database saved to file');
-  } catch (error) {
-    logger.error('Failed to save database:', error);
-  }
-}
-
-/**
- * Get the database instance
- */
-export function getDatabase(): Database {
+export function getDatabase(): BetterSqlite3.Database {
   if (!db) {
     throw new Error('Database not initialized. Call initDatabase() first.');
   }
@@ -142,29 +95,13 @@ export function getDatabase(): Database {
 }
 
 /**
- * Close the database connection
+ * Close the database connection cleanly.
+ * Called during graceful shutdown in server.ts.
  */
 export function closeDatabase(): void {
   if (db) {
-    saveDatabase();
     db.close();
     db = null;
     logger.info('Database closed');
   }
 }
-
-// Auto-save every 5 minutes
-setInterval(() => {
-  saveDatabase();
-}, 5 * 60 * 1000);
-
-// Save on process exit
-process.on('SIGINT', () => {
-  closeDatabase();
-  process.exit(0);
-});
-
-process.on('SIGTERM', () => {
-  closeDatabase();
-  process.exit(0);
-});

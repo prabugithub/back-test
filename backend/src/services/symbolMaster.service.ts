@@ -48,6 +48,7 @@ export async function initSymbolMaster(): Promise<void> {
  * Works correctly on any server timezone (UTC cloud or local IST machine).
  */
 let morningRefreshScheduled = false;
+let morningRefreshTimer: ReturnType<typeof setTimeout> | null = null;
 
 function scheduleMorningRefreshIfNeeded(): void {
     if (morningRefreshScheduled) return;
@@ -66,7 +67,11 @@ function scheduleMorningRefreshIfNeeded(): void {
     logger.info(`Server started before 8 AM IST — scheduling Symbol Master refresh in ${minutesUntil} min (at 8:00 AM IST)`);
     morningRefreshScheduled = true;
 
-    setTimeout(async () => {
+    // Clear any previous timer before setting a new one to prevent accumulation on repeated inits
+    if (morningRefreshTimer) clearTimeout(morningRefreshTimer);
+
+    morningRefreshTimer = setTimeout(async () => {
+        morningRefreshTimer = null;
         logger.info('8:00 AM IST reached — re-downloading fresh Dhan CSV and refreshing Symbol Master...');
         morningRefreshScheduled = false; // allow re-schedule if init is called again tomorrow
         await initSymbolMaster();
@@ -120,7 +125,7 @@ function downloadScripMaster(): Promise<void> {
         };
 
         const fetchUrl = (url: string, redirectsLeft = 3) => {
-            https.get(url, (response) => {
+            const req = https.get(url, (response) => {
                 // Follow redirects (301 / 302)
                 if (response.statusCode === 301 || response.statusCode === 302) {
                     const location = response.headers.location;
@@ -142,7 +147,12 @@ function downloadScripMaster(): Promise<void> {
                 file.on('finish', () => { file.close(); done(); });
 
                 response.pipe(file);
-            }).on('error', (err) => done(err));
+            });
+            req.on('error', (err) => done(err));
+            // Abort if the server stops sending data for 30 seconds
+            req.setTimeout(30000, () => {
+                req.destroy(new Error('CSV download timed out after 30s'));
+            });
         };
 
         fetchUrl(CSV_URL);

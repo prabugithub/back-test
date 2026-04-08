@@ -58,13 +58,19 @@ export async function loginDhan(): Promise<void> {
         return;
     }
 
+    // Clear the old refresh timer BEFORE the first await to prevent cascading retries
+    if (tokenRefreshTimer) {
+        clearTimeout(tokenRefreshTimer);
+        tokenRefreshTimer = null;
+    }
+
     const totp = authenticator.generate(totpSecret);
     logger.info('Attempting Dhan TOTP login', { clientId });
 
     const response = await axios.post(
         'https://auth.dhan.co/app/generateAccessToken',
         null,
-        { params: { dhanClientId: clientId, pin, totp } }
+        { params: { dhanClientId: clientId, pin, totp }, timeout: 10000 }
     );
 
     const { accessToken, expiryTime } = response.data;
@@ -129,11 +135,12 @@ export async function fetchHistoricalCandles(params: DhanHistoricalParams) {
                 'Content-Type': 'application/json',
                 'access-token': accessToken,
                 'client-id': clientID
-            }
+            },
+            timeout: 10000,
         });
 
         const timeArray = response.data.start_time || response.data.start_Time || response.data.timestamp;
-        
+
         if (response.data && timeArray) {
             const candles = [];
             for (let i = 0; i < timeArray.length; i++) {
@@ -183,7 +190,8 @@ export async function fetchIntradayCandles(params: Omit<DhanHistoricalParams, 'f
                 'Content-Type': 'application/json',
                 'access-token': accessToken,
                 'client-id': clientID
-            }
+            },
+            timeout: 10000,
         });
 
         const timeArray = response.data.start_time || response.data.start_Time || response.data.timestamp;
@@ -266,7 +274,8 @@ export async function fetchRollingOptionData(params: {
                 'Content-Type': 'application/json',
                 'access-token': accessToken,
                 'client-id': clientID
-            }
+            },
+            timeout: 10000,
         });
 
         const timeArray = response.data.start_time || response.data.start_Time || response.data.timestamp;
@@ -348,7 +357,8 @@ export async function placeOrder(params: {
                 'Content-Type': 'application/json',
                 'access-token': accessToken,
                 'client-id': clientID
-            }
+            },
+            timeout: 10000,
         });
 
         logger.info('Dhan Order placement response:', response.data);
@@ -378,7 +388,8 @@ export async function getOrderStatus(orderId: string) {
             headers: {
                 'access-token': accessToken,
                 'client-id': clientID
-            }
+            },
+            timeout: 10000,
         });
         return response.data;
     } catch (error: any) {
@@ -423,7 +434,8 @@ export async function modifyOrder(orderId: string, params: {
                 'Content-Type': 'application/json',
                 'access-token': accessToken,
                 'client-id': clientID
-            }
+            },
+            timeout: 10000,
         });
 
         logger.info(`Dhan Order Modify response for ${orderId}:`, response.data);
@@ -454,7 +466,8 @@ export async function getPositions() {
             headers: {
                 'access-token': accessToken,
                 'client-id': clientID
-            }
+            },
+            timeout: 10000,
         });
         
         return response.data;

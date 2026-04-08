@@ -1,7 +1,7 @@
 import { executeSmartExit } from './smartExit.service';
 import { placeOrder } from '../adapters/dhan.adapter';
 import { subscribeToInstrument } from '../adapters/dhanFeed.adapter';
-import { getDatabase, saveDatabase } from '../config/database';
+import { getDatabase } from '../config/database';
 import logger from '../utils/logger';
 import { Server } from 'socket.io';
 
@@ -44,33 +44,35 @@ let ioInstance: Server | null = null;
 export function initPositionMonitor(io: Server): void {
     ioInstance = io;
 
-    // Reload persisted positions from SQLite so SL/TP monitoring survives restarts
+    // Reload persisted positions from SQLite so SL/TP monitoring survives restarts.
+    // Positions older than 24h are cleaned up — they predate the current trading day.
+    const TTL_MS = 24 * 60 * 60 * 1000;
+    const cutoffMs = Date.now() - TTL_MS;
     try {
         const db = getDatabase();
-        const rows = db.exec('SELECT * FROM monitored_positions');
-        if (rows.length > 0 && rows[0].values.length > 0) {
-            const cols = rows[0].columns;
-            for (const row of rows[0].values) {
-                const r: any = {};
-                cols.forEach((c, i) => { r[c] = row[i]; });
-                const pos: MonitoredPosition = {
-                    id: r.id,
-                    spotToken: r.spot_token,
-                    spotSegment: r.spot_segment,
-                    direction: r.direction,
-                    stopLoss: r.stop_loss,
-                    target: r.target,
-                    optionSecurityId: r.option_security_id,
-                    optionExchangeSegment: r.option_exchange_segment,
-                    quantity: r.quantity,
-                    entryPrice: r.entry_price,
-                    exitTriggered: false,
-                    registeredAt: r.registered_at,
-                };
-                monitoredPositions.set(pos.id, pos);
-                subscribeToInstrument(pos.spotToken, pos.spotSegment);
-                logger.info(`[PositionMonitor] Restored from DB | id:${pos.id} | SL:${pos.stopLoss} | TP:${pos.target}`);
-            }
+
+        // Remove stale positions before loading
+        db.prepare('DELETE FROM monitored_positions WHERE registered_at < ?').run(cutoffMs);
+
+        const rows = db.prepare('SELECT * FROM monitored_positions').all() as any[];
+        for (const r of rows) {
+            const pos: MonitoredPosition = {
+                id: r.id,
+                spotToken: r.spot_token,
+                spotSegment: r.spot_segment,
+                direction: r.direction,
+                stopLoss: r.stop_loss,
+                target: r.target,
+                optionSecurityId: r.option_security_id,
+                optionExchangeSegment: r.option_exchange_segment,
+                quantity: r.quantity,
+                entryPrice: r.entry_price,
+                exitTriggered: false,
+                registeredAt: r.registered_at,
+            };
+            monitoredPositions.set(pos.id, pos);
+            subscribeToInstrument(pos.spotToken, pos.spotSegment);
+            logger.info(`[PositionMonitor] Restored from DB | id:${pos.id} | SL:${pos.stopLoss} | TP:${pos.target}`);
         }
     } catch (err: any) {
         logger.error('[PositionMonitor] Failed to reload persisted positions:', err.message);
@@ -94,18 +96,16 @@ export function registerPosition(params: Omit<MonitoredPosition, 'exitTriggered'
     // Persist to SQLite so the position survives a server restart
     try {
         const db = getDatabase();
-        db.run(
+        db.prepare(
             `INSERT OR REPLACE INTO monitored_positions
              (id, spot_token, spot_segment, direction, stop_loss, target,
               option_security_id, option_exchange_segment, quantity, entry_price, registered_at)
-             VALUES (?,?,?,?,?,?,?,?,?,?,?)`,
-            [
-                entry.id, entry.spotToken, entry.spotSegment, entry.direction,
-                entry.stopLoss, entry.target, entry.optionSecurityId,
-                entry.optionExchangeSegment, entry.quantity, entry.entryPrice, entry.registeredAt,
-            ]
+             VALUES (?,?,?,?,?,?,?,?,?,?,?)`
+        ).run(
+            entry.id, entry.spotToken, entry.spotSegment, entry.direction,
+            entry.stopLoss, entry.target, entry.optionSecurityId,
+            entry.optionExchangeSegment, entry.quantity, entry.entryPrice, entry.registeredAt,
         );
-        saveDatabase();
     } catch (err: any) {
         logger.error('[PositionMonitor] Failed to persist position to DB:', err.message);
     }
@@ -128,8 +128,7 @@ export function unregisterPosition(id: string): boolean {
     if (existed) {
         try {
             const db = getDatabase();
-            db.run('DELETE FROM monitored_positions WHERE id = ?', [id]);
-            saveDatabase();
+            db.prepare('DELETE FROM monitored_positions WHERE id = ?').run(id);
         } catch (err: any) {
             logger.error('[PositionMonitor] Failed to remove position from DB:', err.message);
         }
@@ -149,8 +148,7 @@ export function updatePositionTarget(id: string, target: number): boolean {
     pos.target = target;
     try {
         const db = getDatabase();
-        db.run('UPDATE monitored_positions SET target = ? WHERE id = ?', [target, id]);
-        saveDatabase();
+        db.prepare('UPDATE monitored_positions SET target = ? WHERE id = ?').run(target, id);
     } catch (err: any) {
         logger.error('[PositionMonitor] Failed to update target in DB:', err.message);
     }
@@ -259,8 +257,7 @@ async function triggerExit(pos: MonitoredPosition, reason: 'SL' | 'TP', triggerP
         monitoredPositions.delete(pos.id);
         try {
             const db = getDatabase();
-            db.run('DELETE FROM monitored_positions WHERE id = ?', [pos.id]);
-            saveDatabase();
+            db.prepare('DELETE FROM monitored_positions WHERE id = ?').run(pos.id);
         } catch (err: any) {
             logger.error('[PositionMonitor] Failed to remove exited position from DB:', err.message);
         }
