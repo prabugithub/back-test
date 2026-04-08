@@ -1,17 +1,18 @@
 import { useEffect, useMemo, useState } from 'react';
-import { 
-  X, TrendingUp, TrendingDown, Activity, Target, 
+import {
+  X, TrendingUp, TrendingDown, Activity, Target,
   BarChart3, Filter, Download as DownloadIcon,
   Layers, ArrowUpRight, ArrowDownRight, Info,
-  Search, ArrowUpDown, ChevronRight, ChevronDown, Link as LinkIcon
+  Search, ArrowUpDown, ChevronRight, ChevronDown, Link as LinkIcon,
+  Loader2
 } from 'lucide-react';
 import { 
   AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer,
   BarChart, Bar, Cell, PieChart as RePieChart, Pie, Legend
 } from 'recharts';
-import { getStoredSessions, type TradeSession } from '../utils/tradeStorage';
+import { listSnapshots, type SessionState } from '../services/firebaseSessionService';
 import { groupTradesIntoPositions, calculatePerformanceStats, type GroupedPosition } from '../utils/tradeAnalysis';
-import { formatCurrency } from '../utils/formatters';
+import { formatCurrency, formatTimestamp } from '../utils/formatters';
 import type { Trade } from '../types';
 import { OptionBacktestModal } from './OptionBacktestModal';
 import { ShieldCheck } from 'lucide-react';
@@ -29,81 +30,62 @@ const MARKET_STRUCTURES = [
 ];
 
 export function PerformanceDashboard({ isOpen, onClose, liveTrades, liveInstrument }: PerformanceDashboardProps) {
-    const [sessions, setSessions] = useState<TradeSession[]>([]);
+    const [snapshots, setSnapshots] = useState<SessionState[]>([]);
+    const [loadingSnapshots, setLoadingSnapshots] = useState(false);
+    const [selectedSnapshotIds, setSelectedSnapshotIds] = useState<Set<string>>(new Set());
     const [selectedInstrument, setSelectedInstrument] = useState<string>('All');
     const [selectedCategory, setSelectedCategory] = useState<string>('All');
-    const [dateRange, setDateRange] = useState<{ from: string; to: string }>({ from: '', to: '' });
     const [activeTab, setActiveTab] = useState<'dashboard' | 'log'>('dashboard');
     const [searchQuery, setSearchQuery] = useState('');
     const [isOptionModalOpen, setIsOptionModalOpen] = useState(false);
 
     useEffect(() => {
-        if (isOpen) {
-            setSessions(getStoredSessions());
-            if (liveInstrument) {
-                setSelectedInstrument(liveInstrument);
-            }
-        }
+        if (!isOpen) return;
+        if (liveInstrument) setSelectedInstrument(liveInstrument);
+        setLoadingSnapshots(true);
+        listSnapshots().then(snaps => {
+            setSnapshots(snaps);
+            setSelectedSnapshotIds(new Set()); // empty = all included
+        }).finally(() => setLoadingSnapshots(false));
     }, [isOpen, liveInstrument]);
 
-    // Consolidate all trades from selected filters
+    // Consolidate trades from selected snapshots
     const filteredPositions = useMemo(() => {
         let allPos: GroupedPosition[] = [];
-        
-        // 1. Process Saved Sessions
-        sessions.forEach(s => {
+
+        // Process selected snapshots (empty set = all included)
+        const activeSnapshots = selectedSnapshotIds.size === 0
+            ? snapshots
+            : snapshots.filter(s => selectedSnapshotIds.has(s.id!));
+        activeSnapshots.forEach(s => {
             const pos = groupTradesIntoPositions(s.trades);
             allPos = [...allPos, ...pos];
         });
 
-        // 2. Process Live Session if available
-        if (liveTrades && liveTrades.length > 0) {
-            const livePos = groupTradesIntoPositions(liveTrades);
-            allPos = [...allPos, ...livePos];
-        }
-
         return allPos.filter(p => {
-            // 1. Instrument Filter (Case-Insensitive)
+            // Instrument Filter (Case-Insensitive)
             const pInst = p.instrument.trim().toLowerCase();
             const sInst = selectedInstrument.trim().toLowerCase();
             const matchInstrument = selectedInstrument === 'All' || pInst === sInst;
 
-            // 2. Category Filter (Case-Insensitive)
+            // Category Filter (Case-Insensitive)
             const entryExec = p.executions[0];
             const pCat = (entryExec?.journal?.tradeCategory || 'Discretionary').trim().toLowerCase();
             const sCat = selectedCategory.trim().toLowerCase();
             const matchCategory = selectedCategory === 'All' || pCat === sCat;
-            
-            // 3. Date Filter (Robust Local Day Comparison)
-            const posDate = new Date(p.entryTime);
-            const tradeTime = new Date(posDate.getFullYear(), posDate.getMonth(), posDate.getDate()).getTime();
-            
-            let matchFrom = true;
-            if (dateRange.from) {
-                const [y, m, d] = dateRange.from.split('-').map(Number);
-                const fromTime = new Date(y, m - 1, d).getTime();
-                matchFrom = tradeTime >= fromTime;
-            }
 
-            let matchTo = true;
-            if (dateRange.to) {
-                const [y, m, d] = dateRange.to.split('-').map(Number);
-                const toTime = new Date(y, m - 1, d).getTime();
-                matchTo = tradeTime <= toTime;
-            }
-
-            return matchInstrument && matchCategory && matchFrom && matchTo;
-        }).sort((a,b) => a.entryTime - b.entryTime);
-    }, [sessions, selectedInstrument, selectedCategory, dateRange, liveTrades, liveInstrument]);
+            return matchInstrument && matchCategory;
+        }).sort((a, b) => a.entryTime - b.entryTime);
+    }, [snapshots, selectedSnapshotIds, selectedInstrument, selectedCategory]);
 
     const stats = useMemo(() => calculatePerformanceStats(filteredPositions), [filteredPositions]);
 
     const instruments = useMemo(() => {
         const set = new Set<string>();
-        sessions.forEach(s => set.add(s.instrument));
+        snapshots.forEach(s => set.add(s.instrument));
         if (liveInstrument) set.add(liveInstrument);
         return ['All', ...Array.from(set)];
-    }, [sessions, liveInstrument]);
+    }, [snapshots, liveInstrument]);
 
     // Data for charts
     const pnlDistributionData = useMemo(() => {
@@ -345,23 +327,66 @@ export function PerformanceDashboard({ isOpen, onClose, liveTrades, liveInstrume
                                 </div>
 
                                 <div>
-                                    <label className="block text-xs font-bold text-slate-400 uppercase mb-1.5 tracking-tighter">From Date</label>
-                                    <input 
-                                        type="date"
-                                        className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-sm focus:ring-2 focus:ring-blue-500 outline-none font-medium text-slate-600"
-                                        value={dateRange.from}
-                                        onChange={(e) => setDateRange(prev => ({ ...prev, from: e.target.value }))}
-                                    />
-                                </div>
-
-                                <div>
-                                    <label className="block text-xs font-bold text-slate-400 uppercase mb-1.5 tracking-tighter">To Date</label>
-                                    <input 
-                                        type="date"
-                                        className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-sm focus:ring-2 focus:ring-blue-500 outline-none font-medium text-slate-600"
-                                        value={dateRange.to}
-                                        onChange={(e) => setDateRange(prev => ({ ...prev, to: e.target.value }))}
-                                    />
+                                    <div className="flex items-center justify-between mb-1.5">
+                                        <label className="text-xs font-bold text-slate-400 uppercase tracking-tighter">Snapshots</label>
+                                        {snapshots.length > 0 && (
+                                            <div className="flex gap-2 text-[10px] font-bold">
+                                                <button
+                                                    className="text-blue-500 hover:text-blue-700"
+                                                    onClick={() => setSelectedSnapshotIds(new Set())}
+                                                >All</button>
+                                                <span className="text-slate-300">|</span>
+                                                <button
+                                                    className="text-blue-500 hover:text-blue-700"
+                                                    onClick={() => setSelectedSnapshotIds(new Set(snapshots.map(s => s.id!)))}
+                                                >None</button>
+                                            </div>
+                                        )}
+                                    </div>
+                                    {loadingSnapshots ? (
+                                        <div className="flex items-center gap-2 text-slate-400 text-xs py-2">
+                                            <Loader2 size={14} className="animate-spin" />
+                                            <span>Loading snapshots...</span>
+                                        </div>
+                                    ) : snapshots.length === 0 ? (
+                                        <p className="text-xs text-slate-400 italic py-1">No snapshots saved yet.</p>
+                                    ) : (
+                                        <div className="space-y-1.5 max-h-48 overflow-y-auto pr-1 custom-scrollbar">
+                                            {snapshots.map(s => {
+                                                return (
+                                                    <label key={s.id} className="flex items-start gap-2 cursor-pointer group">
+                                                        <input
+                                                            type="checkbox"
+                                                            className="mt-0.5 accent-blue-600 shrink-0"
+                                                            checked={selectedSnapshotIds.size === 0 || selectedSnapshotIds.has(s.id!)}
+                                                            onChange={() => {
+                                                                setSelectedSnapshotIds(prev => {
+                                                                    const next = new Set(prev);
+                                                                    if (prev.size === 0) {
+                                                                        // "all" mode — unchecking this one: include all except this
+                                                                        snapshots.forEach(sn => { if (sn.id !== s.id) next.add(sn.id!); });
+                                                                    } else if (next.has(s.id!)) {
+                                                                        next.delete(s.id!);
+                                                                        if (next.size === 0) return new Set(); // back to "all"
+                                                                    } else {
+                                                                        next.add(s.id!);
+                                                                        if (next.size === snapshots.length) return new Set(); // all checked = "all" mode
+                                                                    }
+                                                                    return next;
+                                                                });
+                                                            }}
+                                                        />
+                                                        <div className="min-w-0">
+                                                            <div className="text-xs font-semibold text-slate-700 truncate group-hover:text-blue-700">{s.name}</div>
+                                                            <div className="text-[10px] text-slate-400">
+                                                                {s.archivedAt ? new Date(s.archivedAt).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' }) : ''}
+                                                            </div>
+                                                        </div>
+                                                    </label>
+                                                );
+                                            })}
+                                        </div>
+                                    )}
                                 </div>
                             </div>
                         </div>

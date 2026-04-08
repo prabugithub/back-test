@@ -19,11 +19,12 @@ A complete reference of every feature available in the application.
 11. [Performance Report](#11-performance-report)
 12. [Multi-Timeframe Analysis](#12-multi-timeframe-analysis)
 13. [Options Backtesting](#13-options-backtesting)
-14. [Session Persistence](#14-session-persistence)
-15. [Screenshots](#15-screenshots)
-16. [Live Trading](#16-live-trading)
-17. [Smart Exit (Order Chaser)](#17-smart-exit-order-chaser)
-18. [Keyboard Shortcuts](#18-keyboard-shortcuts)
+14. [Performance Analytics Dashboard](#14-performance-analytics-dashboard)
+15. [Session Persistence](#15-session-persistence)
+16. [Screenshots](#16-screenshots)
+17. [Live Trading](#17-live-trading)
+18. [Smart Exit (Order Chaser)](#18-smart-exit-order-chaser)
+19. [Keyboard Shortcuts](#19-keyboard-shortcuts)
 
 ---
 
@@ -430,28 +431,115 @@ View two timeframes simultaneously for top-down analysis.
 ## 13. Options Backtesting
 
 **Component:** `OptionBacktestModal`  
-**Endpoint:** `POST /api/options/backtest`
+**Endpoint:** `POST /api/options/backtest`  
+**Data source:** Dhan API — `POST /v2/charts/rollingoption`
 
-Simulate an options strategy layered over your spot backtest trades.
+Simulate a credit spread options strategy (Bull Put or Bear Call) layered over your spot backtest trades. For each spot position, two option legs are fetched from the Dhan rolling option API and the spread P&L is calculated at the entry and exit timestamps of the spot trade.
 
 ### Inputs
 
 | Field | Description |
 |-------|-------------|
-| Spot Trades | Auto-populated from current session |
-| Offset Buy | Price offset applied to buy legs |
-| Offset Sell | Price offset applied to sell legs |
-| Instrument | `NIFTY` or `BANKNIFTY` |
+| Spot Trades | Auto-populated from the Performance Analytics Dashboard filter |
+| Sell Strike Offset | Number of strikes OTM to sell (e.g. 2 = 2 strikes from ATM) |
+| Buy Strike Offset | Number of strikes OTM to buy as hedge (must be > Sell offset) |
+| Instrument | Auto-detected from the selected instrument — `NIFTY` (securityId 13) or `BANKNIFTY` (securityId 25) |
+
+### Strategy logic
+
+| Spot direction | Options strategy | Sell leg | Buy leg |
+|----------------|-----------------|----------|---------|
+| LONG | Bull Put Spread | ATM − offsetSell (Put) | ATM − offsetBuy (Put) |
+| SHORT | Bear Call Spread | ATM + offsetSell (Call) | ATM + offsetBuy (Call) |
+
+Monthly expiry contracts are used for consistency across historical dates.
 
 ### Output
 
-- Options P&L for each spot trade
-- Comparison: spot P&L vs options P&L
-- Total strategy result
+- Per-trade: sell leg entry/exit, buy leg entry/exit, spread P&L
+- Summary: total option P&L, spot P&L, win rate, trade count
+
+### Accessing the modal
+
+Available from the **Performance Analytics Dashboard** sidebar via the "Option Backtest (Dhan)" button. Receives the currently filtered positions automatically.
 
 ---
 
-## 14. Session Persistence
+## 14. Performance Analytics Dashboard
+
+**Component:** `PerformanceDashboard`  
+**Data source:** Firebase Firestore snapshots (`snapshot_session_*` documents)
+
+Cross-session analytics dashboard. Aggregates trades across multiple saved snapshots to give a holistic view of strategy performance over time — unlike the in-session Performance Report which covers only the current session.
+
+### Opening
+
+Click the chart icon in the top toolbar (App.tsx) or via any trigger that sets `isPerformanceDashboardOpen = true`.
+
+### Data loading
+
+On open, the dashboard calls `listSnapshots()` from `firebaseSessionService.ts`, which fetches all documents in the Firestore `sessions` collection with the `snapshot_session_*` prefix. A loading spinner is shown while fetching.
+
+> **Important:** Only **saved snapshots** are included. The current in-memory session is excluded to prevent double-counting. To include your latest trades, save a snapshot first.
+
+### Snapshot selector (sidebar)
+
+| Control | Behaviour |
+|---------|-----------|
+| Checkbox per snapshot | Check = include in analytics, uncheck = exclude |
+| **All** link | Include all snapshots (default state on open) |
+| **None** link | Exclude all (useful as a starting point to cherry-pick) |
+| Snapshot label | Shows snapshot name + date saved |
+
+Deselecting all checkboxes returns to "all included" mode automatically.
+
+### Filters (sidebar)
+
+| Filter | Options |
+|--------|---------|
+| Instrument | All, or any instrument found across loaded snapshots |
+| Category | All / System / Discretionary |
+
+Date range filter has been removed — snapshot selection replaces it.
+
+### Dashboard tab — Metrics
+
+| Metric | Description |
+|--------|-------------|
+| Total Net P&L | Sum of realized P&L across all filtered closed positions |
+| Win Rate | % of closed positions with positive P&L |
+| Profit Factor | Gross profit ÷ gross loss |
+| Max Drawdown | Largest peak-to-trough equity drop |
+| Expectancy | Average expected P&L per trade |
+
+### Dashboard tab — Charts
+
+- **Equity Growth** — area chart of cumulative P&L over time
+- **Profit Distribution** — histogram of P&L values bucketed by ₹500
+- **Top 5 Profitable Setups** — ranked by total P&L (LT Market | Entry Signal combos)
+- **Top 5 Scenarios to Avoid** — worst-performing setups
+- **Entry Signal Effectiveness** — horizontal bar chart, P&L by entry signal
+- **Hourly Performance** — area chart, P&L aggregated by hour of day
+- **LLHH Pivot Pattern Performance** — horizontal bar chart
+- **Entry Position Performance** — horizontal bar chart
+- **Category Split** — pie chart (System vs Discretionary) with P&L per category
+- **Market Structure Matrix** — heatmap of LT × HT market structure combinations
+
+### Detailed Log tab
+
+Full searchable/sortable position table across all selected snapshots. Each row expands to show individual execution details, journal fields, and screenshot links.
+
+### Export
+
+**Export Filtered Data** button downloads a CSV of all filtered positions (instrument, direction, entry/exit time and price, qty, P&L, journal fields).
+
+### Option Backtest integration
+
+The "Option Backtest (Dhan)" button in the sidebar opens `OptionBacktestModal`, passing the currently filtered positions. Instrument is inferred from the active instrument filter.
+
+---
+
+## 15. Session Persistence
 
 **Service:** `firebaseSessionService.ts`  
 **Component:** `BackupHistoryDialog`
@@ -487,7 +575,7 @@ The session is automatically saved to Firestore whenever significant changes occ
 
 ---
 
-## 15. Screenshots
+## 16. Screenshots
 
 **Component:** `ScreenshotSaveDialog`  
 **Endpoint:** `POST /api/screenshot/upload`
@@ -509,9 +597,9 @@ Capture and save the chart for trade documentation.
 
 ---
 
-## 16. Live Trading
+## 17. Live Trading
 
-**Component:** `PerformanceDashboard`  
+**Component:** `LiveTradingPanel`  
 **Routes:** `/api/live/*`
 
 Connect to your real Dhan account for live order execution.
@@ -540,7 +628,7 @@ Connect to your real Dhan account for live order execution.
 
 ---
 
-## 17. Smart Exit (Order Chaser)
+## 18. Smart Exit (Order Chaser)
 
 **Service:** `smartExit.service.ts`  
 **Endpoint:** `POST /api/live/smart-exit`
@@ -578,7 +666,7 @@ Step 3 — Market Order
 
 ---
 
-## 18. Keyboard Shortcuts
+## 19. Keyboard Shortcuts
 
 | Key | Action |
 |-----|--------|
@@ -616,12 +704,12 @@ Dialogs (open on demand):
 - Trade History
 - Trade Journal
 - Trade Exit Confirmation
-- Performance Report
-- Options Backtest
+- Performance Report (current session)
+- Performance Analytics Dashboard (cross-session, snapshot-based)
+- Options Backtest (Dhan API)
 - Backup History
 - Screenshot Save
-- Performance Dashboard (Live Trading)
 
 ---
 
-*Last updated: 2026-04-05*
+*Last updated: 2026-04-08*

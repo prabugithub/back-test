@@ -2,11 +2,16 @@ import { fetchRollingOptionData } from './dhan.service';
 import logger from '../utils/logger';
 import { format, addMonths, subMonths } from 'date-fns';
 
+const INSTRUMENT_CONFIG: Record<string, { securityId: string }> = {
+    NIFTY: { securityId: '13' },
+    BANKNIFTY: { securityId: '25' },
+};
+
 export interface OptionBacktestRequest {
     spotTrades: any[]; // The GroupedPosition[] from frontend
     offsetSell: number; // e.g., 2 (200 pts OTM)
     offsetBuy: number; // e.g., 4 (400 pts OTM)
-    instrument: 'NIFTY'; // For now just Nifty
+    instrument: 'NIFTY' | 'BANKNIFTY';
 }
 
 export interface OptionBacktestResult {
@@ -30,6 +35,8 @@ export async function backtestOptions(params: OptionBacktestRequest): Promise<Op
 
     logger.info(`Starting option backtesting for ${params.spotTrades.length} trades`);
 
+    const securityId = (INSTRUMENT_CONFIG[params.instrument] ?? INSTRUMENT_CONFIG['NIFTY']).securityId;
+
     for (const spotTrade of params.spotTrades) {
         try {
             const entryDate = new Date(spotTrade.entryTime);
@@ -42,22 +49,18 @@ export async function backtestOptions(params: OptionBacktestRequest): Promise<Op
             // Determine Option Type and Strikes
             const isBullish = spotTrade.direction === 'LONG';
             const optionType: 'CALL' | 'PUT' = isBullish ? 'PUT' : 'CALL';
-            
+
             // For Bullish (Spot Long), we Sell Put OTM (ATM-offset) and Buy Put further OTM (ATM-offset-buy)
             // For Bearish (Spot Short), we Sell Call OTM (ATM+offset) and Buy Call further OTM (ATM+offset+buy)
             const sellStrikeStr = isBullish ? `ATM-${params.offsetSell}` : `ATM+${params.offsetSell}`;
             const buyStrikeStr = isBullish ? `ATM-${params.offsetBuy}` : `ATM+${params.offsetBuy}`;
 
-            // Fetch data for both legs
-            // Note: rollingoption requires 1 day extra or exactly same day?
-            // Usually, if entry and exit are same day, fromDate == toDate works.
-            
             const [leg1Data, leg2Data] = await Promise.all([
                 fetchRollingOptionData({
-                    securityId: '13',
+                    securityId,
                     exchangeSegment: 'NSE_FNO',
                     instrument: 'OPTIDX',
-                    expiryFlag: 'MONTH', // Using Monthly for consistency in backtesting
+                    expiryFlag: 'MONTH',
                     strike: sellStrikeStr,
                     optionType,
                     fromDate: fromDateStr,
@@ -65,7 +68,7 @@ export async function backtestOptions(params: OptionBacktestRequest): Promise<Op
                     interval: '5'
                 }),
                 fetchRollingOptionData({
-                    securityId: '13',
+                    securityId,
                     exchangeSegment: 'NSE_FNO',
                     instrument: 'OPTIDX',
                     expiryFlag: 'MONTH',

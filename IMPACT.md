@@ -19,7 +19,7 @@ The central store. Changes here have the widest blast radius.
 | `autoExitTarget` | checkSLTPHits (read at check-time) | setAutoExitTarget (Trade Settings checkbox) | HIGH |
 | `manualLevels` | handleExecuteTrade in PlaybackControls, setTargetRR (guard) | useChartDrawings RR tool, clearManualLevels | HIGH — guards TP recalculation |
 | `candles` | AdvancedChart, SessionStats, PlaybackControls | setCandles (data load), restoreSessionState | MEDIUM |
-| `trades` | TradeHistoryDialog, SessionStats, PerformanceDashboard | executeTrade, deleteTrade, editTrade | MEDIUM |
+| `trades` | TradeHistoryDialog, SessionStats | executeTrade, deleteTrade, editTrade | MEDIUM |
 | `drawings` | useChartDrawings (primary), AdvancedChart (primary) | setDrawings (auto-patches Firestore 2s debounce) | LOW |
 | `secondaryDrawings` | useChartDrawings (secondary), AdvancedChart (secondary) | setSecondaryDrawings (auto-patches Firestore 2s debounce) | LOW |
 | `sessionConfig` | PlaybackControls (Data Settings form) | performDataReload | MEDIUM |
@@ -118,6 +118,18 @@ The central store. Changes here have the widest blast radius.
 
 ---
 
+## PerformanceDashboard.tsx
+
+- **Data source:** Firebase Firestore snapshots only (`listSnapshots()` — `snapshot_session_*` prefix, sorted by `archivedAt` desc). **Does NOT read `sessionStore.trades` or localStorage.** This prevents double-counting when the current session is already saved as a snapshot.
+- **Snapshot selector state:** `selectedSnapshotIds: Set<string>` — empty = all included; non-empty = only matching IDs included. Toggling automatically returns to "all" when all boxes are re-checked.
+- **Instrument filter** is populated from `snapshot.instrument` across all loaded snapshots.
+- **`liveTrades` prop** is still accepted (for backward compat with App.tsx) but is no longer processed — it has no effect on displayed data. If the current session should appear in analytics, save a snapshot first.
+- **Option Backtest button** passes `filteredPositions` (already instrument+category filtered) to `OptionBacktestModal`. Instrument is inferred from `selectedInstrument` (falls back to `'NIFTY'` when `'All'`).
+
+**Check when changing:** Ensure `listSnapshots()` still filters to `snapshot_session_*` prefix — any change to Firestore document naming would break the data load. Snapshot selector logic relies on `s.id` being defined; new snapshot writes must always include an `id` field.
+
+---
+
 ## firebaseSessionService.ts
 
 ### What is persisted
@@ -166,7 +178,13 @@ sessionConfig
 | `POST /api/live/smart-exit` | Start order chaser loop |
 | `PUT /api/live/monitor/:id` | Update live position SL/TP in backend monitor |
 | `POST /api/screenshot/upload` | Upload chart PNG to Google Drive |
-| `POST /api/options/backtest` | Run options P&L simulation |
+| `POST /api/options/backtest` | Run options P&L simulation via Dhan rolling option API |
+
+### `backtest.options.service.ts`
+
+- `INSTRUMENT_CONFIG` map drives `securityId` selection: `NIFTY → '13'`, `BANKNIFTY → '25'`. Add new instruments here.
+- `instrument` param comes from `OptionBacktestModal` which infers it from the active instrument filter in `PerformanceDashboard`.
+- **Check when changing:** If Dhan changes `securityId` values or adds new instruments, update `INSTRUMENT_CONFIG`. Strike offset notation (`ATM+N`) is Dhan-specific — verify the rolling option API still accepts this format.
 
 ---
 

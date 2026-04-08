@@ -43,7 +43,7 @@ export function OptionBacktestModal({
                 spotTrades: originalOrderPositions,
                 offsetSell,
                 offsetBuy,
-                instrument: finalInstrument.includes('NIFTY') ? 'NIFTY' : 'NIFTY' // Defaulting to NIFTY
+                instrument: finalInstrument.toUpperCase().includes('BANKNIFTY') ? 'BANKNIFTY' : 'NIFTY'
             });
             setResults(data);
             notify('Option backtest completed!', 'success');

@@ -1,8 +1,10 @@
 import { DhanHqClient, DhanEnv } from 'dhanhq';
 import logger from '../utils/logger';
 import axios from 'axios';
+import { authenticator } from 'otplib';
 
 let dhanClient: any = null;
+let tokenRefreshTimer: NodeJS.Timeout | null = null;
 
 export interface DhanHistoricalParams {
     securityId: string;
@@ -38,6 +40,51 @@ export function initDhanClient() {
         logger.error('Failed to initialize Dhan client:', error.message);
         return null;
     }
+}
+
+/**
+ * Login to Dhan using TOTP and update the access token automatically.
+ * Requires DHAN_PIN and DHAN_TOTP_SECRET env vars.
+ * Falls back to static DHAN_ACCESS_TOKEN if not set.
+ * Schedules a refresh 23 hours after each successful login.
+ */
+export async function loginDhan(): Promise<void> {
+    const clientId = process.env.DHAN_CLIENT_ID;
+    const pin = process.env.DHAN_PIN;
+    const totpSecret = process.env.DHAN_TOTP_SECRET;
+
+    if (!clientId || !pin || !totpSecret) {
+        logger.warn('DHAN_PIN or DHAN_TOTP_SECRET not set — skipping TOTP login, using static DHAN_ACCESS_TOKEN');
+        return;
+    }
+
+    const totp = authenticator.generate(totpSecret);
+    logger.info('Attempting Dhan TOTP login', { clientId });
+
+    const response = await axios.post(
+        'https://auth.dhan.co/app/generateAccessToken',
+        null,
+        { params: { dhanClientId: clientId, pin, totp } }
+    );
+
+    const { accessToken, expiryTime } = response.data;
+    if (!accessToken) {
+        throw new Error(`Dhan TOTP login failed: no accessToken in response — ${JSON.stringify(response.data)}`);
+    }
+
+    process.env.DHAN_ACCESS_TOKEN = accessToken;
+
+    // Re-initialize Dhan client with the fresh token
+    dhanClient = null;
+    initDhanClient();
+
+    logger.info(`Dhan TOTP login successful, token expires: ${expiryTime}`);
+
+    // Schedule next refresh 1 hour before expiry (23h from now)
+    if (tokenRefreshTimer) clearTimeout(tokenRefreshTimer);
+    tokenRefreshTimer = setTimeout(() => {
+        loginDhan().catch((err) => logger.error('Dhan token auto-refresh failed:', err.message));
+    }, 23 * 60 * 60 * 1000);
 }
 
 /**

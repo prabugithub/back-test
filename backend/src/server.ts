@@ -140,8 +140,13 @@ async function startServer() {
         app.use('/api/dev', scenarioRoutes);
         logger.info('🧪 [SIMULATION MODE] Scenario routes mounted at /api/dev');
       } else {
-        const { initDhanClient: realInit } = await import('./services/dhan.service');
+        const { loginDhan, initDhanClient: realInit } = await import('./services/dhan.service');
         const { initSymbolMaster: realMaster } = await import('./services/symbolMaster.service');
+        try {
+          await loginDhan(); // TOTP login — refreshes token if DHAN_PIN + DHAN_TOTP_SECRET are set
+        } catch (err: any) {
+          logger.warn('Dhan TOTP login failed, using static DHAN_ACCESS_TOKEN:', err.message);
+        }
         realInit();
         realMaster(); // Download and parse Scrip Master
         initDhanMarketFeed(io);
