@@ -246,7 +246,7 @@ export function PerformanceDashboard({ onBack, liveInstrument }: PerformanceDash
     };
 
     return (
-        <div className="h-full w-full bg-slate-50 flex flex-col overflow-hidden font-sans">
+        <div className="absolute inset-0 z-[110] bg-slate-50 flex flex-col overflow-hidden font-sans">
             {/* Header */}
             <div className="flex items-center justify-between px-6 py-4 bg-white border-b border-slate-200 shrink-0">
                 <div className="flex items-center gap-4">
