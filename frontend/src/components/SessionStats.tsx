@@ -6,8 +6,7 @@ import { OptionBacktestModal } from './OptionBacktestModal';
 export function SessionStats() {
   const trades = useSessionStore((s) => s.trades);
   const position = useSessionStore((s) => s.position);
-  const candles = useSessionStore((s) => s.candles);
-  const currentIndex = useSessionStore((s) => s.currentIndex);
+
   const getUnrealizedPnL = useSessionStore((s) => s.getUnrealizedPnL);
   const [isOptionModalOpen, setIsOptionModalOpen] = useState(false);
 

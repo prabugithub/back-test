@@ -26,7 +26,7 @@ function App() {
   const candles = useSessionStore((s: any) => s.candles);
   const [isTradeHistoryOpen, setIsTradeHistoryOpen] = useState(false);
   const [isPerformanceDashboardOpen, setIsPerformanceDashboardOpen] = useState(false);
-  const trades = useSessionStore((s: any) => s.trades);
+
   const instrument = useSessionStore((s: any) => s.instrument);
   const [isBackupHistoryOpen, setIsBackupHistoryOpen] = useState(false);
   const [isSnapshotPromptOpen, setIsSnapshotPromptOpen] = useState(false);
@@ -151,9 +151,7 @@ function App() {
               )}
               {isPerformanceDashboardOpen && (
                 <PerformanceDashboard
-                  isOpen={isPerformanceDashboardOpen}
-                  onClose={() => setIsPerformanceDashboardOpen(false)}
-                  liveTrades={trades}
+                  onBack={() => setIsPerformanceDashboardOpen(false)}
                   liveInstrument={instrument}
                 />
               )}

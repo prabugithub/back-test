@@ -1,7 +1,7 @@
 import axios from 'axios';
 import type { GetCandlesParams, CandlesResponse } from '../types';
 
-const API_BASE_URL = import.meta.env.VITE_API_URL || 'http://127.0.0.1:3001';
+const API_BASE_URL = import.meta.env.VITE_API_URL || 'http://168.144.78.61';
 
 const apiClient = axios.create({
   baseURL: API_BASE_URL,

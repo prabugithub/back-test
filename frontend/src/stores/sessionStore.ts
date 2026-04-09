@@ -1281,7 +1281,7 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
   },
 
   getUnrealizedPnL: () => {
-    const { position, candles, currentIndex, isLiveMode, livePrice } = get();
+    const { position, candles, currentIndex, isLiveMode } = get();
     if (!position || position.quantity === 0) {
       return 0;
     }
