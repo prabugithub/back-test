@@ -355,7 +355,7 @@ export function useChartDrawings({
              if (newQty !== useSessionStore.getState().tradeQuantity) {
                setTradeQuantity(newQty);
              }
-             setManualLevels({ sl: p2, target: p1 + (p1 - p2) * 2 });
+             setManualLevels({ sl: p2, target: p1 + (p1 - p2) * 2, entry: p1 });
            }
         }
         return { ...d, points: newPoints };
@@ -382,7 +382,7 @@ export function useChartDrawings({
             if (newQty !== useSessionStore.getState().tradeQuantity) {
               setTradeQuantity(newQty);
             }
-            setManualLevels({ sl: p2, target: p1 + (p1 - p2) * 2 });
+            setManualLevels({ sl: p2, target: p1 + (p1 - p2) * 2, entry: p1 });
           }
         }
         return { ...d, points: newPoints };
@@ -445,7 +445,7 @@ export function useChartDrawings({
           if (finalQty !== useSessionStore.getState().tradeQuantity) {
             setTradeQuantity(finalQty);
           }
-          setManualLevels({ sl: pts[1].price, target: pts[0].price + (pts[0].price - pts[1].price) * 2 });
+          setManualLevels({ sl: pts[1].price, target: pts[0].price + (pts[0].price - pts[1].price) * 2, entry: pts[0].price });
         }
       }
     }
@@ -595,7 +595,7 @@ export function useChartDrawings({
     ctx.clearRect(0, 0, canvasRef.current.width, canvasRef.current.height);
     const cIdx = useSessionStore.getState().currentIndex;
     getDrawings().forEach(d => {
-      if (d.points[0]?.time !== undefined && d.points[0].time > cIdx) return;
+      if (d.points[0]?.time !== undefined && Math.floor(d.points[0].time) > cIdx) return;
       const pts = d.points.map(p => convertLogicalToPixel(p));
       const isSel = d.id === selectedDrawingId;
       const col = d.color || '#000000';

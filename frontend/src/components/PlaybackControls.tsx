@@ -217,8 +217,20 @@ export function PlaybackControls({ onOpenHistory, onOpenDashboard }: { onOpenHis
       }
     }
 
+    // Live-mode guard: block if RR levels are anchored to a stale price
+    if (isLiveMode && manualLevels?.entry != null) {
+      const drift = Math.abs(currentCandle.close - manualLevels.entry) / manualLevels.entry;
+      if (drift > 0.003) {
+        useNotificationStore.getState().notify(
+          `RR levels anchored to ₹${manualLevels.entry.toFixed(0)} but market is at ₹${currentCandle.close.toFixed(0)}. Redraw the RR tool before trading.`,
+          'warning'
+        );
+        return;
+      }
+    }
+
     initiateTrade(type, tradeQuantity, sl, target);
-  }, [currentCandle, memoizedPivots, recentPivot, manualLevels, tradeQuantity, targetRR, initiateTrade]);
+  }, [currentCandle, memoizedPivots, recentPivot, manualLevels, tradeQuantity, targetRR, initiateTrade, isLiveMode]);
 
   const [customJump, setCustomJump] = useState('10');
   const [showSettings, setShowSettings] = useState(false);

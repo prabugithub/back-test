@@ -41,7 +41,7 @@ interface SessionStore {
   riskPerTrade: number;
   targetRR: number;
   autoExitTarget: boolean;
-  manualLevels: { sl: number, target: number } | null;
+  manualLevels: { sl: number, target: number, entry?: number } | null;
 
 
 
@@ -100,7 +100,7 @@ interface SessionStore {
   setRiskPerTrade: (risk: number) => void;
   setTargetRR: (rr: number) => void;
   setAutoExitTarget: (auto: boolean) => void;
-  setManualLevels: (levels: { sl: number, target: number } | null) => void;
+  setManualLevels: (levels: { sl: number, target: number, entry?: number } | null) => void;
   updatePositionTarget: (newTarget: number) => Promise<void>;
   checkTrendReversal: (index: number) => void;
   toggleAtrForSignals: () => void;
@@ -578,15 +578,15 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
   },
 
   executeTrade: async (type, quantity, stopLoss, target, priceOverride, exitReason = 'MANUAL', journal) => {
-    const { candles, currentIndex, trades, position, instrument, sessionConfig, isLiveMode } = get();
+    const { candles, currentIndex, trades, position, instrument, sessionConfig, isLiveMode, livePrice } = get();
     const currentCandle = candles[currentIndex];
-    
+
     if (!currentCandle) {
       console.error('No current candle available');
       return;
     }
 
-    const currentPrice = priceOverride || currentCandle.close;
+    const currentPrice = priceOverride || (isLiveMode && livePrice) || currentCandle.close;
     const timestamp = currentCandle.timestamp;
 
     const tradeSign = type === 'BUY' ? 1 : -1;
