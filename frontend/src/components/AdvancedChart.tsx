@@ -257,6 +257,8 @@ export function AdvancedChart({
     handleMouseMove,
     handleMouseUp,
     renderCanvas,
+    scheduleRender,
+    invalidateRectCache,
   } = useChartDrawings({
     canvasRef,
     activeTool,
@@ -439,12 +441,12 @@ export function AdvancedChart({
         const pos = state.crosshairPosition;
         // Only trigger redraw if position comes from a different chart
         if (pos.sourceChartId !== chartId) {
-          renderCanvas();
+          scheduleRender();
         }
       }
     });
     return unsubscribe;
-  }, [chartId, renderCanvas]);
+  }, [chartId, scheduleRender]);
 
   // Update candle data
   useEffect(() => {
@@ -953,14 +955,15 @@ export function AdvancedChart({
         if (ctx) {
           ctx.scale(dpr, dpr);
         }
-        // Force re-render after size change
-        renderCanvas();
+        // Invalidate rect cache (size changed) then schedule one redraw
+        invalidateRectCache();
+        scheduleRender();
       }
     });
 
     resizeCanvasObserver.observe(container);
     return () => resizeCanvasObserver.disconnect();
-  }, [renderCanvas]);
+  }, [scheduleRender, invalidateRectCache]);
 
   // Keyboard shortcuts — only registered by the active chart to avoid double-binding
   useEffect(() => {

@@ -72,6 +72,13 @@ export function useChartDrawings({
   const isResizingRef = useRef(isResizing);
   const resizeHandleIndexRef = useRef(resizeHandleIndex);
 
+  // Cached bounding rect — invalidated on resize, avoids forced reflow on every mousemove
+  const rectCacheRef = useRef<DOMRect | null>(null);
+  const invalidateRectCache = useCallback(() => { rectCacheRef.current = null; }, []);
+
+  // rAF scheduler — collapses all synchronous renderCanvas() calls within a frame into one
+  const rafIdRef = useRef<number>(0);
+
   // Keep refs in sync with state
   useEffect(() => { activeToolRef.current = activeTool; }, [activeTool]);
   useEffect(() => { isDrawingRef.current = isDrawing; }, [isDrawing]);
@@ -83,7 +90,7 @@ export function useChartDrawings({
   useEffect(() => { resizeHandleIndexRef.current = resizeHandleIndex; }, [resizeHandleIndex]);
 
   const getChartCoordinates = useCallback((event: MouseEvent, canvas: HTMLCanvasElement): Point => {
-    const rect = canvas.getBoundingClientRect();
+    const rect = rectCacheRef.current ?? (rectCacheRef.current = canvas.getBoundingClientRect());
     const x = event.clientX - rect.left;
     const y = event.clientY - rect.top;
     const point: Point = { x, y };
@@ -391,8 +398,12 @@ export function useChartDrawings({
     }
 
     if (!isDrawingRef.current || activeToolRef.current === 'none') {
-      const found = findDrawingAtPoint(point, getDrawings());
-      if (canvasRef.current) canvasRef.current.style.cursor = found ? (activeToolRef.current === 'select' ? 'pointer' : 'crosshair') : 'default';
+      if (activeToolRef.current === 'select' && canvasRef.current) {
+        const found = findDrawingAtPoint(point, getDrawings());
+        canvasRef.current.style.cursor = found ? 'pointer' : 'default';
+      } else if (canvasRef.current) {
+        canvasRef.current.style.cursor = 'crosshair';
+      }
       return;
     }
 
@@ -628,22 +639,27 @@ export function useChartDrawings({
     onCustomRender?.(ctx);
   }, [chartApi, seriesApi, currentDrawing, selectedDrawingId, activeTool, getDrawingColor, convertLogicalToPixel, canvasRef, onCustomRender]);
 
-  useEffect(() => { renderCanvas(); }, [renderCanvas]);
-
   const renderCanvasRef = useRef(renderCanvas);
   renderCanvasRef.current = renderCanvas;
 
+  // Collapses all renderCanvas() calls within a single animation frame into one paint
+  const scheduleRender = useCallback(() => {
+    if (rafIdRef.current) return;
+    rafIdRef.current = requestAnimationFrame(() => {
+      rafIdRef.current = 0;
+      renderCanvasRef.current?.();
+    });
+  }, []);
+
+  useEffect(() => { scheduleRender(); }, [renderCanvas, scheduleRender]);
+
   // Redraw when drawings change without recreating renderCanvas on every drag frame
-  useEffect(() => { renderCanvasRef.current?.(); }, [drawings]);
+  useEffect(() => { scheduleRender(); }, [drawings, scheduleRender]);
 
   useEffect(() => {
     if (!chartApi || !seriesApi) return;
-    
-    const sync = () => {
-      if (renderCanvasRef.current) {
-        renderCanvasRef.current();
-      }
-    };
+
+    const sync = () => { scheduleRender(); };
     
     const ts = chartApi.timeScale();
     ts.subscribeVisibleLogicalRangeChange(sync);
@@ -670,11 +686,11 @@ export function useChartDrawings({
         seriesApi.detachPrimitive(redrawPrimitive);
       } catch (e) {}
     };
-  }, [chartApi, seriesApi]);
+  }, [chartApi, seriesApi, scheduleRender]);
 
   return {
     drawings, clearDrawings: useCallback(() => { setDrawings([]); setCurrentDrawing([]); setSelectedDrawingId(null); }, []),
-    addTextDrawing, addCalloutDrawing, deleteSelectedDrawing, selectedDrawingId, isHoveringSelected, handleMouseDown, handleMouseMove, handleMouseUp, renderCanvas
+    addTextDrawing, addCalloutDrawing, deleteSelectedDrawing, selectedDrawingId, isHoveringSelected, handleMouseDown, handleMouseMove, handleMouseUp, renderCanvas, scheduleRender, invalidateRectCache
   };
 }
 
