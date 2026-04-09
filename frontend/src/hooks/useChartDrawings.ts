@@ -593,9 +593,9 @@ export function useChartDrawings({
     const ctx = canvasRef.current.getContext('2d');
     if (!ctx) return;
     ctx.clearRect(0, 0, canvasRef.current.width, canvasRef.current.height);
-    const cIdx = useSessionStore.getState().currentIndex;
+    const { currentIndex: cIdx, isLiveMode } = useSessionStore.getState();
     getDrawings().forEach(d => {
-      if (d.points[0]?.time !== undefined && Math.floor(d.points[0].time) > cIdx) return;
+      if (!isLiveMode && d.points[0]?.time !== undefined && Math.floor(d.points[0].time) > cIdx) return;
       const pts = d.points.map(p => convertLogicalToPixel(p));
       const isSel = d.id === selectedDrawingId;
       const col = d.color || '#000000';
