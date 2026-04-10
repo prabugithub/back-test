@@ -192,6 +192,26 @@ direction, slPrice, tpPrice) {
     const lastCandle = tradingCandles[tradingCandles.length - 1] ?? niftyCandles[niftyCandles.length - 1];
     return { exitTs: lastCandle?.timestamp ?? entryTs, exitReason: 'EOD' };
 }
+const sleep = (ms) => new Promise(resolve => setTimeout(resolve, ms));
+async function fetchRollingOptionWithRetry(params, retries = 2) {
+    for (let attempt = 0; attempt <= retries; attempt++) {
+        try {
+            return await (0, dhan_service_1.fetchRollingOptionData)(params);
+        }
+        catch (err) {
+            const isRateLimit = err?.message?.includes('DH-904') || err?.message?.includes('Rate_Limit');
+            if (isRateLimit && attempt < retries) {
+                const waitMs = 2000 * (attempt + 1); // 2s, then 4s
+                logger_1.default.warn(`Rate limit hit — waiting ${waitMs}ms before retry ${attempt + 1}/${retries}`);
+                await sleep(waitMs);
+            }
+            else {
+                throw err;
+            }
+        }
+    }
+    return [];
+}
 async function nakedBuyBacktest(params) {
     const { spotTrades, instrument, expiryFlag, strikeMode, exitMode, rrValues, riskPerTrade, niftyCandles } = params;
     // Get lot size from symbol master
@@ -239,15 +259,21 @@ async function nakedBuyBacktest(params) {
             const dhanOptionType = optionType === 'CALL' ? 'CALL' : 'PUT';
             const entryDate = new Date(trade.entryTime);
             const exitDate = new Date(trade.exitTime);
-            // Fetch a small window around the trade — add a few days buffer for data availability
+            // Wide window: from entry date to 10 days after exit to ensure the expiry week is covered
             const fromDateStr = (0, date_fns_1.format)(entryDate, 'yyyy-MM-dd');
-            const toDateStr = (0, date_fns_1.format)((0, date_fns_1.addDays)(exitDate, 3), 'yyyy-MM-dd');
+            const toDateStr = (0, date_fns_1.format)((0, date_fns_1.addDays)(exitDate, 10), 'yyyy-MM-dd');
             const dhanExpiry = expiryFlag === 'WEEK' ? 'WEEK' : 'MONTH';
-            const optionCandles = await (0, dhan_service_1.fetchRollingOptionData)({
+            // expiryCode: 1 = nearest expiry (weekly/monthly), higher = further out
+            const expiryCode = 1;
+            // Throttle: 700ms between each trade to stay under Dhan rate limits
+            if (results.length > 0)
+                await sleep(700);
+            const optionCandles = await fetchRollingOptionWithRetry({
                 securityId,
                 exchangeSegment: 'NSE_FNO',
                 instrument: 'OPTIDX',
                 expiryFlag: dhanExpiry,
+                expiryCode,
                 strike: strikeStr,
                 optionType: dhanOptionType,
                 fromDate: fromDateStr,
