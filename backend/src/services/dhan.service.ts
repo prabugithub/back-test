@@ -362,6 +362,11 @@ export async function placeOrder(params: {
         });
 
         logger.info('Dhan Order placement response:', response.data);
+        // Dhan sometimes returns HTTP 200 with status:"failure" — treat as an error
+        if (response.data?.status === 'failure' || response.data?.status === 'FAILURE') {
+            const remarks = response.data?.remarks || JSON.stringify(response.data);
+            throw new Error(remarks);
+        }
         return response.data;
     } catch (error: any) {
         if (error.response) {
@@ -439,6 +444,10 @@ export async function modifyOrder(orderId: string, params: {
         });
 
         logger.info(`Dhan Order Modify response for ${orderId}:`, response.data);
+        if (response.data?.status === 'failure' || response.data?.status === 'FAILURE') {
+            const remarks = response.data?.remarks || JSON.stringify(response.data);
+            throw new Error(remarks);
+        }
         return response.data;
     } catch (error: any) {
         if (error.response) {

@@ -1,4 +1,3 @@
-import { executeSmartExit } from './smartExit.service';
 import { placeOrder } from '../adapters/dhan.adapter';
 import { subscribeToInstrument } from '../adapters/dhanFeed.adapter';
 import { getDatabase } from '../config/database';
@@ -231,27 +230,18 @@ export async function onTick(token: string, price: number): Promise<void> {
  */
 async function triggerExit(pos: MonitoredPosition, reason: 'SL' | 'TP', triggerPrice: number): Promise<void> {
     try {
-        if (reason === 'SL') {
-            await executeSmartExit({
-                securityId: pos.optionSecurityId,
-                exchangeSegment: pos.optionExchangeSegment,
-                transactionType: 'SELL',
-                quantity: pos.quantity,
-                slPrice: triggerPrice,
-            });
-            logger.info(`[PositionMonitor] SL Smart Exit initiated for ${pos.id}`);
-        } else {
-            // Target hit — exit at market immediately
-            await placeOrder({
-                securityId: pos.optionSecurityId,
-                exchangeSegment: pos.optionExchangeSegment,
-                transactionType: 'SELL',
-                quantity: pos.quantity,
-                orderType: 'MARKET',
-                productType: 'INTRADAY',
-            });
-            logger.info(`[PositionMonitor] TP MARKET exit placed for ${pos.id}`);
-        }
+        // Both SL and TP exit at MARKET — the backend monitors spot price to trigger,
+        // but the exit is on the option. We don't have the live option premium here,
+        // so LIMIT pricing derived from spot is meaningless. MARKET guarantees a fill.
+        await placeOrder({
+            securityId: pos.optionSecurityId,
+            exchangeSegment: pos.optionExchangeSegment,
+            transactionType: 'SELL',
+            quantity: pos.quantity,
+            orderType: 'MARKET',
+            productType: 'INTRADAY',
+        });
+        logger.info(`[PositionMonitor] ${reason} MARKET exit placed for ${pos.id} | triggerPrice:${triggerPrice}`);
 
         // Clean up after successful exit (in-memory + DB)
         monitoredPositions.delete(pos.id);
