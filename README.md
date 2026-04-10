@@ -187,6 +187,22 @@ VITE_FIREBASE_APP_ID=
 
 ---
 
+## Deployment (VPS)
+
+### Backend
+
+```bash
+ssh root@168.144.78.61 "bash /var/www/html/deploy.sh"
+```
+
+Runs the deploy script on the VPS — pulls latest code, rebuilds, and restarts the backend process.
+
+### Frontend
+
+Build locally and upload the dist, or trigger a CI/CD pipeline if configured.
+
+---
+
 ## Documentation
 
 | Document | Purpose |
