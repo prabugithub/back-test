@@ -364,31 +364,44 @@ export async function nakedBuyBacktest(params: NakedBuyBacktestRequest): Promise
             const strikeStr = getStrikeString(strikeMode, optionType);
             const dhanOptionType = optionType === 'CALL' ? 'CALL' : 'PUT';
 
-            const entryDate = new Date(trade.entryTime);
-            const exitDate  = new Date(trade.exitTime);
-            // Wide window: from entry date to 10 days after exit to ensure the expiry week is covered
-            const fromDateStr = format(entryDate, 'yyyy-MM-dd');
-            const toDateStr   = format(addDays(exitDate, 10), 'yyyy-MM-dd');
+            // Dhan API uses IST dates; ensure fromDate/toDate are in IST regardless of server TZ
+            const IST_OFFSET_MS = 5.5 * 60 * 60 * 1000;
+            const entryDateIST = new Date(trade.entryTime + IST_OFFSET_MS);
+            const exitDateIST  = new Date(trade.exitTime  + IST_OFFSET_MS);
+            // Wide window: from entry date to 10 days after exit to ensure expiry week is covered
+            const fromDateStr = format(entryDateIST, 'yyyy-MM-dd');
+            const toDateStr   = format(addDays(exitDateIST, 10), 'yyyy-MM-dd');
 
-            const dhanExpiry = expiryFlag === 'WEEK' ? 'WEEK' : 'MONTH';
+            const dhanExpiry: 'WEEK' | 'MONTH' | 'ALL' = expiryFlag === 'WEEK' ? 'WEEK' : 'MONTH';
             // expiryCode: 1 = nearest expiry (weekly/monthly), higher = further out
             const expiryCode = 1;
 
             // Throttle: 400ms between each trade to stay under Dhan rate limits
             if (results.length > 0) await sleep(400);
 
-            const optionCandles = await fetchRollingOptionWithRetry({
+            const commonParams = {
                 securityId,
-                exchangeSegment: 'NSE_FNO',
-                instrument: 'OPTIDX',
+                exchangeSegment: 'NSE_FNO' as const,
+                instrument: 'OPTIDX' as const,
                 expiryFlag: dhanExpiry,
                 expiryCode,
                 strike: strikeStr,
-                optionType: dhanOptionType,
+                optionType: dhanOptionType as 'CALL' | 'PUT',
                 fromDate: fromDateStr,
                 toDate: toDateStr,
-                interval: '5'
-            });
+            };
+
+            // Try 5-min first; fall back to daily if API returns no intraday data
+            // (Dhan only keeps 5-min option data for ~60 days; older data needs daily)
+            let optionCandles = await fetchRollingOptionWithRetry({ ...commonParams, interval: '5' });
+            let usingDailyFallback = false;
+
+            if (optionCandles.length === 0) {
+                logger.info(`No 5-min option data for trade ${tradeId} (${fromDateStr}) — retrying with daily interval`);
+                await sleep(400);
+                optionCandles = await fetchRollingOptionWithRetry({ ...commonParams, interval: 'D' });
+                usingDailyFallback = true;
+            }
 
             if (optionCandles.length === 0) {
                 results.push({
@@ -397,12 +410,21 @@ export async function nakedBuyBacktest(params: NakedBuyBacktestRequest): Promise
                     avgExitPrice: trade.avgExitPrice, stopLoss: trade.stopLoss,
                     spotPnL: trade.realizedPnL ?? 0, spotExitReason: trade.exitReason,
                     optionType, strikeLabel: strikeStr, expiryFlag, entryOptionPrice: 0,
-                    lots: 0, actualQty: 0, error: 'No option data returned from Dhan API'
+                    lots: 0, actualQty: 0, error: 'No option data returned from Dhan API (tried 5-min and daily)'
                 });
                 continue;
             }
 
-            const entryTs = Math.floor(trade.entryTime / 1000);
+            if (usingDailyFallback) {
+                logger.info(`Using daily candles for trade ${tradeId} (${optionCandles.length} candles)`);
+            }
+
+            // Dhan returns timestamps as IST-stored-as-UTC (a known Dhan quirk).
+            // Trade entryTime is true UTC ms. Add IST offset before converting to seconds
+            // so both sides are on the same "IST-as-UTC" basis for closest-candle matching.
+            const entryTs = usingDailyFallback
+                ? Math.floor(entryDateIST.getTime() / 1000)  // date-level match for daily
+                : Math.floor((trade.entryTime + IST_OFFSET_MS) / 1000);
             const entryCandle = findClosestCandle(optionCandles, entryTs);
             if (!entryCandle) {
                 results.push({
@@ -436,7 +458,9 @@ export async function nakedBuyBacktest(params: NakedBuyBacktestRequest): Promise
             }
 
             if (exitMode === 'actual') {
-                const exitTs = Math.floor(trade.exitTime / 1000);
+                const exitTs = usingDailyFallback
+                    ? Math.floor(exitDateIST.getTime() / 1000)
+                    : Math.floor((trade.exitTime + IST_OFFSET_MS) / 1000);
                 const exitCandle = findClosestCandle(optionCandles, exitTs);
                 const exitOptionPrice = exitCandle?.close ?? entryOptionPrice;
                 const pnl = (exitOptionPrice - entryOptionPrice) * actualQty;
