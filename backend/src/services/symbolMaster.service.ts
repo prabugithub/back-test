@@ -237,6 +237,21 @@ function parseScripMaster(): Promise<void> {
 }
 
 /**
+ * Returns the lot size for a given instrument (NIFTY or BANKNIFTY)
+ * by reading the first matching contract from the cached scrip master.
+ */
+export function getLotSizeForInstrument(instrumentName: 'NIFTY' | 'BANKNIFTY'): number {
+    if (!isReady || optionCache.length === 0) {
+        throw new Error('Symbol Master is not ready yet');
+    }
+    const match = optionCache.find(o => o.instrument === instrumentName);
+    if (!match) {
+        throw new Error(`No options found for ${instrumentName} in symbol master`);
+    }
+    return match.lotSize;
+}
+
+/**
  * Gets the ATM option security ID for the given parameters.
  * Prefers weekly expiry (expiryFlag 'W'), falls back to nearest.
  */

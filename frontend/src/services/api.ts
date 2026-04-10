@@ -65,6 +65,31 @@ export async function backtestOptions(params: {
   return response.data;
 }
 /**
+ * Get lot size for an instrument from the Dhan scrip master on the server.
+ */
+export async function getOptionLotSize(instrument: 'NIFTY' | 'BANKNIFTY'): Promise<{ instrument: string; lotSize: number }> {
+  const response = await apiClient.get('/api/options/lot-size', { params: { instrument } });
+  return response.data;
+}
+
+/**
+ * Run naked buy options backtest against spot trades.
+ */
+export async function nakedBuyBacktest(params: {
+  spotTrades: any[];
+  instrument: 'NIFTY' | 'BANKNIFTY';
+  expiryFlag: 'WEEK' | 'MONTH';
+  strikeMode: 'ATM' | 'OTM1' | 'OTM2' | 'ITM1' | 'ITM2';
+  exitMode: 'actual' | 'rr';
+  rrValues?: number[];
+  riskPerTrade?: number;
+  niftyCandles?: any[];
+}): Promise<any> {
+  const response = await apiClient.post('/api/options/naked-backtest', params);
+  return response.data;
+}
+
+/**
  * Place a live market order on Dhan
  */
 export async function placeLiveOrder(params: {
