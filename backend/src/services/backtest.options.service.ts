@@ -374,8 +374,8 @@ export async function nakedBuyBacktest(params: NakedBuyBacktestRequest): Promise
             // expiryCode: 1 = nearest expiry (weekly/monthly), higher = further out
             const expiryCode = 1;
 
-            // Throttle: 700ms between each trade to stay under Dhan rate limits
-            if (results.length > 0) await sleep(700);
+            // Throttle: 400ms between each trade to stay under Dhan rate limits
+            if (results.length > 0) await sleep(400);
 
             const optionCandles = await fetchRollingOptionWithRetry({
                 securityId,
