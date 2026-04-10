@@ -27,7 +27,7 @@ interface LiveState {
     unsubscribe: (token: string) => void;
 }
 
-const SOCKET_URL = 'http://127.0.0.1:3001';
+const SOCKET_URL = 'http://168.144.78.61';
 
 export const useLiveStore = create<LiveState>((set, get) => ({
     socket: null,

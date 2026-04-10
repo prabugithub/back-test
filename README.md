@@ -174,7 +174,7 @@ GOOGLE_DRIVE_FOLDER_ID=
 ### `frontend/.env`
 
 ```env
-VITE_API_URL=http://127.0.0.1:3001
+VITE_API_URL=http://168.144.78.61
 
 # Firebase (required for session persistence)
 VITE_FIREBASE_API_KEY=
