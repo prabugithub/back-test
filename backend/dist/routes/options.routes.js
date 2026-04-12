@@ -5,6 +5,7 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
 Object.defineProperty(exports, "__esModule", { value: true });
 const express_1 = require("express");
 const backtest_options_service_1 = require("../services/backtest.options.service");
+const dhan_service_1 = require("../services/dhan.service");
 const symbolMaster_service_1 = require("../services/symbolMaster.service");
 const logger_1 = __importDefault(require("../utils/logger"));
 const router = (0, express_1.Router)();
@@ -82,6 +83,32 @@ router.post('/naked-backtest', async (req, res) => {
     catch (error) {
         logger_1.default.error('Naked buy backtest failed:', error);
         res.status(500).json({ error: 'Failed to run naked buy backtest', message: error.message });
+    }
+});
+// POST /api/options/fetch-single
+// Debug endpoint: fetch raw rolling option candles for manually specified params
+router.post('/fetch-single', async (req, res) => {
+    try {
+        const { instrument, optionType, strike, expiryFlag, expiryCode, fromDate, toDate, interval } = req.body;
+        const SECURITY_IDS = { NIFTY: '13', BANKNIFTY: '25' };
+        const securityId = SECURITY_IDS[instrument?.toUpperCase()] ?? '13';
+        const candles = await (0, dhan_service_1.fetchRollingOptionData)({
+            securityId,
+            exchangeSegment: 'NSE_FNO',
+            instrument: 'OPTIDX',
+            expiryFlag: expiryFlag ?? 'WEEK',
+            expiryCode: expiryCode ?? 1,
+            strike: strike ?? 'ATM',
+            optionType: optionType ?? 'CALL',
+            fromDate,
+            toDate,
+            interval: interval ?? '5',
+        });
+        res.json({ candles, count: candles.length });
+    }
+    catch (error) {
+        logger_1.default.error('fetch-single option failed:', error);
+        res.status(500).json({ error: error.message });
     }
 });
 exports.default = router;

@@ -1,5 +1,6 @@
 import { Router, Request, Response } from 'express';
 import { backtestOptions, nakedBuyBacktest } from '../services/backtest.options.service';
+import { fetchRollingOptionData } from '../services/dhan.service';
 import { getLotSizeForInstrument } from '../services/symbolMaster.service';
 import logger from '../utils/logger';
 
@@ -87,6 +88,35 @@ router.post('/naked-backtest', async (req: Request, res: Response) => {
     } catch (error: any) {
         logger.error('Naked buy backtest failed:', error);
         res.status(500).json({ error: 'Failed to run naked buy backtest', message: error.message });
+    }
+});
+
+// POST /api/options/fetch-single
+// Debug endpoint: fetch raw rolling option candles for manually specified params
+router.post('/fetch-single', async (req: Request, res: Response) => {
+    try {
+        const { instrument, optionType, strike, expiryFlag, expiryCode, fromDate, toDate, interval } = req.body;
+
+        const SECURITY_IDS: Record<string, string> = { NIFTY: '13', BANKNIFTY: '25' };
+        const securityId = SECURITY_IDS[instrument?.toUpperCase()] ?? '13';
+
+        const candles = await fetchRollingOptionData({
+            securityId,
+            exchangeSegment: 'NSE_FNO',
+            instrument: 'OPTIDX',
+            expiryFlag: expiryFlag ?? 'WEEK',
+            expiryCode: expiryCode ?? 1,
+            strike: strike ?? 'ATM',
+            optionType: optionType ?? 'CALL',
+            fromDate,
+            toDate,
+            interval: interval ?? '5',
+        });
+
+        res.json({ candles, count: candles.length });
+    } catch (error: any) {
+        logger.error('fetch-single option failed:', error);
+        res.status(500).json({ error: error.message });
     }
 });
 

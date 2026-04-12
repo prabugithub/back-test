@@ -79,7 +79,7 @@ export function OptionBacktestModal({
   const notify = useNotificationStore((s) => s.notify);
 
   // ── Tab ──────────────────────────────────────────────────────────────────────
-  const [activeTab, setActiveTab] = useState<'spread' | 'naked'>('naked');
+  const [activeTab, setActiveTab] = useState<'spread' | 'naked' | 'debug'>('naked');
 
   // ── Spread config ─────────────────────────────────────────────────────────────
   const [offsetSell, setOffsetSell] = useState(2);
@@ -99,6 +99,53 @@ export function OptionBacktestModal({
 
   const [isLoading, setIsLoading] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
+
+  // ── Debug fetch state ─────────────────────────────────────────────────────────
+  const [debugParams, setDebugParams] = useState({
+    instrument: 'NIFTY',
+    optionType: 'CALL' as 'CALL' | 'PUT',
+    strike: 'ATM',
+    expiryFlag: 'WEEK' as 'WEEK' | 'MONTH',
+    expiryCode: 1,
+    fromDate: '',
+    toDate: '',
+    interval: '5',
+    filterTime: '',   // e.g. "10:30" to filter candles by IST time
+  });
+  const [debugCandles, setDebugCandles] = useState<any[]>([]);
+  const [debugLoading, setDebugLoading] = useState(false);
+  const [debugError, setDebugError] = useState('');
+
+  const handleDebugFetch = async () => {
+    setDebugLoading(true);
+    setDebugError('');
+    setDebugCandles([]);
+    try {
+      const res = await fetch('/api/options/fetch-single', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(debugParams),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'Request failed');
+      setDebugCandles(data.candles ?? []);
+    } catch (e: any) {
+      setDebugError(e.message);
+    } finally {
+      setDebugLoading(false);
+    }
+  };
+
+  // Filter candles by IST time string (e.g. "10:30")
+  const filteredDebugCandles = debugParams.filterTime
+    ? debugCandles.filter(c => {
+        // Dhan candles are true UTC; convert to IST for display
+        const d = new Date((c.timestamp + 19800) * 1000);
+        const hh = String(d.getUTCHours()).padStart(2, '0');
+        const mm = String(d.getUTCMinutes()).padStart(2, '0');
+        return `${hh}:${mm}` === debugParams.filterTime;
+      })
+    : debugCandles;
 
   const finalInstrument = customInstrument || sessionInstrument;
   const detectedInstrument: 'NIFTY' | 'BANKNIFTY' =
@@ -198,7 +245,7 @@ export function OptionBacktestModal({
 
         {/* Tabs */}
         <div className="flex border-b bg-gray-50">
-          {(['naked', 'spread'] as const).map(tab => (
+          {(['naked', 'spread', 'debug'] as const).map(tab => (
             <button
               key={tab}
               onClick={() => setActiveTab(tab)}
@@ -208,7 +255,7 @@ export function OptionBacktestModal({
                   : 'border-transparent text-gray-500 hover:text-gray-700'
               }`}
             >
-              {tab === 'naked' ? 'Naked Buy' : 'Credit Spread'}
+              {tab === 'naked' ? 'Naked Buy' : tab === 'spread' ? 'Credit Spread' : '🔍 Debug Fetch'}
             </button>
           ))}
         </div>
@@ -677,6 +724,135 @@ export function OptionBacktestModal({
             </>
           )}
         </div>
+
+          {/* ─── DEBUG FETCH TAB ────────────────────────────────────────────────── */}
+          {activeTab === 'debug' && (
+            <div className="space-y-5">
+              <p className="text-sm text-gray-500">Fetch a single option candle series from Dhan API with custom params to verify premium values.</p>
+
+              {/* Params grid */}
+              <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+                {/* Instrument */}
+                <div>
+                  <label className="block text-xs font-medium text-gray-600 mb-1">Instrument</label>
+                  <select value={debugParams.instrument} onChange={e => setDebugParams(p => ({ ...p, instrument: e.target.value }))}
+                    className="w-full border border-gray-300 rounded-lg px-2 py-1.5 text-sm">
+                    <option>NIFTY</option><option>BANKNIFTY</option>
+                  </select>
+                </div>
+                {/* Option type */}
+                <div>
+                  <label className="block text-xs font-medium text-gray-600 mb-1">Option Type</label>
+                  <select value={debugParams.optionType} onChange={e => setDebugParams(p => ({ ...p, optionType: e.target.value as 'CALL' | 'PUT' }))}
+                    className="w-full border border-gray-300 rounded-lg px-2 py-1.5 text-sm">
+                    <option>CALL</option><option>PUT</option>
+                  </select>
+                </div>
+                {/* Strike */}
+                <div>
+                  <label className="block text-xs font-medium text-gray-600 mb-1">Strike</label>
+                  <input value={debugParams.strike} onChange={e => setDebugParams(p => ({ ...p, strike: e.target.value }))}
+                    placeholder="ATM / ATM+1 / ATM-2"
+                    className="w-full border border-gray-300 rounded-lg px-2 py-1.5 text-sm" />
+                </div>
+                {/* Expiry flag */}
+                <div>
+                  <label className="block text-xs font-medium text-gray-600 mb-1">Expiry Flag</label>
+                  <select value={debugParams.expiryFlag} onChange={e => setDebugParams(p => ({ ...p, expiryFlag: e.target.value as 'WEEK' | 'MONTH' }))}
+                    className="w-full border border-gray-300 rounded-lg px-2 py-1.5 text-sm">
+                    <option>WEEK</option><option>MONTH</option>
+                  </select>
+                </div>
+                {/* Expiry code */}
+                <div>
+                  <label className="block text-xs font-medium text-gray-600 mb-1">Expiry Code</label>
+                  <input type="number" min={1} value={debugParams.expiryCode}
+                    onChange={e => setDebugParams(p => ({ ...p, expiryCode: Number(e.target.value) }))}
+                    className="w-full border border-gray-300 rounded-lg px-2 py-1.5 text-sm" />
+                </div>
+                {/* From date */}
+                <div>
+                  <label className="block text-xs font-medium text-gray-600 mb-1">From Date</label>
+                  <input type="date" value={debugParams.fromDate} onChange={e => setDebugParams(p => ({ ...p, fromDate: e.target.value }))}
+                    className="w-full border border-gray-300 rounded-lg px-2 py-1.5 text-sm" />
+                </div>
+                {/* To date */}
+                <div>
+                  <label className="block text-xs font-medium text-gray-600 mb-1">To Date</label>
+                  <input type="date" value={debugParams.toDate} onChange={e => setDebugParams(p => ({ ...p, toDate: e.target.value }))}
+                    className="w-full border border-gray-300 rounded-lg px-2 py-1.5 text-sm" />
+                </div>
+                {/* Interval */}
+                <div>
+                  <label className="block text-xs font-medium text-gray-600 mb-1">Interval (min)</label>
+                  <select value={debugParams.interval} onChange={e => setDebugParams(p => ({ ...p, interval: e.target.value }))}
+                    className="w-full border border-gray-300 rounded-lg px-2 py-1.5 text-sm">
+                    <option value="1">1</option><option value="5">5</option>
+                    <option value="15">15</option><option value="25">25</option><option value="60">60</option>
+                  </select>
+                </div>
+              </div>
+
+              {/* Filter + fetch row */}
+              <div className="flex items-end gap-3">
+                <div>
+                  <label className="block text-xs font-medium text-gray-600 mb-1">Filter by IST Time (HH:MM)</label>
+                  <input value={debugParams.filterTime} onChange={e => setDebugParams(p => ({ ...p, filterTime: e.target.value }))}
+                    placeholder="e.g. 10:30"
+                    className="border border-gray-300 rounded-lg px-2 py-1.5 text-sm w-32" />
+                </div>
+                <button onClick={handleDebugFetch} disabled={debugLoading || !debugParams.fromDate || !debugParams.toDate}
+                  className="px-5 py-2 bg-indigo-600 text-white rounded-lg text-sm font-semibold hover:bg-indigo-700 disabled:opacity-50 transition-colors">
+                  {debugLoading ? 'Fetching…' : 'Fetch from Dhan'}
+                </button>
+                {debugCandles.length > 0 && (
+                  <span className="text-xs text-gray-500">{debugCandles.length} candles returned{debugParams.filterTime ? `, ${filteredDebugCandles.length} matching ${debugParams.filterTime} IST` : ''}</span>
+                )}
+              </div>
+
+              {debugError && <p className="text-sm text-red-600 bg-red-50 border border-red-200 rounded-lg px-3 py-2">{debugError}</p>}
+
+              {/* Results table */}
+              {filteredDebugCandles.length > 0 && (
+                <div className="overflow-x-auto rounded-xl border border-gray-200">
+                  <table className="w-full text-sm">
+                    <thead className="bg-gray-50 text-xs text-gray-500 uppercase">
+                      <tr>
+                        <th className="px-3 py-2 text-left">Time (IST)</th>
+                        <th className="px-3 py-2 text-right">Open</th>
+                        <th className="px-3 py-2 text-right">High</th>
+                        <th className="px-3 py-2 text-right">Low</th>
+                        <th className="px-3 py-2 text-right font-bold">Close</th>
+                        <th className="px-3 py-2 text-right">Volume</th>
+                        <th className="px-3 py-2 text-right">IV</th>
+                        <th className="px-3 py-2 text-right">OI</th>
+                        <th className="px-3 py-2 text-right">Spot</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-gray-100">
+                      {filteredDebugCandles.map((c, i) => {
+                        const istDate = new Date((c.timestamp + 19800) * 1000);
+                        const timeStr = istDate.toUTCString().replace(/ GMT$/, '');
+                        return (
+                          <tr key={i} className="hover:bg-gray-50">
+                            <td className="px-3 py-2 font-mono text-xs text-gray-600 whitespace-nowrap">{timeStr}</td>
+                            <td className="px-3 py-2 text-right">{c.open?.toFixed(2) ?? '—'}</td>
+                            <td className="px-3 py-2 text-right">{c.high?.toFixed(2) ?? '—'}</td>
+                            <td className="px-3 py-2 text-right">{c.low?.toFixed(2) ?? '—'}</td>
+                            <td className="px-3 py-2 text-right font-bold text-indigo-700">{c.close?.toFixed(2) ?? '—'}</td>
+                            <td className="px-3 py-2 text-right text-gray-500">{c.volume ?? '—'}</td>
+                            <td className="px-3 py-2 text-right text-gray-500">{c.iv?.toFixed(2) ?? '—'}</td>
+                            <td className="px-3 py-2 text-right text-gray-500">{c.oi ?? '—'}</td>
+                            <td className="px-3 py-2 text-right text-gray-500">{c.spot?.toFixed(2) ?? '—'}</td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+            </div>
+          )}
 
         {/* Footer */}
         <div className="p-4 border-t bg-gray-50 flex justify-end rounded-b-xl">

@@ -256,7 +256,6 @@ export function AdvancedChart({
     handleMouseDown,
     handleMouseMove,
     handleMouseUp,
-    renderCanvas,
     scheduleRender,
     invalidateRectCache,
   } = useChartDrawings({
