@@ -275,13 +275,12 @@ async function nakedBuyBacktest(params) {
             const optionType = trade.direction === 'LONG' ? 'CALL' : 'PUT';
             const strikeStr = getStrikeString(strikeMode, optionType);
             const dhanOptionType = optionType === 'CALL' ? 'CALL' : 'PUT';
-            // Dhan API uses IST dates; ensure fromDate/toDate are in IST regardless of server TZ
-            const IST_OFFSET_MS = 5.5 * 60 * 60 * 1000;
-            const entryDateIST = new Date(trade.entryTime + IST_OFFSET_MS);
-            const exitDateIST = new Date(trade.exitTime + IST_OFFSET_MS);
-            // Wide window: from entry date to 10 days after exit to ensure expiry week is covered
-            const fromDateStr = (0, date_fns_1.format)(entryDateIST, 'yyyy-MM-dd');
-            const toDateStr = (0, date_fns_1.format)((0, date_fns_1.addDays)(exitDateIST, 10), 'yyyy-MM-dd');
+            // Trade timestamps are IST-as-UTC: the frontend stores IST clock time as ms
+            // (e.g. 13:20 IST is stored as 1735737600000, which reads as 13:20 UTC).
+            // Dhan candle timestamps use the same IST-as-UTC convention.
+            // Do NOT add IST offset — both sides are already on the same basis.
+            const fromDateStr = (0, date_fns_1.format)(new Date(trade.entryTime), 'yyyy-MM-dd');
+            const toDateStr = (0, date_fns_1.format)((0, date_fns_1.addDays)(new Date(trade.exitTime), 10), 'yyyy-MM-dd');
             const dhanExpiry = expiryFlag === 'WEEK' ? 'WEEK' : 'MONTH';
             // expiryCode: 1 = nearest expiry (weekly/monthly), higher = further out
             const expiryCode = 1;
@@ -312,10 +311,9 @@ async function nakedBuyBacktest(params) {
                 });
                 continue;
             }
-            // Dhan returns timestamps as IST-stored-as-UTC (a known Dhan quirk).
-            // Trade entryTime is true UTC ms. Add IST offset before converting to seconds
-            // so both sides are on the same "IST-as-UTC" basis for closest-candle matching.
-            const entryTs = Math.floor((trade.entryTime + IST_OFFSET_MS) / 1000);
+            // Both trade timestamps and Dhan candle timestamps are IST-as-UTC.
+            // Convert ms → seconds directly, no offset needed.
+            const entryTs = Math.floor(trade.entryTime / 1000);
             const entryCandle = findClosestCandle(optionCandles, entryTs);
             if (!entryCandle) {
                 results.push({
@@ -345,7 +343,7 @@ async function nakedBuyBacktest(params) {
                 continue;
             }
             if (exitMode === 'actual') {
-                const exitTs = Math.floor((trade.exitTime + IST_OFFSET_MS) / 1000);
+                const exitTs = Math.floor(trade.exitTime / 1000);
                 const exitCandle = findClosestCandle(optionCandles, exitTs);
                 const exitOptionPrice = exitCandle?.close ?? entryOptionPrice;
                 const pnl = (exitOptionPrice - entryOptionPrice) * actualQty;
