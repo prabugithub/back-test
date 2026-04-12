@@ -241,10 +241,18 @@ async function fetchRollingOptionData(params) {
             },
             timeout: 10000,
         });
-        // Dhan response: { data: { ce: { open, high, low, close, volume, iv, oi, spot, timestamp }, pe: ... } }
-        // For CALL requests, data lives under .ce; for PUT requests, under .pe
+        // Log raw response keys to diagnose actual structure from Dhan
+        logger_1.default.info('Dhan rollingoption raw response keys:', {
+            topLevelKeys: Object.keys(response.data ?? {}),
+            hasDataNested: !!response.data?.data,
+            nestedKeys: response.data?.data ? Object.keys(response.data.data) : [],
+            hasCeDirect: !!response.data?.ce,
+            hasPeDirect: !!response.data?.pe,
+        });
+        // Dhan response may be { data: { ce: {...} } } or { ce: {...} } depending on SDK version
+        // Try nested first, fall back to direct
         const optionKey = params.optionType === 'CALL' ? 'ce' : 'pe';
-        const optionData = response.data?.data?.[optionKey];
+        const optionData = response.data?.data?.[optionKey] ?? response.data?.[optionKey];
         if (optionData && Array.isArray(optionData.timestamp) && optionData.timestamp.length > 0) {
             const candles = [];
             for (let i = 0; i < optionData.timestamp.length; i++) {
