@@ -194,19 +194,37 @@ direction, slPrice, tpPrice) {
 }
 const sleep = (ms) => new Promise(resolve => setTimeout(resolve, ms));
 async function fetchRollingOptionWithRetry(params, retries = 2) {
-    for (let attempt = 0; attempt <= retries; attempt++) {
-        try {
-            return await (0, dhan_service_1.fetchRollingOptionData)(params);
-        }
-        catch (err) {
-            const isRateLimit = err?.message?.includes('DH-904') || err?.message?.includes('Rate_Limit');
-            if (isRateLimit && attempt < retries) {
-                const waitMs = 2000 * (attempt + 1); // 2s, then 4s
-                logger_1.default.warn(`Rate limit hit — waiting ${waitMs}ms before retry ${attempt + 1}/${retries}`);
-                await sleep(waitMs);
+    // If WEEK is requested, also try MONTH as fallback — Dhan may reject WEEK
+    // for older historical data (DH-905 bad parameter) or return empty
+    const expiryFlagsToTry = params.expiryFlag === 'WEEK' ? ['WEEK', 'MONTH'] : [params.expiryFlag];
+    for (const expiry of expiryFlagsToTry) {
+        const p = { ...params, expiryFlag: expiry };
+        for (let attempt = 0; attempt <= retries; attempt++) {
+            try {
+                const result = await (0, dhan_service_1.fetchRollingOptionData)(p);
+                if (result.length > 0 || expiry === expiryFlagsToTry[expiryFlagsToTry.length - 1]) {
+                    return result;
+                }
+                // Empty result — try next expiry flag
+                logger_1.default.info(`Empty result for expiryFlag=${expiry}, trying next`);
+                break;
             }
-            else {
-                throw err;
+            catch (err) {
+                const isRateLimit = err?.message?.includes('DH-904') || err?.message?.includes('Rate_Limit');
+                const isBadParam = err?.message?.includes('DH-905') || err?.message?.includes('Input_Exception');
+                if (isRateLimit && attempt < retries) {
+                    const waitMs = 2000 * (attempt + 1);
+                    logger_1.default.warn(`Rate limit hit — waiting ${waitMs}ms before retry ${attempt + 1}/${retries}`);
+                    await sleep(waitMs);
+                }
+                else if (isBadParam) {
+                    // Bad param for this expiryFlag — try the next one
+                    logger_1.default.warn(`DH-905 for expiryFlag=${expiry} — trying next expiry flag`);
+                    break;
+                }
+                else {
+                    throw err;
+                }
             }
         }
     }
