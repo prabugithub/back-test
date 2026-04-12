@@ -240,7 +240,7 @@ export async function fetchRollingOptionData(params: {
     securityId: string;
     exchangeSegment: string;
     instrument: string;
-    expiryFlag: 'MONTH' | 'WEEK' | 'ALL';
+    expiryFlag: 'MONTH' | 'WEEK';
     expiryCode?: number;
     strike: 'ATM' | string; // e.g. ATM, ATM+1, ATM-1
     optionType: 'CALL' | 'PUT';
@@ -260,13 +260,13 @@ export async function fetchRollingOptionData(params: {
         const response = await axios.post('https://api.dhan.co/v2/charts/rollingoption', {
             exchangeSegment: params.exchangeSegment,
             interval: params.interval,
-            securityId: params.securityId,
+            securityId: Number(params.securityId),   // Dhan expects integer, not string
             instrument: params.instrument,
             expiryFlag: params.expiryFlag,
             expiryCode: params.expiryCode || 1,
             strike: params.strike,
             drvOptionType: params.optionType,
-            requiredData: ['open', 'high', 'low', 'close', 'volume'],
+            requiredData: ['open', 'high', 'low', 'close', 'iv', 'volume', 'oi', 'spot'],
             fromDate: params.fromDate,
             toDate: params.toDate
         }, {
@@ -278,18 +278,24 @@ export async function fetchRollingOptionData(params: {
             timeout: 10000,
         });
 
-        const timeArray = response.data.start_time || response.data.start_Time || response.data.timestamp;
-        
-        if (response.data && timeArray) {
+        // Dhan response: { data: { ce: { open, high, low, close, volume, iv, oi, spot, timestamp }, pe: ... } }
+        // For CALL requests, data lives under .ce; for PUT requests, under .pe
+        const optionKey = params.optionType === 'CALL' ? 'ce' : 'pe';
+        const optionData = response.data?.data?.[optionKey];
+
+        if (optionData && Array.isArray(optionData.timestamp) && optionData.timestamp.length > 0) {
             const candles = [];
-            for (let i = 0; i < timeArray.length; i++) {
+            for (let i = 0; i < optionData.timestamp.length; i++) {
                 candles.push({
-                    timestamp: timeArray[i],
-                    open: response.data.open[i],
-                    high: response.data.high[i],
-                    low: response.data.low[i],
-                    close: response.data.close[i],
-                    volume: response.data.volume[i],
+                    timestamp: optionData.timestamp[i],
+                    open:   optionData.open?.[i]   ?? 0,
+                    high:   optionData.high?.[i]   ?? 0,
+                    low:    optionData.low?.[i]    ?? 0,
+                    close:  optionData.close?.[i]  ?? 0,
+                    volume: optionData.volume?.[i] ?? 0,
+                    iv:     optionData.iv?.[i]     ?? null,
+                    oi:     optionData.oi?.[i]     ?? null,
+                    spot:   optionData.spot?.[i]   ?? null,
                 });
             }
             return candles;
