@@ -311,21 +311,11 @@ async function nakedBuyBacktest(params) {
                 });
                 continue;
             }
-            // Both trade timestamps and Dhan candle timestamps are IST-as-UTC.
-            // Convert ms → seconds directly, no offset needed.
-            const entryTs = Math.floor(trade.entryTime / 1000);
-            const exitTsDebug = Math.floor(trade.exitTime / 1000);
-            logger_1.default.info(`Trade ${tradeId} candle stats:`, {
-                totalCandles: optionCandles.length,
-                firstCandleTs: optionCandles[0]?.timestamp,
-                lastCandleTs: optionCandles[optionCandles.length - 1]?.timestamp,
-                firstCandleDate: optionCandles[0] ? new Date(optionCandles[0].timestamp * 1000).toISOString() : null,
-                lastCandleDate: optionCandles[optionCandles.length - 1] ? new Date(optionCandles[optionCandles.length - 1].timestamp * 1000).toISOString() : null,
-                entryTs,
-                exitTs: exitTsDebug,
-                entryDate: new Date(entryTs * 1000).toISOString(),
-                exitDate: new Date(exitTsDebug * 1000).toISOString(),
-            });
+            // Trade timestamps are IST-as-UTC (frontend stores IST clock time as UTC epoch).
+            // Dhan candle timestamps are true UTC (09:15 IST = 03:45 UTC epoch).
+            // Subtract IST offset to convert trade timestamps to true UTC for candle matching.
+            const IST_OFFSET_S = 5.5 * 3600; // 19800 seconds
+            const entryTs = Math.floor(trade.entryTime / 1000) - IST_OFFSET_S;
             const entryCandle = findClosestCandle(optionCandles, entryTs);
             if (!entryCandle) {
                 results.push({
@@ -355,7 +345,7 @@ async function nakedBuyBacktest(params) {
                 continue;
             }
             if (exitMode === 'actual') {
-                const exitTs = Math.floor(trade.exitTime / 1000);
+                const exitTs = Math.floor(trade.exitTime / 1000) - IST_OFFSET_S;
                 const exitCandle = findClosestCandle(optionCandles, exitTs);
                 const exitOptionPrice = exitCandle?.close ?? entryOptionPrice;
                 const pnl = (exitOptionPrice - entryOptionPrice) * actualQty;
