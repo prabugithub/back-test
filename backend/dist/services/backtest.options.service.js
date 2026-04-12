@@ -314,6 +314,18 @@ async function nakedBuyBacktest(params) {
             // Both trade timestamps and Dhan candle timestamps are IST-as-UTC.
             // Convert ms → seconds directly, no offset needed.
             const entryTs = Math.floor(trade.entryTime / 1000);
+            const exitTsDebug = Math.floor(trade.exitTime / 1000);
+            logger_1.default.info(`Trade ${tradeId} candle stats:`, {
+                totalCandles: optionCandles.length,
+                firstCandleTs: optionCandles[0]?.timestamp,
+                lastCandleTs: optionCandles[optionCandles.length - 1]?.timestamp,
+                firstCandleDate: optionCandles[0] ? new Date(optionCandles[0].timestamp * 1000).toISOString() : null,
+                lastCandleDate: optionCandles[optionCandles.length - 1] ? new Date(optionCandles[optionCandles.length - 1].timestamp * 1000).toISOString() : null,
+                entryTs,
+                exitTs: exitTsDebug,
+                entryDate: new Date(entryTs * 1000).toISOString(),
+                exitDate: new Date(exitTsDebug * 1000).toISOString(),
+            });
             const entryCandle = findClosestCandle(optionCandles, entryTs);
             if (!entryCandle) {
                 results.push({
