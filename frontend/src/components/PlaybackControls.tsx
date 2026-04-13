@@ -235,7 +235,9 @@ export function PlaybackControls({ onOpenHistory, onOpenDashboard }: { onOpenHis
   const [customJump, setCustomJump] = useState('10');
   const [showSettings, setShowSettings] = useState(false);
   const [showTradeSettings, setShowTradeSettings] = useState(false);
-  const rrDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const [draftRR, setDraftRR] = useState<string>(String(targetRR));
+  // Keep draft in sync when targetRR changes externally (e.g. session restore)
+  useEffect(() => { setDraftRR(String(targetRR)); }, [targetRR]);
   const [showDatePicker, setShowDatePicker] = useState(false);
   const [jumpToDate, setJumpToDate] = useState('2021-02-01');
 
@@ -843,18 +845,34 @@ export function PlaybackControls({ onOpenHistory, onOpenDashboard }: { onOpenHis
               <label className="block text-xs font-medium text-gray-700 mb-2">Risk</label>
               <div className="flex items-center justify-between mb-2">
                 <span className="text-xs text-gray-600">Target RR Ratio (1:X)</span>
-                <input
-                  type="number"
-                  min="1"
-                  step="0.5"
-                  value={targetRR}
-                  onChange={(e) => {
-                    const val = Number(e.target.value);
-                    if (rrDebounceRef.current) clearTimeout(rrDebounceRef.current);
-                    rrDebounceRef.current = setTimeout(() => setTargetRR(val), 400);
-                  }}
-                  className="w-16 px-2 py-1 text-sm border border-gray-300 rounded focus:outline-none focus:ring-1 focus:ring-blue-500"
-                />
+                <div className="flex items-center gap-1">
+                  <input
+                    type="number"
+                    min="1"
+                    step="0.5"
+                    value={draftRR}
+                    onChange={(e) => setDraftRR(e.target.value)}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter') {
+                        const val = Number(draftRR);
+                        if (!isNaN(val) && val > 0) setTargetRR(val);
+                      }
+                    }}
+                    className={`w-16 px-2 py-1 text-sm border rounded focus:outline-none focus:ring-1 focus:ring-blue-500 ${Number(draftRR) !== targetRR ? 'border-orange-400 bg-orange-50' : 'border-gray-300'}`}
+                  />
+                  {Number(draftRR) !== targetRR && (
+                    <button
+                      onClick={() => {
+                        const val = Number(draftRR);
+                        if (!isNaN(val) && val > 0) setTargetRR(val);
+                      }}
+                      title="Confirm RR"
+                      className="flex items-center justify-center w-6 h-6 rounded bg-green-500 hover:bg-green-600 text-white text-xs font-bold"
+                    >
+                      ✓
+                    </button>
+                  )}
+                </div>
               </div>
               <label className="flex items-center gap-2 cursor-pointer group">
                 <input
