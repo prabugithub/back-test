@@ -121,13 +121,18 @@ export function OptionBacktestModal({
     setDebugError('');
     setDebugCandles([]);
     try {
+      // Strip filterTime — it's frontend-only, not a Dhan param
+      const { filterTime, ...apiParams } = debugParams;
       const res = await fetch('/api/options/fetch-single', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(debugParams),
+        body: JSON.stringify(apiParams),
       });
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.error || 'Request failed');
+      const text = await res.text();
+      let data: any;
+      try { data = JSON.parse(text); }
+      catch { throw new Error(`Server error (${res.status}): ${text.slice(0, 300)}`); }
+      if (!res.ok) throw new Error(data.error || `HTTP ${res.status}`);
       setDebugCandles(data.candles ?? []);
     } catch (e: any) {
       setDebugError(e.message);
