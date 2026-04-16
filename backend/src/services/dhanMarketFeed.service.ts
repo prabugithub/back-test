@@ -58,13 +58,20 @@ let restPollHandle: ReturnType<typeof setTimeout> | null = null;
  * Poll the Dhan intraday chart API for the latest price.
  * Used as fallback when the WebSocket feed fails (e.g. expired token).
  */
-async function performRestPoll(clientID: string, accessToken: string) {
+async function performRestPoll(clientID: string) {
     if (isPollingInProgress) return;
-    
+
     isPollingInProgress = true;
     try {
         if (subscribedTokens.size === 0) return; // Silent return, will reschedule in finally
-        
+
+        // Always read fresh token — loginDhan() may have refreshed it since polling started
+        const accessToken = process.env.DHAN_ACCESS_TOKEN;
+        if (!accessToken) {
+            logger.warn('[REST Poll] No access token available, skipping poll');
+            return;
+        }
+
         const today = new Date().toISOString().split('T')[0];
 
         // Loop through tokens sequentially to avoid swamping the event loop
@@ -115,16 +122,16 @@ async function performRestPoll(clientID: string, accessToken: string) {
         isPollingInProgress = false;
         // Schedule next poll ONLY after this one is finished; stop if handle was cleared by stopRestPolling()
         if (restPollHandle !== null) {
-            restPollHandle = setTimeout(() => performRestPoll(clientID, accessToken), 2000);
+            restPollHandle = setTimeout(() => performRestPoll(clientID), 2000);
         }
     }
 }
 
-function startRestPolling(clientID: string, accessToken: string) {
+function startRestPolling(clientID: string) {
     if (restPollHandle !== null) return; // already running
 
     logger.info('🔄 Starting REST polling fallback (Safe loop, 2s delay)');
-    restPollHandle = setTimeout(() => performRestPoll(clientID, accessToken), 100);
+    restPollHandle = setTimeout(() => performRestPoll(clientID), 100);
 }
 
 function stopRestPolling() {
@@ -143,12 +150,22 @@ function stopRestPolling() {
 export function initDhanMarketFeed(serverIo: Server) {
     io = serverIo;
     const clientID = process.env.DHAN_CLIENT_ID;
-    const accessToken = process.env.DHAN_ACCESS_TOKEN;
 
-    if (!clientID || !accessToken) {
+    if (!clientID || !process.env.DHAN_ACCESS_TOKEN) {
         logger.warn('Dhan client ID or Access Token not set. Live market feed disabled.');
         return;
     }
+
+    connectDhanWS(clientID);
+}
+
+/**
+ * Internal: (re)connect the Dhan WebSocket with the current access token.
+ * Called on initial startup and after a token refresh.
+ */
+function connectDhanWS(clientID: string) {
+    // Always read token fresh — loginDhan() may have updated it
+    const accessToken = process.env.DHAN_ACCESS_TOKEN!;
 
     logger.info('Initializing Dhan Market Feed with:', {
         clientID: clientID.substring(0, 4) + '****',
@@ -194,16 +211,23 @@ export function initDhanMarketFeed(serverIo: Server) {
                 feedConnected = false;
                 logger.warn(`Dhan Market Feed: WebSocket closed. Code: ${code}`);
                 if (code === 1006) {
-                    logger.error('⚠️  Dhan WS closed with code 1006 (HTTP 400) — ACCESS TOKEN LIKELY EXPIRED. Falling back to REST polling.');
-                    startRestPolling(clientID, accessToken);
+                    logger.error('⚠️  Dhan WS closed with code 1006 — token likely expired. Refreshing token and reconnecting...');
+                    // Start REST polling immediately so ticks keep flowing while we refresh
+                    startRestPolling(clientID);
+                    // Refresh the token, then reconnect the WS
+                    import('../services/dhan.service').then(({ loginDhan }) => {
+                        loginDhan()
+                            .then(() => {
+                                logger.info('Token refreshed after WS 1006 — reconnecting WebSocket');
+                                connectDhanWS(clientID);
+                            })
+                            .catch((err) => {
+                                logger.error('Token refresh failed after WS 1006 — staying on REST polling:', err.message);
+                            });
+                    });
                 }
             }
         );
-
-        // Catch WS errors (e.g. HTTP 400 on connect)
-        if (feedInstance && feedInstance.ws === undefined) {
-            // ws not created yet — hook after connect is called
-        }
 
         logger.info('Dhan Market Feed: Connecting WebSocket...');
         feedInstance.connect();
@@ -212,13 +236,13 @@ export function initDhanMarketFeed(serverIo: Server) {
         setTimeout(() => {
             if (!feedConnected) {
                 logger.warn('Dhan WS did not connect within 5s — starting REST polling fallback');
-                startRestPolling(clientID, accessToken);
+                startRestPolling(clientID);
             }
         }, 5000);
 
     } catch (error: any) {
         logger.error('Dhan Market Feed: Failed to initialize:', error.message);
-        startRestPolling(clientID, accessToken);
+        startRestPolling(clientID);
     }
 }
 
@@ -244,9 +268,8 @@ export function subscribeToInstrument(token: string, segment: string = 'NSE_EQ')
         
         // Ensure REST polling is running if WS is down
         const clientID = process.env.DHAN_CLIENT_ID;
-        const accessToken = process.env.DHAN_ACCESS_TOKEN;
-        if (clientID && accessToken) {
-            startRestPolling(clientID, accessToken);
+        if (clientID) {
+            startRestPolling(clientID);
         }
         return;
     }
