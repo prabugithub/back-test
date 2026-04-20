@@ -163,6 +163,7 @@ export async function registerPositionMonitor(params: {
     optionExchangeSegment: string;
     quantity: number;
     entryPrice: number;
+    productType: string;
 }): Promise<any> {
     const response = await apiClient.post('/api/live/monitor', params);
     return response.data;
@@ -177,10 +178,10 @@ export async function unregisterPositionMonitor(id: string): Promise<any> {
 }
 
 /**
- * Update the target level for a monitored position.
- * Only target can be changed — stop loss is strict and immutable.
+ * Update mutable fields for a monitored position (target and/or quantity).
+ * quantity should be set to the broker-confirmed filled qty on partial fills.
  */
-export async function updatePositionMonitor(id: string, params: { target: number }): Promise<any> {
+export async function updatePositionMonitor(id: string, params: { target?: number; quantity?: number }): Promise<any> {
     const response = await apiClient.patch(`/api/live/monitor/${id}`, params);
     return response.data;
 }

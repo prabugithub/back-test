@@ -70,6 +70,9 @@ export interface Position {
   pendingOrderId?: string;
   // Qty confirmed filled by broker (from order status poll); undefined means not yet verified
   filledQty?: number;
+  // Set when the backend monitor emits position:exit-triggered — prevents checkSLTPHits from
+  // placing a duplicate exit order while the backend's MARKET order is already in flight
+  exitTriggeredByBackend?: boolean;
 }
 
 // API request/response types

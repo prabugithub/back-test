@@ -1,4 +1,4 @@
-import { placeOrder } from '../adapters/dhan.adapter';
+import { placeOrder, getOrderStatus } from '../adapters/dhan.adapter';
 import { subscribeToInstrument } from '../adapters/dhanFeed.adapter';
 import { getDatabase } from '../config/database';
 import logger from '../utils/logger';
@@ -25,6 +25,8 @@ export interface MonitoredPosition {
     quantity: number;
     /** Option entry price (premium) — recorded for reference only */
     entryPrice: number;
+    /** Product type used at entry — exit order must match (e.g. 'INTRADAY', 'MARGIN') */
+    productType: 'INTRADAY' | 'CNC' | 'MARGIN' | 'MTF' | 'CO' | 'BO';
     /** Set to true the moment an exit is triggered to prevent duplicate orders */
     exitTriggered: boolean;
     /** Unix timestamp (ms) when the position was registered */
@@ -73,6 +75,7 @@ export function initPositionMonitor(io: Server): void {
                 optionExchangeSegment: r.option_exchange_segment,
                 quantity: r.quantity,
                 entryPrice: r.entry_price,
+                productType: (r.product_type || 'INTRADAY') as MonitoredPosition['productType'],
                 exitTriggered: false,
                 registeredAt: r.registered_at,
             };
@@ -105,12 +108,13 @@ export function registerPosition(params: Omit<MonitoredPosition, 'exitTriggered'
         db.prepare(
             `INSERT OR REPLACE INTO monitored_positions
              (id, spot_token, spot_segment, direction, stop_loss, target,
-              option_security_id, option_exchange_segment, quantity, entry_price, registered_at)
-             VALUES (?,?,?,?,?,?,?,?,?,?,?)`
+              option_security_id, option_exchange_segment, quantity, entry_price, product_type, registered_at)
+             VALUES (?,?,?,?,?,?,?,?,?,?,?,?)`
         ).run(
             entry.id, entry.spotToken, entry.spotSegment, entry.direction,
             entry.stopLoss, entry.target, entry.optionSecurityId,
-            entry.optionExchangeSegment, entry.quantity, entry.entryPrice, entry.registeredAt,
+            entry.optionExchangeSegment, entry.quantity, entry.entryPrice,
+            entry.productType, entry.registeredAt,
         );
     } catch (err: any) {
         logger.error('[PositionMonitor] Failed to persist position to DB:', err.message);
@@ -141,6 +145,25 @@ export function unregisterPosition(id: string): boolean {
         logger.info(`[PositionMonitor] Unregistered position: ${id}`);
     }
     return existed;
+}
+
+/**
+ * Update the exit quantity for a monitored position.
+ * Called when a partial fill confirms fewer units than originally requested.
+ * Returns false if the position doesn't exist or has already triggered an exit.
+ */
+export function updatePositionQuantity(id: string, quantity: number): boolean {
+    const pos = monitoredPositions.get(id);
+    if (!pos || pos.exitTriggered) return false;
+    pos.quantity = quantity;
+    try {
+        const db = getDatabase();
+        db.prepare('UPDATE monitored_positions SET quantity = ? WHERE id = ?').run(quantity, id);
+    } catch (err: any) {
+        logger.error('[PositionMonitor] Failed to update quantity in DB:', err.message);
+    }
+    logger.info(`[PositionMonitor] Quantity updated | id:${id} | newQty:${quantity}`);
+    return true;
 }
 
 /**
@@ -232,25 +255,72 @@ export async function onTick(token: string, price: number): Promise<void> {
 
 /**
  * Executes the actual broker exit order for a position.
- * For SL: uses the 3-step SmartExit chaser.
- * For TP: places a direct MARKET order for immediate fill.
+ * Both SL and TP exits use MARKET: the backend only has spot price and option entry premium,
+ * not the live option LTP, so a limit-price anchor would be unreliable. MARKET guarantees fill.
+ * The frontend smart-exit chaser (3-step LIMIT→LIMIT→MARKET) handles exits when the browser
+ * is open. This path is the fallback for browser-closed scenarios.
  */
 async function triggerExit(pos: MonitoredPosition, reason: 'SL' | 'TP', triggerPrice: number): Promise<void> {
+    let placedOrderId: string | undefined;
     try {
-        // Both SL and TP exit at MARKET — the backend monitors spot price to trigger,
-        // but the exit is on the option. We don't have the live option premium here,
-        // so LIMIT pricing derived from spot is meaningless. MARKET guarantees a fill.
-        await placeOrder({
+        const result = await placeOrder({
             securityId: pos.optionSecurityId,
             exchangeSegment: pos.optionExchangeSegment,
             transactionType: 'SELL',
             quantity: pos.quantity,
             orderType: 'MARKET',
-            productType: 'INTRADAY',
+            productType: pos.productType,
         });
-        logger.info(`[PositionMonitor] ${reason} MARKET exit placed for ${pos.id} | triggerPrice:${triggerPrice}`);
+        placedOrderId = result?.orderId || result?.data?.orderId;
+        logger.info(`[PositionMonitor] ${reason} MARKET exit placed for ${pos.id} | orderId:${placedOrderId} | triggerPrice:${triggerPrice}`);
+    } catch (err: any) {
+        logger.error(`[PositionMonitor] Exit order failed for ${pos.id}: ${err.message}`);
+        // Reset flag so the next tick can retry — prevents silent permanent failure
+        pos.exitTriggered = false;
+        throw err;
+    }
 
-        // Clean up after successful exit (in-memory + DB)
+    // Poll order status after 3 s to confirm TRADED. If REJECTED, reset the trigger flag
+    // and alert the frontend so the user can act manually.
+    if (placedOrderId) {
+        setTimeout(async () => {
+            try {
+                const resp = await getOrderStatus(placedOrderId!);
+                const status: string = resp?.orderStatus || resp?.data?.orderStatus || '';
+                if (status === 'REJECTED') {
+                    const reason_str = resp?.rejectedReason || resp?.data?.rejectedReason || 'unknown reason';
+                    logger.error(`[PositionMonitor] Exit order REJECTED for ${pos.id}: ${reason_str}`);
+                    // Reset so next tick retries
+                    pos.exitTriggered = false;
+                    ioInstance?.emit('position:exit-failed', {
+                        positionId: pos.id,
+                        reason,
+                        error: `Exit order REJECTED: ${reason_str}. Retrying on next tick.`,
+                    });
+                    return; // Don't clean up — position still open
+                }
+                logger.info(`[PositionMonitor] Exit order confirmed ${status} for ${pos.id}`);
+            } catch (pollErr: any) {
+                logger.warn(`[PositionMonitor] Could not verify exit order status for ${pos.id}: ${pollErr.message}`);
+            }
+
+            // Clean up after confirmed (or unverifiable) exit
+            monitoredPositions.delete(pos.id);
+            try {
+                const db = getDatabase();
+                db.prepare('DELETE FROM monitored_positions WHERE id = ?').run(pos.id);
+            } catch (err: any) {
+                logger.error('[PositionMonitor] Failed to remove exited position from DB:', err.message);
+            }
+
+            ioInstance?.emit('position:exit-placed', {
+                positionId: pos.id,
+                reason,
+                triggerPrice,
+            });
+        }, 3000);
+    } else {
+        // No orderId returned — clean up optimistically and notify
         monitoredPositions.delete(pos.id);
         try {
             const db = getDatabase();
@@ -258,18 +328,6 @@ async function triggerExit(pos: MonitoredPosition, reason: 'SL' | 'TP', triggerP
         } catch (err: any) {
             logger.error('[PositionMonitor] Failed to remove exited position from DB:', err.message);
         }
-
-        // Notify clients that exit order was successfully placed
-        ioInstance?.emit('position:exit-placed', {
-            positionId: pos.id,
-            reason,
-            triggerPrice,
-        });
-    } catch (err: any) {
-        logger.error(`[PositionMonitor] Exit order failed for ${pos.id}: ${err.message}`);
-        // Reset flag so the next tick can retry — prevents silent permanent failure
-        pos.exitTriggered = false;
-        // Re-throw so the caller can emit position:exit-failed
-        throw err;
+        ioInstance?.emit('position:exit-placed', { positionId: pos.id, reason, triggerPrice });
     }
 }

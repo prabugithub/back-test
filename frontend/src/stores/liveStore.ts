@@ -122,6 +122,12 @@ export const useLiveStore = create<LiveState>((set, get) => ({
                 `${data.reason} Hit at ${level.toFixed(2)} — Backend is exiting position automatically.`,
                 data.reason === 'SL' ? 'warning' : 'success'
             );
+            // Mark position so checkSLTPHits skips placing a duplicate exit order
+            useSessionStore.setState((s) => ({
+                position: s.position?.liveOptionToken === data.positionId
+                    ? { ...s.position, exitTriggeredByBackend: true }
+                    : s.position,
+            }));
         });
 
         // Backend confirmed the exit order was placed with the broker

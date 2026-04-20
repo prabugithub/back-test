@@ -3,7 +3,7 @@ import { placeOrder } from '../adapters/dhan.adapter';
 import { getFeedStatus, emitTestTick } from '../adapters/dhanFeed.adapter';
 import { getATMOptionForOrder } from '../adapters/optionChain.adapter';
 import { executeSmartExit } from '../services/smartExit.service';
-import { registerPosition, unregisterPosition, getMonitoredPositions, updatePositionTarget } from '../services/positionMonitor.service';
+import { registerPosition, unregisterPosition, getMonitoredPositions, updatePositionTarget, updatePositionQuantity } from '../services/positionMonitor.service';
 import logger from '../utils/logger';
 
 const router = Router();
@@ -179,7 +179,7 @@ router.get('/order/:orderId', async (req: Request, res: Response) => {
  */
 router.post('/monitor', (req: Request, res: Response) => {
     try {
-        const { id, spotToken, spotSegment, direction, stopLoss, target, optionSecurityId, optionExchangeSegment, quantity, entryPrice } = req.body;
+        const { id, spotToken, spotSegment, direction, stopLoss, target, optionSecurityId, optionExchangeSegment, quantity, entryPrice, productType } = req.body;
 
         if (!id || !spotToken || !direction || !optionSecurityId || !quantity) {
             return res.status(400).json({
@@ -190,6 +190,9 @@ router.post('/monitor', (req: Request, res: Response) => {
         if (!stopLoss && !target) {
             return res.status(400).json({ error: 'At least one of stopLoss or target must be provided' });
         }
+
+        const VALID_PRODUCT_TYPES = ['INTRADAY', 'CNC', 'MARGIN', 'MTF', 'CO', 'BO'] as const;
+        const resolvedProductType = VALID_PRODUCT_TYPES.includes(productType) ? productType : 'INTRADAY';
 
         registerPosition({
             id,
@@ -202,6 +205,7 @@ router.post('/monitor', (req: Request, res: Response) => {
             optionExchangeSegment: optionExchangeSegment || 'NSE_FNO',
             quantity: Number(quantity),
             entryPrice: Number(entryPrice) || 0,
+            productType: resolvedProductType,
         });
 
         res.json({ success: true, message: `Position ${id} registered for backend monitoring` });
@@ -224,20 +228,38 @@ router.delete('/monitor/:id', (req: Request, res: Response) => {
 
 /**
  * PATCH /api/live/monitor/:id
- * Update the target level for a monitored position.
+ * Update mutable fields for a monitored position: target and/or quantity.
  * Stop loss is strict and cannot be modified via this endpoint.
+ * quantity update is used when a partial fill confirms fewer units than originally requested.
  */
 router.patch('/monitor/:id', (req: Request, res: Response) => {
     const { id } = req.params;
-    const { target } = req.body;
-    if (target === undefined || isNaN(Number(target))) {
-        return res.status(400).json({ error: 'target must be a valid number' });
+    const { target, quantity } = req.body;
+
+    if (target === undefined && quantity === undefined) {
+        return res.status(400).json({ error: 'Provide at least one of: target, quantity' });
     }
-    const updated = updatePositionTarget(id, Number(target));
+
+    let updated = false;
+
+    if (target !== undefined) {
+        if (isNaN(Number(target))) {
+            return res.status(400).json({ error: 'target must be a valid number' });
+        }
+        updated = updatePositionTarget(id, Number(target)) || updated;
+    }
+
+    if (quantity !== undefined) {
+        if (isNaN(Number(quantity)) || Number(quantity) <= 0) {
+            return res.status(400).json({ error: 'quantity must be a positive number' });
+        }
+        updated = updatePositionQuantity(id, Number(quantity)) || updated;
+    }
+
     if (!updated) {
         return res.status(404).json({ error: `Position ${id} not found or already exited` });
     }
-    res.json({ success: true, message: `Target updated to ${target} for position ${id}` });
+    res.json({ success: true, message: `Position ${id} updated` });
 });
 
 /**

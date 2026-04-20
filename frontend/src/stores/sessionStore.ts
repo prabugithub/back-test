@@ -632,7 +632,13 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
                liveTransactionType = isReducing ? 'SELL' : 'BUY';
                // Always exit at MARKET — quantity is exactly what we hold, no rounding needed.
                limitPrice = undefined;
-               finalQuantity = Math.abs(position.quantity);
+               finalQuantity = position.filledQty ?? Math.abs(position.quantity);
+
+               // Unregister backend monitor BEFORE placing the exit order to prevent a race
+               // where both frontend and backend fire a SELL on the same position.
+               await unregisterPositionMonitor(position.liveOptionToken).catch((e) =>
+                   console.warn('[Monitor] Pre-exit unregister failed:', e)
+               );
             } else {
                // OPENING: Fetch the ATM weekly option token and its current LTP
                const optType = type === 'BUY' ? 'CE' : 'PE';
@@ -870,13 +876,8 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
     if (get().isLiveMode) {
       const sessionCfg = get().sessionConfig;
       if (nextPosition === null) {
-        // Position fully closed — remove from backend monitor
-        const closedToken = position?.liveOptionToken;
-        if (closedToken) {
-          unregisterPositionMonitor(closedToken).catch((e) =>
-            console.warn('[Monitor] Unregister failed:', e)
-          );
-        }
+        // Unregister was already called pre-order for live option closes (see above).
+        // Nothing more to do here for the backend monitor.
       } else if (nextPosition.liveOptionToken && sessionCfg) {
         // New / updated live option position — register (or re-register) with backend
         const isLongPos = nextPosition.quantity > 0;
@@ -891,6 +892,7 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
           optionExchangeSegment: 'NSE_FNO',
           quantity: Math.abs(nextPosition.quantity),
           entryPrice: nextPosition.averagePrice,
+          productType: 'INTRADAY',
         }).catch((e) => console.warn('[Monitor] Register failed:', e));
       }
     }
@@ -915,10 +917,17 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
               `Order REJECTED: ${order.rejectedReason || 'Unknown reason'}. Clearing position.`,
               'error'
             );
+            // Capture option token before clearing position
+            const rejectedToken = get().position?.liveOptionToken;
             // Position no longer valid — clear it
             set((s) => ({
               position: s.position?.pendingOrderId === orderIdToCheck ? null : s.position
             }));
+            // Also remove backend monitor that was registered for the phantom position
+            if (rejectedToken && get().isLiveMode) {
+              const { unregisterPositionMonitor: unregister } = await import('../services/api');
+              unregister(rejectedToken).catch(() => {});
+            }
           } else if (status === 'PARTIALLY_TRADED') {
             useNotificationStore.getState().notify(
               `Order PARTIAL FILL: ${filled} filled, ${remaining} pending.`,
@@ -928,6 +937,12 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
               if (!s.position || s.position.pendingOrderId !== orderIdToCheck) return s;
               return { position: { ...s.position, filledQty: filled, pendingOrderId: undefined } };
             });
+            // Sync backend monitor quantity to actual filled qty so exit order matches broker position
+            const partialToken = get().position?.liveOptionToken;
+            if (partialToken && get().isLiveMode && filled > 0) {
+              const { updatePositionMonitor: updateMonitor } = await import('../services/api');
+              updateMonitor(partialToken, { quantity: filled }).catch(() => {});
+            }
           } else {
             // TRADED or any other terminal state — mark as confirmed
             set((s) => {
