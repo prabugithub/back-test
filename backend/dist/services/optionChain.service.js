@@ -57,19 +57,26 @@ function pickWeeklyExpiry(expiries) {
 /**
  * Fetches option chain data for a given expiry and returns the LTP
  * for the ATM strike of the requested option type.
+ *
+ * IMPORTANT: always returns { atmStrike } as the strike calculated from spot price,
+ * never the fallback strike. This ensures the security ID lookup always resolves
+ * to the option the user intended to trade. LTP may come from a nearby strike if
+ * the exact ATM has no price, but that only affects the limit-order anchor — not
+ * which security is ordered.
  */
 async function fetchATMLTPFromChain(instrumentName, expiry, spotPrice, optionType) {
     const config = INSTRUMENT_CONFIG[instrumentName];
     const response = await axios_1.default.post('https://api.dhan.co/v2/optionchain', { UnderlyingScrip: config.underlyingScrip, UnderlyingSeg: config.underlyingSeg, Expiry: expiry }, { headers: getHeaders() });
     const oc = response.data?.data?.oc || response.data?.oc;
-    // Round spot to nearest strike interval
+    // Round spot to nearest strike interval — this is the INTENDED strike
     const interval = config.strikeInterval;
     const atmStrike = Math.round(spotPrice / interval) * interval;
     if (!oc) {
         logger_1.default.warn(`Option chain data missing from Dhan response for ${instrumentName} exp ${expiry}`);
         return { ltp: 0, atmStrike };
     }
-    // Search for ATM strike — widen search to find ANY strike with a price if ATM is missing
+    // Try exact ATM first, then adjacent strikes only for LTP fallback.
+    // Never change atmStrike — the security ID must always match the intended strike.
     const searchRange = [0];
     for (let i = 1; i <= 10; i++) {
         searchRange.push(i * interval);
@@ -84,10 +91,12 @@ async function fetchATMLTPFromChain(instrumentName, expiry, spotPrice, optionTyp
             const optData = strikeData[optionType.toLowerCase()];
             if (optData && optData.last_price > 0) {
                 if (delta !== 0) {
-                    logger_1.default.warn(`Exact ATM ${atmStrike} has no LTP. Using adjusted strike ${strike} (delta: ${delta})`);
+                    logger_1.default.warn(`ATM ${atmStrike} ${optionType} has no LTP in chain — using nearby strike ${strike} as LTP reference only. ` +
+                        `Security ID will still resolve to ATM ${atmStrike}.`);
                 }
                 logger_1.default.info(`Option chain LTP for ${instrumentName} ${optionType} ${strike} exp ${expiry}: ${optData.last_price}`);
-                return { ltp: optData.last_price, atmStrike: strike };
+                // Always return the intended atmStrike, not the fallback strike
+                return { ltp: optData.last_price, atmStrike };
             }
         }
     }

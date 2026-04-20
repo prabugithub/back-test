@@ -78,9 +78,18 @@ function createSchema(database) {
       option_exchange_segment TEXT NOT NULL,
       quantity INTEGER NOT NULL,
       entry_price REAL NOT NULL,
+      product_type TEXT NOT NULL DEFAULT 'INTRADAY',
       registered_at INTEGER NOT NULL
     );
   `);
+    // Migrate existing databases — add product_type if the column is missing
+    try {
+        database.exec(`ALTER TABLE monitored_positions ADD COLUMN product_type TEXT NOT NULL DEFAULT 'INTRADAY'`);
+    }
+    catch (e) {
+        if (!e.message?.includes('duplicate column'))
+            throw e;
+    }
     logger_1.default.info('Database schema ready');
 }
 /**
