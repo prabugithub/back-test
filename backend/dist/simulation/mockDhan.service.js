@@ -10,6 +10,7 @@ exports.placeOrder = placeOrder;
 exports.getOrderStatus = getOrderStatus;
 exports.modifyOrder = modifyOrder;
 exports.getPositions = getPositions;
+exports.getOptionLTP = getOptionLTP;
 exports.retryApiCall = retryApiCall;
 /**
  * Mock Dhan Service — Simulation Mode
@@ -89,6 +90,12 @@ async function getPositions() {
         realizedProfit: p.realizedProfit,
         unrealizedProfit: p.unrealizedProfit,
     }));
+}
+// ─── Option LTP ───────────────────────────────────────────────────────────────
+async function getOptionLTP(securityId, _exchangeSegment = 'NSE_FNO') {
+    const price = currentPrices.get(securityId);
+    logger_1.default.info(`[MockDhan] getOptionLTP ${securityId}: ${price ?? null}`);
+    return price ?? null;
 }
 // ─── Retry wrapper (no-op passthrough in simulation) ─────────────────────────
 async function retryApiCall(fn) {

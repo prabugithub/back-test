@@ -130,6 +130,20 @@ export async function getATMOption(spotPrice: number, optionType: 'CE' | 'PE', i
 }
 
 /**
+ * Fetch current LTP for a held option — used to anchor the Smart Exit chaser at SL time.
+ */
+export async function getOptionLTP(securityId: string, exchangeSegment = 'NSE_FNO'): Promise<number | null> {
+  try {
+    const response = await apiClient.get(`/api/live/option-ltp/${securityId}`, {
+      params: { exchange: exchangeSegment }
+    });
+    return response.data?.ltp ?? null;
+  } catch {
+    return null;
+  }
+}
+
+/**
  * Fetch real account positions
  */
 export async function getLivePositions(): Promise<any> {

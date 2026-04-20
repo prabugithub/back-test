@@ -147,6 +147,18 @@ export const useLiveStore = create<LiveState>((set, get) => ({
                 `CRITICAL: Backend ${data.reason} exit FAILED (${data.error}). Please close position manually!`,
                 'error'
             );
+            // Reset the dialog-shown flag so checkSLTPHits can re-fire on the next tick.
+            // Without this, the frontend permanently suppresses SL/TP notifications after one failure.
+            useSessionStore.setState((s) => {
+                if (s.position?.liveOptionToken !== data.positionId) return {};
+                return {
+                    position: {
+                        ...s.position,
+                        slDialogShown: data.reason === 'SL' ? false : s.position.slDialogShown,
+                        tpDialogShown: data.reason === 'TP' ? false : s.position.tpDialogShown,
+                    },
+                };
+            });
         });
 
         set({ socket });

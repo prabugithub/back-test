@@ -146,6 +146,25 @@ router.get('/atm-option', async (req, res) => {
     }
 });
 /**
+ * GET /api/live/option-ltp/:securityId
+ * Fetches current LTP for a held option — used to anchor the Smart Exit chaser at SL time.
+ */
+router.get('/option-ltp/:securityId', async (req, res) => {
+    try {
+        const { securityId } = req.params;
+        const exchangeSegment = req.query.exchange || 'NSE_FNO';
+        const ltp = await (0, dhan_adapter_1.getOptionLTP)(securityId, exchangeSegment);
+        if (ltp === null) {
+            return res.status(404).json({ success: false, message: 'LTP unavailable for this security' });
+        }
+        res.json({ success: true, ltp });
+    }
+    catch (error) {
+        logger_1.default.error('Error fetching option LTP:', error.message);
+        res.status(500).json({ error: 'Server error', message: error.message });
+    }
+});
+/**
  * GET /api/live/positions
  * Fetches actual positions from Dhan API
  */

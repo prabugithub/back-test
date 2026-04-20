@@ -6,7 +6,7 @@ import { saveSession, loadSession, restoreBackup, saveSnapshot, listSnapshots, l
 import { useNotificationStore } from './notificationStore';
 import { calculatePivotPoints } from '../utils/indicators';
 import { analyzeMarketStructure } from '../utils/pivotAnalysis';
-import { placeLiveOrder, getATMOption, executeSmartExit, getLivePositions, registerPositionMonitor, unregisterPositionMonitor, updatePositionMonitor } from '../services/api';
+import { placeLiveOrder, getATMOption, getOptionLTP, executeSmartExit, getLivePositions, registerPositionMonitor, unregisterPositionMonitor, updatePositionMonitor } from '../services/api';
 
 export interface SessionConfig {
   securityId: string;
@@ -598,6 +598,7 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
     let finalQuantity = quantity;
 
     let atmOptionToken: string | undefined = undefined;
+    let tradeOptionType: 'CE' | 'PE' | undefined = undefined;
 
     // Handle Live Order Placement
     if (isLiveMode && sessionConfig) {
@@ -624,15 +625,21 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
             }
 
             if (position && position.liveOptionToken) {
-               // CLOSING/REDUCING: exit the exact option we hold — use MARKET to guarantee fill.
-               // Do NOT call getATMOption here: spot has moved since entry, so ATM may now be a
-               // different strike. Using ATM LTP as a limit anchor would reference the wrong strike.
+               // CLOSING/REDUCING: exit the exact option we hold.
                liveSecurityId = position.liveOptionToken;
                liveExchange = 'NSE_FNO';
                liveTransactionType = isReducing ? 'SELL' : 'BUY';
-               // Always exit at MARKET — quantity is exactly what we hold, no rounding needed.
-               limitPrice = undefined;
                finalQuantity = position.filledQty ?? Math.abs(position.quantity);
+               tradeOptionType = position.quantity > 0 ? 'CE' : 'PE';
+
+               // For SL exits: fetch the held option's current LTP to anchor the 3-step
+               // LIMIT→LIMIT→MARKET smart exit chaser. Falls back to MARKET if LTP unavailable.
+               if (exitReason === 'SL') {
+                 limitPrice = await getOptionLTP(String(liveSecurityId)) ?? undefined;
+               } else {
+                 // TP and MANUAL exits use MARKET — no limit anchor needed.
+                 limitPrice = undefined;
+               }
 
                // Unregister backend monitor BEFORE placing the exit order to prevent a race
                // where both frontend and backend fire a SELL on the same position.
@@ -642,6 +649,7 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
             } else {
                // OPENING: Fetch the ATM weekly option token and its current LTP
                const optType = type === 'BUY' ? 'CE' : 'PE';
+               tradeOptionType = optType;
                const instName = isBankNiftyIndex ? 'BANKNIFTY' : 'NIFTY';
                const optData = await getATMOption(currentPrice, optType, instName);
                if (optData && optData.success && optData.data) {
@@ -679,8 +687,11 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
         let orderTypeToUse: 'LIMIT' | 'MARKET' = 'LIMIT';
         if (!limitPrice) {
           orderTypeToUse = 'MARKET';
-          console.warn('LTP not available for option, falling back to MARKET order');
-          useNotificationStore.getState().notify('LTP unavailable: Placing MARKET order instead of LIMIT', 'warning');
+          // SL exits handle the "no LTP" notification in their own branch below
+          if (exitReason !== 'SL') {
+            console.warn('LTP not available for option, falling back to MARKET order');
+            useNotificationStore.getState().notify('LTP unavailable: Placing MARKET order instead of LIMIT', 'warning');
+          }
         }
 
         // Fail-safe: Ensure we never send an index directly to Dhan API
@@ -796,6 +807,7 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
       quantity: finalQuantity,
       instrument,
       liveOptionToken: atmOptionToken || position?.liveOptionToken,
+      optionType: tradeOptionType,
       stopLoss: tradeStopLoss,
       target: tradeTarget,
       exitReason: exitReason,

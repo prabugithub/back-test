@@ -46,6 +46,7 @@ export interface Trade {
   journal?: TradeJournal;
   interval?: string;
   liveOptionToken?: string;
+  optionType?: 'CE' | 'PE';
 }
 
 // Position tracking

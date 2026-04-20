@@ -13,6 +13,7 @@ exports.placeOrder = placeOrder;
 exports.getOrderStatus = getOrderStatus;
 exports.modifyOrder = modifyOrder;
 exports.getPositions = getPositions;
+exports.getOptionLTP = getOptionLTP;
 exports.retryApiCall = retryApiCall;
 const dhanhq_1 = require("dhanhq");
 const logger_1 = __importDefault(require("../utils/logger"));
@@ -439,6 +440,36 @@ async function getPositions() {
         }
         logger_1.default.error('Dhan Get Positions API error:', error.message);
         throw new Error(`Dhan API error: ${error.message}`);
+    }
+}
+/**
+ * Fetch the current LTP for a single option security via Dhan market feed.
+ * Used to anchor the Smart Exit chaser price at SL time.
+ */
+async function getOptionLTP(securityId, exchangeSegment = 'NSE_FNO') {
+    const accessToken = process.env.DHAN_ACCESS_TOKEN;
+    const clientID = process.env.DHAN_CLIENT_ID;
+    if (!accessToken || !clientID) {
+        throw new Error('DHAN_ACCESS_TOKEN and DHAN_CLIENT_ID are required');
+    }
+    try {
+        const response = await axios_1.default.post('https://api.dhan.co/v2/marketfeed/ltp', {
+            [exchangeSegment]: [securityId],
+        }, {
+            headers: {
+                'Content-Type': 'application/json',
+                'access-token': accessToken,
+                'client-id': clientID,
+            },
+            timeout: 5000,
+        });
+        const ltp = response.data?.data?.[exchangeSegment]?.[securityId]?.last_price;
+        logger_1.default.info(`[getOptionLTP] ${securityId} LTP: ${ltp}`);
+        return ltp ?? null;
+    }
+    catch (error) {
+        logger_1.default.error(`[getOptionLTP] Failed for ${securityId}:`, error.message);
+        return null;
     }
 }
 /**

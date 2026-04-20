@@ -1,5 +1,5 @@
 import { Router, Request, Response } from 'express';
-import { placeOrder } from '../adapters/dhan.adapter';
+import { placeOrder, getOptionLTP } from '../adapters/dhan.adapter';
 import { getFeedStatus, emitTestTick } from '../adapters/dhanFeed.adapter';
 import { getATMOptionForOrder } from '../adapters/optionChain.adapter';
 import { executeSmartExit } from '../services/smartExit.service';
@@ -130,6 +130,25 @@ router.get('/atm-option', async (req: Request, res: Response) => {
 
     } catch (error: any) {
         logger.error('Error fetching ATM option:', error.message);
+        res.status(500).json({ error: 'Server error', message: error.message });
+    }
+});
+
+/**
+ * GET /api/live/option-ltp/:securityId
+ * Fetches current LTP for a held option — used to anchor the Smart Exit chaser at SL time.
+ */
+router.get('/option-ltp/:securityId', async (req: Request, res: Response) => {
+    try {
+        const { securityId } = req.params;
+        const exchangeSegment = (req.query.exchange as string) || 'NSE_FNO';
+        const ltp = await getOptionLTP(securityId, exchangeSegment);
+        if (ltp === null) {
+            return res.status(404).json({ success: false, message: 'LTP unavailable for this security' });
+        }
+        res.json({ success: true, ltp });
+    } catch (error: any) {
+        logger.error('Error fetching option LTP:', error.message);
         res.status(500).json({ error: 'Server error', message: error.message });
     }
 });

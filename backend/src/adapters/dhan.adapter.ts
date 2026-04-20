@@ -15,6 +15,7 @@ export const placeOrder      = impl.placeOrder;
 export const getOrderStatus  = impl.getOrderStatus;
 export const modifyOrder     = impl.modifyOrder;
 export const getPositions    = impl.getPositions;
+export const getOptionLTP    = impl.getOptionLTP;
 export const initDhanClient  = impl.initDhanClient;
 export const getDhanClient   = impl.getDhanClient;
 export const retryApiCall    = impl.retryApiCall;

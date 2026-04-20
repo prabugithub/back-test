@@ -506,6 +506,38 @@ export async function getPositions() {
 }
 
 /**
+ * Fetch the current LTP for a single option security via Dhan market feed.
+ * Used to anchor the Smart Exit chaser price at SL time.
+ */
+export async function getOptionLTP(securityId: string, exchangeSegment = 'NSE_FNO'): Promise<number | null> {
+    const accessToken = process.env.DHAN_ACCESS_TOKEN;
+    const clientID = process.env.DHAN_CLIENT_ID;
+    if (!accessToken || !clientID) {
+        throw new Error('DHAN_ACCESS_TOKEN and DHAN_CLIENT_ID are required');
+    }
+
+    try {
+        const response = await axios.post('https://api.dhan.co/v2/marketfeed/ltp', {
+            [exchangeSegment]: [securityId],
+        }, {
+            headers: {
+                'Content-Type': 'application/json',
+                'access-token': accessToken,
+                'client-id': clientID,
+            },
+            timeout: 5000,
+        });
+
+        const ltp: number | undefined = response.data?.data?.[exchangeSegment]?.[securityId]?.last_price;
+        logger.info(`[getOptionLTP] ${securityId} LTP: ${ltp}`);
+        return ltp ?? null;
+    } catch (error: any) {
+        logger.error(`[getOptionLTP] Failed for ${securityId}:`, error.message);
+        return null;
+    }
+}
+
+/**
  * Retry wrapper for API calls
  */
 export async function retryApiCall<T>(fn: () => Promise<T>, maxRetries = 3, baseDelay = 1000): Promise<T> {

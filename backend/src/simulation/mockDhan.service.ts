@@ -123,6 +123,14 @@ export async function getPositions(): Promise<any[]> {
     }));
 }
 
+// ─── Option LTP ───────────────────────────────────────────────────────────────
+
+export async function getOptionLTP(securityId: string, _exchangeSegment = 'NSE_FNO'): Promise<number | null> {
+    const price = currentPrices.get(securityId);
+    logger.info(`[MockDhan] getOptionLTP ${securityId}: ${price ?? null}`);
+    return price ?? null;
+}
+
 // ─── Retry wrapper (no-op passthrough in simulation) ─────────────────────────
 
 export async function retryApiCall<T>(fn: () => Promise<T>): Promise<T> {

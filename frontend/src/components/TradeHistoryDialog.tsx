@@ -484,7 +484,7 @@ export function TradeHistoryDialog({ isOpen, onClose, onOpenDashboard }: TradeHi
                                                                             <tr key={exec.id || idx} className="hover:bg-gray-50/80 group">
                                                                                 <td className="px-3 py-2 text-gray-600 whitespace-nowrap">{formatTimestamp(exec.timestamp)}</td>
                                                                                 <td className={`px-3 py-2 font-semibold ${exec.type === 'BUY' ? 'text-green-600' : 'text-red-600'}`}>
-                                                                                    {exec.type}
+                                                                                    {exec.type}{exec.optionType ? ` ${exec.optionType}` : ''}
                                                                                 </td>
                                                                                 <td className="px-3 py-2 text-right font-mono text-[10px]">{formatCurrency(exec.price)}</td>
                                                                                 <td className="px-3 py-2 text-right font-mono text-[10px]">{exec.quantity}</td>
