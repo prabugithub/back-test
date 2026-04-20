@@ -624,39 +624,15 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
             }
 
             if (position && position.liveOptionToken) {
-               // CLOSING/REDUCING: Sell the option we already hold (Option Buyers always SELL to close)
+               // CLOSING/REDUCING: exit the exact option we hold — use MARKET to guarantee fill.
+               // Do NOT call getATMOption here: spot has moved since entry, so ATM may now be a
+               // different strike. Using ATM LTP as a limit anchor would reference the wrong strike.
                liveSecurityId = position.liveOptionToken;
                liveExchange = 'NSE_FNO';
                liveTransactionType = isReducing ? 'SELL' : 'BUY';
-               
-                // Try to get current LTP for closing limit order
-                try {
-                  const instName = isBankNiftyIndex ? 'BANKNIFTY' : 'NIFTY';
-                  // We use the same option type as the position we hold
-                  const optType = (position.quantity > 0) ? 'CE' : 'PE'; 
-                  const closingOptData = await getATMOption(currentPrice, optType, instName);
-                  if (closingOptData?.success) {
-                    if (closingOptData.data?.ltp) {
-                      limitPrice = closingOptData.data.ltp;
-                    }
-                    
-                    // Refine quantity for closing trade
-                    if (closingOptData.data?.lotSize) {
-                      const lotSize = closingOptData.data.lotSize;
-                      const fraction = quantity / lotSize;
-                      // For closing, we round to nearest lot (0.5 threshold)
-                      const lots = Math.round(fraction);
-                      finalQuantity = Math.max(1, lots) * lotSize;
-                      
-                      // Safety: if we are closing a position, don't exceed the current position size
-                      if (Math.abs(finalQuantity) > Math.abs(position.quantity)) {
-                         finalQuantity = Math.abs(position.quantity);
-                      }
-                    }
-                  }
-                } catch (err) { 
-                  console.warn('Could not fetch LTP/LotSize for closing, will fallback to MARKET', err);
-                }
+               // Always exit at MARKET — quantity is exactly what we hold, no rounding needed.
+               limitPrice = undefined;
+               finalQuantity = Math.abs(position.quantity);
             } else {
                // OPENING: Fetch the ATM weekly option token and its current LTP
                const optType = type === 'BUY' ? 'CE' : 'PE';

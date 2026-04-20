@@ -44,9 +44,16 @@ export function initPositionMonitor(io: Server): void {
     ioInstance = io;
 
     // Reload persisted positions from SQLite so SL/TP monitoring survives restarts.
-    // Positions older than 24h are cleaned up — they predate the current trading day.
-    const TTL_MS = 24 * 60 * 60 * 1000;
-    const cutoffMs = Date.now() - TTL_MS;
+    // Discard positions registered before today's 9:15 AM IST (3:45 AM UTC) — they belong
+    // to a previous trading session. A rolling 24h TTL is NOT used because a position from
+    // yesterday morning would survive today's restart and fire a spurious exit order.
+    const todayMarketOpen = new Date();
+    todayMarketOpen.setUTCHours(3, 45, 0, 0); // 9:15 AM IST
+    if (Date.now() < todayMarketOpen.getTime()) {
+        // Before today's market open — roll back to yesterday's session open
+        todayMarketOpen.setDate(todayMarketOpen.getDate() - 1);
+    }
+    const cutoffMs = todayMarketOpen.getTime();
     try {
         const db = getDatabase();
 
