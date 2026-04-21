@@ -79,6 +79,14 @@ export function useChartDrawings({
   // rAF scheduler — collapses all synchronous renderCanvas() calls within a frame into one
   const rafIdRef = useRef<number>(0);
 
+  // Perf: buffer drag/resize mutations locally; commit to store only on mouseup.
+  // This prevents setDrawings() → re-render → repaint on every mousemove pixel.
+  const dragBufferRef = useRef<Drawing[] | null>(null);
+  // Synchronous flag (not via useEffect) so renderCanvas and handleMouseMove
+  // always know whether an interaction is genuinely active even before React's
+  // useEffect-based ref-sync fires.
+  const isInteractingRef = useRef(false);
+
   // Keep refs in sync with state
   useEffect(() => { activeToolRef.current = activeTool; }, [activeTool]);
   useEffect(() => { isDrawingRef.current = isDrawing; }, [isDrawing]);
@@ -236,7 +244,22 @@ export function useChartDrawings({
   };
 
   const findDrawingAtPoint = (point: Point, drawings: Drawing[]): Drawing | null => {
-    for (let i = drawings.length - 1; i >= 0; i--) if (isPointOnDrawing(point, drawings[i])) return drawings[i];
+    for (let i = drawings.length - 1; i >= 0; i--) {
+      const d = drawings[i];
+      // Fast bounding-box reject before expensive per-pixel geometry test
+      if (d.points.length >= 2) {
+        const pts = d.points.map(p => convertLogicalToPixel(p));
+        const pad = 12;
+        const minX = Math.min(...pts.map(p => p.x)) - pad;
+        const maxX = Math.max(...pts.map(p => p.x)) + pad;
+        const minY = Math.min(...pts.map(p => p.y)) - pad;
+        const maxY = Math.max(...pts.map(p => p.y)) + pad;
+        // Horizontal lines span the full width — skip X bounds check for them
+        if (d.type !== 'horizontal' && (point.x < minX || point.x > maxX)) continue;
+        if (point.y < minY || point.y > maxY) continue;
+      }
+      if (isPointOnDrawing(point, d)) return d;
+    }
     return null;
   };
 
@@ -311,7 +334,7 @@ export function useChartDrawings({
       const drawing = getDrawings().find(d => d.id === selectedDrawingIdRef.current);
       if (drawing) {
         const hIdx = getResizeHandleAtPoint(point, drawing);
-        if (hIdx !== -1) { pushToHistory(); setIsResizing(true); setResizeHandleIndex(hIdx); return true; }
+        if (hIdx !== -1) { pushToHistory(); isInteractingRef.current = true; setIsResizing(true); setResizeHandleIndex(hIdx); return true; }
       }
     }
 
@@ -321,6 +344,7 @@ export function useChartDrawings({
       setSelectedDrawingId(found.id);
       const pts = found.points.map(p => convertLogicalToPixel(p));
       setDragOffset({ x: point.x - pts[0].x, y: point.y - pts[0].y });
+      isInteractingRef.current = true;
       setIsDragging(true);
       return true;
     }
@@ -346,9 +370,10 @@ export function useChartDrawings({
     if (!canvasRef.current || !chartApi || !seriesApi) return;
     const point = getChartCoordinates(event, canvasRef.current);
 
-    if (isResizingRef.current && selectedDrawingIdRef.current) {
+    if (isResizingRef.current && isInteractingRef.current && selectedDrawingIdRef.current) {
       const hIdx = resizeHandleIndexRef.current;
-      setDrawings(prev => prev.map(d => {
+      const source = dragBufferRef.current ?? getDrawings();
+      const updated = source.map(d => {
         if (d.id !== selectedDrawingIdRef.current) return d;
         const ts = chartApi.timeScale();
         const logical = ts.coordinateToLogical(point.x);
@@ -359,20 +384,21 @@ export function useChartDrawings({
            if (p1 && p2 && Math.abs(p1 - p2) > 0) {
              const dist = Math.abs(p1 - p2);
              const newQty = Math.floor(riskPerTrade / dist);
-             if (newQty !== useSessionStore.getState().tradeQuantity) {
-               setTradeQuantity(newQty);
-             }
+             if (newQty !== useSessionStore.getState().tradeQuantity) setTradeQuantity(newQty);
              setManualLevels({ sl: p2, target: p1 + (p1 - p2) * 2, entry: p1 });
            }
         }
         return { ...d, points: newPoints };
-      }));
+      });
+      dragBufferRef.current = updated;
       canvasRef.current.style.cursor = 'crosshair';
+      scheduleRender();
       return;
     }
 
-    if (isDraggingRef.current && selectedDrawingIdRef.current) {
-      setDrawings(prev => prev.map(d => {
+    if (isDraggingRef.current && isInteractingRef.current && selectedDrawingIdRef.current) {
+      const source = dragBufferRef.current ?? getDrawings();
+      const updated = source.map(d => {
         if (d.id !== selectedDrawingIdRef.current) return d;
         const pts = d.points.map(p => convertLogicalToPixel(p));
         const dx = (point.x - dragOffsetRef.current.x) - pts[0].x;
@@ -386,14 +412,14 @@ export function useChartDrawings({
           const p1 = newPoints[0].price, p2 = newPoints[1]?.price;
           if (p1 && p2 && Math.abs(p1 - p2) > 0) {
             const newQty = Math.floor(riskPerTrade / Math.abs(p1 - p2));
-            if (newQty !== useSessionStore.getState().tradeQuantity) {
-              setTradeQuantity(newQty);
-            }
+            if (newQty !== useSessionStore.getState().tradeQuantity) setTradeQuantity(newQty);
             setManualLevels({ sl: p2, target: p1 + (p1 - p2) * 2, entry: p1 });
           }
         }
         return { ...d, points: newPoints };
-      }));
+      });
+      dragBufferRef.current = updated;
+      scheduleRender();
       return;
     }
 
@@ -422,8 +448,16 @@ export function useChartDrawings({
   }, [getChartCoordinates, convertLogicalToPixel, chartApi, seriesApi, riskPerTrade, setTradeQuantity, setManualLevels]);
 
   const handleMouseUp = useCallback(() => {
-    if (isResizingRef.current) { setIsResizing(false); setResizeHandleIndex(-1); return; }
-    if (isDraggingRef.current) { setIsDragging(false); return; }
+    if (isResizingRef.current) {
+      isInteractingRef.current = false;
+      if (dragBufferRef.current) { setDrawings(dragBufferRef.current); dragBufferRef.current = null; }
+      setIsResizing(false); setResizeHandleIndex(-1); return;
+    }
+    if (isDraggingRef.current) {
+      isInteractingRef.current = false;
+      if (dragBufferRef.current) { setDrawings(dragBufferRef.current); dragBufferRef.current = null; }
+      setIsDragging(false); return;
+    }
     if (!isDrawingRef.current || activeToolRef.current === 'none') return;
 
     const pts = currentDrawingRef.current;
@@ -605,8 +639,24 @@ export function useChartDrawings({
     if (!ctx) return;
     ctx.clearRect(0, 0, canvasRef.current.width, canvasRef.current.height);
     const { currentIndex: cIdx, isLiveMode } = useSessionStore.getState();
-    getDrawings().forEach(d => {
+
+    // Viewport culling: use logical bar indices (same units as d.points[].time)
+    const logicalRange = chartApi.timeScale().getVisibleLogicalRange() as { from: number; to: number } | null;
+
+    // Use drag buffer only while an interaction is genuinely active (synchronous flag,
+    // not the useEffect-delayed isDraggingRef/isResizingRef which lag by one render).
+    const drawingsToRender = (isInteractingRef.current && dragBufferRef.current) ? dragBufferRef.current : getDrawings();
+    drawingsToRender.forEach(d => {
       if (!isLiveMode && d.points[0]?.time !== undefined && Math.floor(d.points[0].time) > cIdx) return;
+      // Skip drawings whose every point is outside the visible bar range.
+      // Horizontal lines span the full width so they're never culled.
+      if (logicalRange && d.points.length > 0 && d.type !== 'horizontal') {
+        const pad = 5; // extra bars of leeway for trendlines that extend past their anchor
+        const allOutside = d.points.every(
+          p => p.time !== undefined && (p.time < logicalRange.from - pad || p.time > logicalRange.to + pad)
+        );
+        if (allOutside) return;
+      }
       const pts = d.points.map(p => convertLogicalToPixel(p));
       const isSel = d.id === selectedDrawingId;
       const col = d.color || '#000000';

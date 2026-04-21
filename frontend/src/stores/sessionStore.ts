@@ -55,6 +55,11 @@ interface SessionStore {
   secondaryCandles: Candle[];
   crosshairPosition: { time: number | null; price: number | null; sourceChartId: 'primary' | 'secondary' | null };
 
+  // Set to true when addLiveCandle() updates the last candle price (same timestamp),
+  // false when a genuinely new candle is appended. Lets AdvancedChart skip expensive
+  // indicator / marker rebuilds on price-only ticks.
+  isLivePriceUpdate: boolean;
+
   // Shared chart tool/indicator state (applies to the active/focused chart)
   activeChartId: 'primary' | 'secondary';
   sharedActiveTool: string;
@@ -168,6 +173,7 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
   secondaryIndicators: ['ema21', 'pivotPoints', 'alBrooks'],
   drawings: [],
   secondaryDrawings: [],
+  isLivePriceUpdate: false,
 
   // Actions
   setDrawings: (drawings) => {
@@ -344,10 +350,12 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
     } else {
       newCandles = [...candles, candle];
     }
-    set({ candles: newCandles });
-    if (isLiveMode) {
-      set({ currentIndex: newCandles.length - 1 });
-    }
+    const isLivePriceUpdate = !!(lastCandle && lastCandle.timestamp === candle.timestamp);
+    set({
+      candles: newCandles,
+      isLivePriceUpdate,
+      ...(isLiveMode ? { currentIndex: newCandles.length - 1 } : {}),
+    });
   },
 
   play: () => set({ isPlaying: true }),

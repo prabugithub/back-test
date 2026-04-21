@@ -105,6 +105,14 @@ export function AdvancedChart({
   const isFirstLoadRef = useRef(true);
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
 
+  // Perf: skip indicator/marker rebuilds when only the live price updated (no new candle)
+  const lastIndicatorCandleCountRef = useRef(0);
+  const lastIndicatorTimestampRef = useRef(0);
+  const lastIndicatorKeyRef = useRef('');
+  const lastMarkerCandleCountRef = useRef(0);
+  const lastMarkerTradeCountRef = useRef(0);
+  const lastMarkerConfigKeyRef = useRef('');
+
   const handleTextToolTrigger = useCallback((point: Point) => {
     setPendingTextPoint(point);
     setPendingCalloutPoints(null);
@@ -670,6 +678,18 @@ export function AdvancedChart({
   useEffect(() => {
     if (!chart) return;
 
+    // Skip if only a live price tick updated the last candle — no new candle, same structure.
+    // activeIndicators changes produce a different key, so they always pass through.
+    const lastCandle = visibleCandles[visibleCandles.length - 1];
+    const indicatorKey = activeIndicators.join(',');
+    const sameCount = visibleCandles.length === lastIndicatorCandleCountRef.current;
+    const sameTimestamp = lastCandle?.timestamp === lastIndicatorTimestampRef.current;
+    const sameKey = indicatorKey === lastIndicatorKeyRef.current;
+    if (sameCount && sameTimestamp && sameKey) return;
+    lastIndicatorCandleCountRef.current = visibleCandles.length;
+    lastIndicatorTimestampRef.current = lastCandle?.timestamp ?? 0;
+    lastIndicatorKeyRef.current = indicatorKey;
+
     const indicatorsToKeep = new Set(activeIndicators);
 
     // Remove series that are no longer active
@@ -708,6 +728,17 @@ export function AdvancedChart({
   // Update markers (Trades and Pivot Points)
   useEffect(() => {
     if (!markersPrimitiveRef.current || visibleCandles.length === 0) return;
+
+    // Skip if only a live price tick arrived — no new candle and no trade/indicator change.
+    const markerConfigKey = `${activeIndicators.join(',')}|${showMarkers}|${useAtrForSignals}|${isSecondary}|${secondaryTimeframe}|${sessionConfig?.interval ?? ''}`;
+    const structureSame =
+      visibleCandles.length === lastMarkerCandleCountRef.current &&
+      trades.length === lastMarkerTradeCountRef.current &&
+      markerConfigKey === lastMarkerConfigKeyRef.current;
+    if (structureSame) return;
+    lastMarkerCandleCountRef.current = visibleCandles.length;
+    lastMarkerTradeCountRef.current = trades.length;
+    lastMarkerConfigKeyRef.current = markerConfigKey;
 
     const allMarkers: any[] = [];
 
