@@ -352,7 +352,7 @@ export async function placeOrder(params: {
 
         const response = await axios.post('https://api.dhan.co/v2/orders', {
             dhanClientId: clientID,
-            correlationId: `backtest-${Date.now()}`,
+            correlationId: `backtest${Date.now()}`,
             transactionType: params.transactionType,
             exchangeSegment: params.exchangeSegment,
             productType: params.productType || 'INTRADAY',
@@ -364,7 +364,6 @@ export async function placeOrder(params: {
             disclosedQuantity: 0,
             triggerPrice: 0,
             afterMarketOrder: false,
-            amoTime: 'OPEN',
             boProfitValue: 0,
             boStopLossValue: 0
         }, {
