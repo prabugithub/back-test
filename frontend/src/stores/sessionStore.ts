@@ -6,7 +6,13 @@ import { saveSession, loadSession, restoreBackup, saveSnapshot, listSnapshots, l
 import { useNotificationStore } from './notificationStore';
 import { calculatePivotPoints } from '../utils/indicators';
 import { analyzeMarketStructure } from '../utils/pivotAnalysis';
-import { placeLiveOrder, getATMOption, getOptionLTP, executeSmartExit, getLivePositions, registerPositionMonitor, unregisterPositionMonitor, updatePositionMonitor } from '../services/api';
+import { getLivePositions } from '../services/api';
+import {
+  executeLiveOrder,
+  registerMonitorIfNeeded,
+  syncTargetWithMonitor,
+  pollOrderFillStatus,
+} from '../services/liveExecutionService';
 
 export interface SessionConfig {
   securityId: string;
@@ -191,6 +197,14 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
     }, 2000);
   },
   loadCandles: (candles, instrument, config) => {
+    // Block only when there is an active broker-backed position — loading candles
+    // would wipe liveOptionToken and the open position record.
+    const activePos = get().position as any;
+    if (activePos?.liveOptionToken) {
+      console.warn('[Safety] loadCandles blocked — active live option position open');
+      useNotificationStore.getState().notify('Cannot load new data while a live option position is open. Close the position first.', 'warning');
+      return;
+    }
     set({
       candles,
       instrument,
@@ -358,11 +372,18 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
     });
   },
 
-  play: () => set({ isPlaying: true }),
+  play: () => {
+    if (get().isLiveMode) return; // playback is not valid in live mode
+    set({ isPlaying: true });
+  },
 
-  pause: () => set({ isPlaying: false }),
+  pause: () => {
+    if (get().isLiveMode) return;
+    set({ isPlaying: false });
+  },
 
   step: (direction) => {
+    if (get().isLiveMode) return; // index is driven by live ticks, not manual stepping
     const { currentIndex, candles } = get();
     if (direction === 'forward' && currentIndex < candles.length - 1) {
       const nextIndex = currentIndex + 1;
@@ -423,43 +444,63 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
       }
     }
 
-    // 3. Check for Close-based Trigger (Dialog) or Live Option Touch-based Auto Exit
+    // ── LIVE OPTION GUARD ────────────────────────────────────────────────────
+    // When a live option position is active the backend positionMonitor owns all
+    // exits. This block updates hit-flags for display purposes only and returns
+    // early so the backtest dialog/auto-exit code below can NEVER fire.
+    // exitTriggeredByBackend is a secondary guard: if the backend already fired
+    // an exit, skip even the hit-flag update to avoid a race.
+    const { isLiveMode, autoExitTarget } = get();
+    const isLiveOption = isLiveMode && (position as any).liveOptionToken;
+
+    if (isLiveOption) {
+      if ((position as any).exitTriggeredByBackend) return; // backend exit already in flight
+      const hasChanged =
+        nextSlHit !== position.slHit ||
+        nextTpHit !== position.tpHit ||
+        nextHitFirst !== position.hitFirst ||
+        nextSlDialogShown !== position.slDialogShown ||
+        nextTpDialogShown !== position.tpDialogShown;
+      if (hasChanged) {
+        set({
+          position: {
+            ...position,
+            slHit: nextSlHit,
+            tpHit: nextTpHit,
+            hitFirst: nextHitFirst,
+            slDialogShown: nextSlDialogShown,
+            tpDialogShown: nextTpDialogShown,
+          },
+        });
+      }
+      return; // backend monitor owns the exit — never fall through to dialog/auto-exit below
+    }
+    // ── BACKTEST PATH ────────────────────────────────────────────────────────
+    // Code below this line never runs when isLiveOption is true.
+
     let dialogToTrigger: 'SL' | 'TP' | null = null;
-    let autoExitSL = false;
     let autoExitTP = false;
 
-    const { isLiveMode, autoExitTarget } = get();
-    const isLiveOption = isLiveMode && position.liveOptionToken;
-
     if (isLong) {
-      if (sl > 0 && (isLiveOption ? effectiveLow : effectiveClose) <= sl && !nextSlDialogShown) {
-        // In live option mode, backend positionMonitor owns SL exit — don't double-fire here
-        if (!isLiveOption) dialogToTrigger = 'SL';
+      if (sl > 0 && effectiveClose <= sl && !nextSlDialogShown) {
+        dialogToTrigger = 'SL';
         nextSlDialogShown = true;
-      } else if (tp > 0 && (isLiveOption ? effectiveHigh : effectiveClose) >= tp && !nextTpDialogShown) {
-        // In live option mode, backend positionMonitor owns TP exit — don't double-fire here
-        if (!isLiveOption) {
-          if (autoExitTarget) autoExitTP = true;
-          else dialogToTrigger = 'TP';
-        }
+      } else if (tp > 0 && effectiveClose >= tp && !nextTpDialogShown) {
+        if (autoExitTarget) autoExitTP = true;
+        else dialogToTrigger = 'TP';
         nextTpDialogShown = true;
       }
     } else {
-      if (sl > 0 && (isLiveOption ? effectiveHigh : effectiveClose) >= sl && !nextSlDialogShown) {
-        // In live option mode, backend positionMonitor owns SL exit — don't double-fire here
-        if (!isLiveOption) dialogToTrigger = 'SL';
+      if (sl > 0 && effectiveClose >= sl && !nextSlDialogShown) {
+        dialogToTrigger = 'SL';
         nextSlDialogShown = true;
-      } else if (tp > 0 && (isLiveOption ? effectiveLow : effectiveClose) <= tp && !nextTpDialogShown) {
-        // In live option mode, backend positionMonitor owns TP exit — don't double-fire here
-        if (!isLiveOption) {
-          if (autoExitTarget) autoExitTP = true;
-          else dialogToTrigger = 'TP';
-        }
+      } else if (tp > 0 && effectiveClose <= tp && !nextTpDialogShown) {
+        if (autoExitTarget) autoExitTP = true;
+        else dialogToTrigger = 'TP';
         nextTpDialogShown = true;
       }
     }
 
-    // Sync state if any change occurred
     const hasChanged =
       nextSlHit !== position.slHit ||
       nextTpHit !== position.tpHit ||
@@ -467,7 +508,7 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
       nextSlDialogShown !== position.slDialogShown ||
       nextTpDialogShown !== position.tpDialogShown;
 
-    if (hasChanged || dialogToTrigger || autoExitSL || autoExitTP) {
+    if (hasChanged || dialogToTrigger || autoExitTP) {
       const updatedPosition = {
         ...position,
         slHit: nextSlHit,
@@ -477,39 +518,22 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
         tpDialogShown: nextTpDialogShown,
       };
 
-      if (autoExitSL) {
-        // Immediately fire the exit trade locally to clean UI and trigger backend smart-exit via executeTrade
+      if (autoExitTP) {
         set({ position: updatedPosition });
-        
-        // Push a notification that we are auto-exiting via smart chaser
         useNotificationStore.getState().notify(
-            `SL Hit at ${sl.toFixed(2)}. Initiating Smart Exit Chaser for protecting capital.`, 
-            'warning'
+          `Target Hit at ${tp.toFixed(2)}. Auto Exiting based on Risk settings.`,
+          'success'
         );
-
         get().executeTrade(
-           isLong ? 'SELL' : 'BUY',
-           Math.abs(position.quantity),
-           undefined, undefined, undefined, 'SL'
-        );
-      } else if (autoExitTP) {
-        set({ position: updatedPosition });
-        
-        useNotificationStore.getState().notify(
-            `Target Hit at ${tp.toFixed(2)}. Auto Exiting based on Risk settings.`, 
-            'success'
-        );
-
-        get().executeTrade(
-           isLong ? 'SELL' : 'BUY',
-           Math.abs(position.quantity),
-           undefined, undefined, undefined, 'TP'
+          isLong ? 'SELL' : 'BUY',
+          Math.abs(position.quantity),
+          undefined, undefined, undefined, 'TP'
         );
       } else if (dialogToTrigger) {
         set({
           isPlaying: false,
           pendingExitRequest: { type: dialogToTrigger, price: dialogToTrigger === 'SL' ? sl : tp, spotPrice: close },
-          position: updatedPosition
+          position: updatedPosition,
         });
       } else {
         set({ position: updatedPosition });
@@ -602,169 +626,31 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
     const isReducing = (currentQty > 0 && tradeSign < 0) || (currentQty < 0 && tradeSign > 0);
     const isSameDirection = (currentQty > 0 && tradeSign > 0) || (currentQty < 0 && tradeSign < 0);
 
-    // Initial quantity calculation (will be refined for live index trades once lotSize is fetched)
     let finalQuantity = quantity;
-
     let atmOptionToken: string | undefined = undefined;
     let tradeOptionType: 'CE' | 'PE' | undefined = undefined;
 
-    // Handle Live Order Placement
+    // ── LIVE PATH ────────────────────────────────────────────────────────────
+    // All broker API calls are delegated to liveExecutionService — no live
+    // code exists below this block.
     if (isLiveMode && sessionConfig) {
       try {
-        let liveSecurityId = sessionConfig.securityId;
-        let liveExchange = sessionConfig.exchangeSegment;
-        let liveTransactionType = type;
-        let limitPrice: number | undefined = undefined;
-
-        // If it's an Index (NIFTY/BANKNIFTY) live trade → place via ATM Option
-        const isNiftyIndex = (typeof instrument === 'string' && instrument.toUpperCase().includes('NIFTY')) || String(sessionConfig.securityId) === '13';
-        const isBankNiftyIndex = (typeof instrument === 'string' && instrument.toUpperCase().includes('BANKNIFTY')) || String(sessionConfig.securityId) === '25';
-        
-        if (isNiftyIndex || isBankNiftyIndex) {
-            // Guard: block adding to an already-open option position to prevent accidental doubles.
-            // isReducing = true means the trade closes/reduces the current position (allowed).
-            // isSameDirection = true means it would ADD to the current position (blocked).
-            if (position && position.liveOptionToken && isSameDirection) {
-               useNotificationStore.getState().notify(
-                 `Already in an open option position (${position.instrument}). Close it before opening a new one.`,
-                 'warning'
-               );
-               return;
-            }
-
-            if (position && position.liveOptionToken) {
-               // CLOSING/REDUCING: exit the exact option we hold.
-               liveSecurityId = position.liveOptionToken;
-               liveExchange = 'NSE_FNO';
-               liveTransactionType = isReducing ? 'SELL' : 'BUY';
-               finalQuantity = position.filledQty ?? Math.abs(position.quantity);
-               tradeOptionType = position.quantity > 0 ? 'CE' : 'PE';
-
-               // For SL exits: fetch the held option's current LTP to anchor the 3-step
-               // LIMIT→LIMIT→MARKET smart exit chaser. Falls back to MARKET if LTP unavailable.
-               if (exitReason === 'SL') {
-                 limitPrice = await getOptionLTP(String(liveSecurityId)) ?? undefined;
-               } else {
-                 // TP and MANUAL exits use MARKET — no limit anchor needed.
-                 limitPrice = undefined;
-               }
-
-               // Unregister backend monitor BEFORE placing the exit order to prevent a race
-               // where both frontend and backend fire a SELL on the same position.
-               await unregisterPositionMonitor(position.liveOptionToken).catch((e) =>
-                   console.warn('[Monitor] Pre-exit unregister failed:', e)
-               );
-            } else {
-               // OPENING: Fetch the ATM weekly option token and its current LTP
-               const optType = type === 'BUY' ? 'CE' : 'PE';
-               tradeOptionType = optType;
-               const instName = isBankNiftyIndex ? 'BANKNIFTY' : 'NIFTY';
-               const optData = await getATMOption(currentPrice, optType, instName);
-               if (optData && optData.success && optData.data) {
-                  liveSecurityId = optData.data.securityId;
-                  liveExchange = 'NSE_FNO';
-                  liveTransactionType = 'BUY';
-                  atmOptionToken = liveSecurityId;
-                  limitPrice = optData.data.ltp || undefined;
-                  
-                  // Refine quantity based on official lot size from backend
-                  if (optData.data.lotSize) {
-                     const lotSize = optData.data.lotSize;
-                     const fraction = quantity / lotSize;
-                     const lots = Math.round(fraction);
-                     if (lots === 0) {
-                        useNotificationStore.getState().notify(
-                          `Cannot place order: calculated quantity (${quantity}) is less than half a lot (lot size: ${lotSize}). Increase risk amount or reduce SL distance.`,
-                          'error'
-                        );
-                        return;
-                     }
-                     finalQuantity = lots * lotSize;
-                  }
-
-                  useNotificationStore.getState().notify(
-                    `ATM Option: ${optData.data.tradingSymbol} | Qty: ${finalQuantity} (${Math.round(finalQuantity / (optData.data.lotSize || 1))} lots)`,
-                    'info'
-                  );
-               } else {
-                  throw new Error('Could not find ATM Option token. Symbol Master may not be ready.');
-               }
-            }
-        }
-
-        let orderTypeToUse: 'LIMIT' | 'MARKET' = 'LIMIT';
-        if (!limitPrice) {
-          orderTypeToUse = 'MARKET';
-          // SL exits handle the "no LTP" notification in their own branch below
-          if (exitReason !== 'SL') {
-            console.warn('LTP not available for option, falling back to MARKET order');
-            useNotificationStore.getState().notify('LTP unavailable: Placing MARKET order instead of LIMIT', 'warning');
-          }
-        }
-
-        // Fail-safe: Ensure we never send an index directly to Dhan API
-        if (liveExchange === 'IDX_I' || String(liveSecurityId) === '13' || String(liveSecurityId) === '25') {
-          throw new Error(`Invalid live order: Attempted to trade Index ${liveSecurityId} directly. Ensure Symbol Master is resolving ATM options.`);
-        }
-
-        let orderResult;
-
-        if (exitReason === 'SL' && position && position.liveOptionToken && isLiveMode) {
-             if (limitPrice) {
-               // Use the option's current LTP (fetched above via getATMOption) as the Smart Exit
-               // anchor price. position.stopLoss is the SPOT level, not the option premium.
-               orderResult = await executeSmartExit({
-                   securityId: String(liveSecurityId),
-                   exchangeSegment: liveExchange,
-                   transactionType: liveTransactionType,
-                   quantity: finalQuantity,
-                   slPrice: limitPrice
-               });
-             } else {
-               // No LTP available — place market order immediately instead of chasing
-               useNotificationStore.getState().notify('No option LTP available for Smart Exit; placing MARKET order directly.', 'warning');
-               orderResult = await placeLiveOrder({
-                   securityId: String(liveSecurityId),
-                   exchangeSegment: liveExchange,
-                   transactionType: liveTransactionType,
-                   quantity: finalQuantity,
-                   price: 0,
-                   orderType: 'MARKET',
-                   productType: 'INTRADAY'
-               });
-             }
-        } else {
-             orderResult = await placeLiveOrder({
-               securityId: String(liveSecurityId),
-               exchangeSegment: liveExchange,
-               transactionType: liveTransactionType,
-               quantity: finalQuantity,
-               price: orderTypeToUse === 'LIMIT' ? limitPrice : 0,
-               orderType: orderTypeToUse,
-               productType: 'INTRADAY'
-             });
-        }
-
-        if (orderResult && orderResult.success) {
-           const placedOrderId: string | undefined = orderResult.data?.orderId || orderResult.orderId;
-           const logMsg = exitReason === 'SL' ? `Smart Exit Launched` : `Live Order Placed`;
-           useNotificationStore.getState().notify(`${logMsg}: ${liveTransactionType} ${finalQuantity} @ ₹${limitPrice?.toFixed(2) || 'auto'} (ID: ${placedOrderId || 'N/A'})`, 'info');
-
-           // Store orderId for fill-status polling (cleared once confirmed/rejected)
-           if (placedOrderId) {
-             // Shallow update — position object is built below; store the id temporarily in a
-             // module-level variable so the position builder can attach it.
-             pendingLiveOrderId = placedOrderId;
-           }
-        } else {
-           useNotificationStore.getState().notify(`Live Order Failed: ${orderResult?.message || 'Unknown error'}`, 'error');
-           return;
-        }
+        const notify = (msg: string, t: any) => useNotificationStore.getState().notify(msg, t);
+        const result = await executeLiveOrder(
+          { type, quantity, exitReason, currentPrice, instrument, sessionConfig, position },
+          notify
+        );
+        if (result === null) return; // blocked by guard or order failed
+        finalQuantity = result.finalQuantity;
+        atmOptionToken = result.atmOptionToken;
+        tradeOptionType = result.tradeOptionType;
+        if (result.pendingOrderId) pendingLiveOrderId = result.pendingOrderId;
       } catch (error: any) {
         useNotificationStore.getState().notify(`Error placing live option order: ${error.message}`, 'error');
         return;
       }
     }
+    // ── BACKTEST PATH (and shared position-building logic) ───────────────────
 
     const tradeQtySigned = finalQuantity * tradeSign;
     const newQty = currentQty + tradeQtySigned;
@@ -892,92 +778,51 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
       manualLevels: null,
     });
 
-    // Register / unregister backend position monitor so SL/TP fires even if browser is closed
+    // ── LIVE: register backend position monitor ──────────────────────────────
     if (get().isLiveMode) {
       const sessionCfg = get().sessionConfig;
-      if (nextPosition === null) {
-        // Unregister was already called pre-order for live option closes (see above).
-        // Nothing more to do here for the backend monitor.
-      } else if (nextPosition.liveOptionToken && sessionCfg) {
-        // New / updated live option position — register (or re-register) with backend
-        const isLongPos = nextPosition.quantity > 0;
-        registerPositionMonitor({
-          id: nextPosition.liveOptionToken,
-          spotToken: String(sessionCfg.securityId),
-          spotSegment: sessionCfg.exchangeSegment || 'IDX_I',
-          direction: isLongPos ? 'LONG' : 'SHORT',
-          stopLoss: nextPosition.stopLoss ?? 0,
-          target: nextPosition.target ?? 0,
-          optionSecurityId: nextPosition.liveOptionToken,
-          optionExchangeSegment: 'NSE_FNO',
-          quantity: Math.abs(nextPosition.quantity),
-          entryPrice: nextPosition.averagePrice,
-          productType: 'INTRADAY',
-        }).catch((e) => console.warn('[Monitor] Register failed:', e));
+      if (nextPosition && sessionCfg) {
+        registerMonitorIfNeeded(nextPosition, sessionCfg);
       }
+      // Unregister was already called pre-order for live option closes (in liveExecutionService).
     }
 
-    // After order placement, poll Dhan once (after ~2 s) to verify fill status.
-    // Updates position.filledQty and shows a toast on rejection.
+    // ── LIVE: poll Dhan for fill status ~2 s after placement ─────────────────
     if (newPositionState.pendingOrderId && get().isLiveMode) {
       const orderIdToCheck = newPositionState.pendingOrderId;
-      setTimeout(async () => {
-        try {
-          const { getOrderStatus } = await import('../services/api');
-          const resp = await getOrderStatus(orderIdToCheck);
-          const order = resp?.data;
-          if (!order) return;
-
-          const status: string = order.orderStatus || '';
-          const filled: number = order.tradedQuantity ?? order.filledQty ?? 0;
-          const remaining: number = order.remainingQuantity ?? 0;
-
-          if (status === 'REJECTED') {
-            useNotificationStore.getState().notify(
-              `Order REJECTED: ${order.rejectedReason || 'Unknown reason'}. Clearing position.`,
-              'error'
-            );
-            // Capture option token before clearing position
-            const rejectedToken = get().position?.liveOptionToken;
-            // Position no longer valid — clear it
-            set((s) => ({
-              position: s.position?.pendingOrderId === orderIdToCheck ? null : s.position
-            }));
-            // Also remove backend monitor that was registered for the phantom position
-            if (rejectedToken && get().isLiveMode) {
-              const { unregisterPositionMonitor: unregister } = await import('../services/api');
-              unregister(rejectedToken).catch(() => {});
-            }
-          } else if (status === 'PARTIALLY_TRADED') {
-            useNotificationStore.getState().notify(
-              `Order PARTIAL FILL: ${filled} filled, ${remaining} pending.`,
-              'warning'
-            );
-            set((s) => {
-              if (!s.position || s.position.pendingOrderId !== orderIdToCheck) return s;
-              return { position: { ...s.position, filledQty: filled, pendingOrderId: undefined } };
-            });
-            // Sync backend monitor quantity to actual filled qty so exit order matches broker position
-            const partialToken = get().position?.liveOptionToken;
-            if (partialToken && get().isLiveMode && filled > 0) {
-              const { updatePositionMonitor: updateMonitor } = await import('../services/api');
-              updateMonitor(partialToken, { quantity: filled }).catch(() => {});
-            }
-          } else {
-            // TRADED or any other terminal state — mark as confirmed
-            set((s) => {
-              if (!s.position || s.position.pendingOrderId !== orderIdToCheck) return s;
-              return { position: { ...s.position, filledQty: filled, pendingOrderId: undefined } };
-            });
-          }
-        } catch (e) {
-          console.warn('Order status poll failed:', e);
-        }
-      }, 2000);
+      const notify = (msg: string, t: any) => useNotificationStore.getState().notify(msg, t);
+      pollOrderFillStatus(orderIdToCheck, {
+        getPosition: () => get().position,
+        isLiveMode: () => get().isLiveMode,
+        onRejected: () => {
+          set((s) => ({
+            position: s.position?.pendingOrderId === orderIdToCheck ? null : s.position,
+          }));
+        },
+        onPartialFill: (filled) => {
+          set((s) => {
+            if (!s.position || s.position.pendingOrderId !== orderIdToCheck) return s;
+            return { position: { ...s.position, filledQty: filled, pendingOrderId: undefined } };
+          });
+        },
+        onFilled: (filled) => {
+          set((s) => {
+            if (!s.position || s.position.pendingOrderId !== orderIdToCheck) return s;
+            return { position: { ...s.position, filledQty: filled, pendingOrderId: undefined } };
+          });
+        },
+        notify,
+      });
     }
   },
 
   resetSession: () => {
+    // Block in live mode — resetting would clear an active live position and trades
+    if (get().isLiveMode) {
+      console.warn('[Safety] resetSession blocked while in live mode');
+      useNotificationStore.getState().notify('Cannot reset session while in live mode. Disable live mode first.', 'warning');
+      return;
+    }
     set({
       currentIndex: 0,
       trades: [],
@@ -1314,6 +1159,7 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
   },
 
   jump: (count) => {
+    if (get().isLiveMode) return; // index is driven by live ticks, not manual jumps
     const { currentIndex, candles } = get();
     const newIndex = currentIndex + count;
     if (newIndex >= 0 && newIndex < candles.length) {
@@ -1418,8 +1264,7 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
     set({ position: { ...position, target: newTarget, tpHit: false, tpDialogShown: false } });
     // Sync to backend monitor if live
     if (isLiveMode && position.liveOptionToken) {
-      await updatePositionMonitor(position.liveOptionToken, { target: newTarget })
-        .catch((e) => console.warn('[Monitor] Update target failed:', e));
+      await syncTargetWithMonitor(position.liveOptionToken, newTarget);
     }
     useNotificationStore.getState().notify(`Target updated to ${newTarget.toFixed(2)}`, 'success');
   },

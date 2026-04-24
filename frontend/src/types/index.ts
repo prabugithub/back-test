@@ -49,8 +49,8 @@ export interface Trade {
   optionType?: 'CE' | 'PE';
 }
 
-// Position tracking
-export interface Position {
+// Position tracking — shared base fields present in both modes
+interface PositionBase {
   instrument: string;
   quantity: number;
   averagePrice: number;
@@ -66,6 +66,18 @@ export interface Position {
   trendReversed?: boolean;
   trendReversedPnL?: number;
   withTrendSeen?: boolean;
+}
+
+// Backtest position: broker fields must never be present
+export interface BacktestPosition extends PositionBase {
+  liveOptionToken?: never;
+  pendingOrderId?: never;
+  filledQty?: never;
+  exitTriggeredByBackend?: never;
+}
+
+// Live position: may carry broker-specific fields
+export interface LivePosition extends PositionBase {
   liveOptionToken?: string;
   // Set immediately after order placement; cleared once fill is confirmed or order rejected
   pendingOrderId?: string;
@@ -75,6 +87,9 @@ export interface Position {
   // placing a duplicate exit order while the backend's MARKET order is already in flight
   exitTriggeredByBackend?: boolean;
 }
+
+// Position is the union used throughout the app (store, components, etc.)
+export type Position = BacktestPosition | LivePosition;
 
 // API request/response types
 export interface GetCandlesParams {
