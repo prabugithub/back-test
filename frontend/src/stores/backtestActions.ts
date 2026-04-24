@@ -2,14 +2,9 @@
 // All playback, candle navigation, trade dialog, and session reset logic lives here.
 
 import { useNotificationStore } from './notificationStore';
-import type { SessionStore } from './sessionStore';
+import type { SessionStore, StoreSet, StoreGet } from './sessionStore';
 
-type Set = (
-  partial: Partial<SessionStore> | ((s: SessionStore) => Partial<SessionStore>)
-) => void;
-type Get = () => SessionStore;
-
-export function createBacktestActions(set: Set, get: Get) {
+export function createBacktestActions(set: StoreSet, get: StoreGet) {
   return {
     loadCandles: (candles: SessionStore['candles'], instrument: string, config?: SessionStore['sessionConfig']) => {
       // Block only when a live broker-backed position is open — loading candles would

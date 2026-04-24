@@ -15,6 +15,13 @@ export interface SessionConfig {
   dataSource: 'api' | 'local';
 }
 
+// Shared set/get types imported by all action modules — avoids `set as any` casts.
+export type StoreSet = (
+  partial: SessionStore | Partial<SessionStore> | ((state: SessionStore) => SessionStore | Partial<SessionStore>),
+  replace?: boolean
+) => void;
+export type StoreGet = () => SessionStore;
+
 export interface SessionStore {
   // ── Data ────────────────────────────────────────────────────────────────────
   candles: Candle[];
@@ -160,7 +167,7 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
   isLivePriceUpdate: false,
 
   // ── Actions composed from isolated modules ───────────────────────────────────
-  ...createBacktestActions(set as any, get),
-  ...createLiveActions(set as any, get),
-  ...createSharedActions(set as any, get),
+  ...createBacktestActions(set, get),
+  ...createLiveActions(set, get),
+  ...createSharedActions(set, get),
 }));

@@ -3,17 +3,11 @@
 
 import { getLivePositions } from '../services/api';
 import { useNotificationStore } from './notificationStore';
-import type { SessionStore } from './sessionStore';
+import type { SessionStore, StoreSet, StoreGet } from './sessionStore';
 
-type Set = (
-  partial: Partial<SessionStore> | ((s: SessionStore) => Partial<SessionStore>)
-) => void;
-type Get = () => SessionStore;
-
-// Interval that periodically syncs broker position state while in live mode
-let syncIntervalId: ReturnType<typeof setInterval> | null = null;
-
-export function createLiveActions(set: Set, get: Get) {
+export function createLiveActions(set: StoreSet, get: StoreGet) {
+  // Scoped to this closure so multiple store instances don't share interval state
+  let syncIntervalId: ReturnType<typeof setInterval> | null = null;
   return {
     setLiveMode: (isLive: boolean) => {
       set({ isLiveMode: isLive });

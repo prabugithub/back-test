@@ -20,25 +20,16 @@ import {
   pollOrderFillStatus,
 } from '../services/liveExecutionService';
 import type { Trade, Position, TradeJournal } from '../types';
-import type { SessionStore, SessionConfig } from './sessionStore';
-
-type Set = (
-  partial: Partial<SessionStore> | ((s: SessionStore) => Partial<SessionStore>)
-) => void;
-type Get = () => SessionStore;
+import type { SessionStore, SessionConfig, StoreSet, StoreGet } from './sessionStore';
 
 const generateTradeId = () =>
   `${Date.now()}-${Math.random().toString(36).substring(2, 11)}`;
 
-// Temporarily holds the orderId of the most recently placed live order so the
-// position builder can attach it for fill-status polling.
-let pendingLiveOrderId: string | undefined = undefined;
-
-// Module-level timers for debounced drawings auto-save
-let _drawingsSaveTimer: ReturnType<typeof setTimeout> | null = null;
-let _secondaryDrawingsSaveTimer: ReturnType<typeof setTimeout> | null = null;
-
-export function createSharedActions(set: Set, get: Get) {
+export function createSharedActions(set: StoreSet, get: StoreGet) {
+  // Scoped to this closure — avoids shared state across hot-reloads or multiple instances
+  let pendingLiveOrderId: string | undefined = undefined;
+  let _drawingsSaveTimer: ReturnType<typeof setTimeout> | null = null;
+  let _secondaryDrawingsSaveTimer: ReturnType<typeof setTimeout> | null = null;
   return {
     setDrawings: (drawings: SessionStore['drawings']) => {
       set({ drawings });
