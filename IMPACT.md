@@ -6,9 +6,23 @@ Keep this updated whenever the architecture changes (new component, store action
 
 ---
 
-## sessionStore.ts (Zustand store)
+## Store Architecture (Phase 3 — Action Module Split)
 
-The central store. Changes here have the widest blast radius.
+`sessionStore.ts` is now a **thin composition layer** — it holds state definitions and wires three action modules via spread. Logic lives in the action files, not in sessionStore itself.
+
+| File | Owns | Boundary contract |
+|------|------|-------------------|
+| `stores/sessionStore.ts` | State shape, `StoreSet`/`StoreGet` types, initial values | No logic — composition only |
+| `stores/backtestActions.ts` | Playback, candle nav, trade dialog, session reset | `@backtest-only` — must never import `liveExecutionService` or live API fns |
+| `stores/liveActions.ts` | Live tick handling, candle updates, position sync | `@live-only` — must never import backtest or playback logic |
+| `stores/sharedActions.ts` | `executeTrade`, `checkSLTPHits`, Firebase, drawings, indicators | May import `liveExecutionService` for the live dispatch path |
+| `services/liveExecutionService.ts` | All Dhan broker API calls, ATM resolution, smart exit, fill polling | `@live-only` — never import by backtest-only code |
+
+**When adding a new action:** put it in the module that matches its mode. If it truly belongs to both, put it in `sharedActions.ts` with a live guard at the top (`if (isLiveMode) { ... return; }`).
+
+---
+
+## sessionStore.ts (state fields)
 
 ### Store state fields
 
@@ -18,13 +32,47 @@ The central store. Changes here have the widest blast radius.
 | `targetRR` | PlaybackControls (trade entry calc), setTargetRR | setTargetRR (Trade Settings input) | HIGH — now also recalculates position.target |
 | `autoExitTarget` | checkSLTPHits (read at check-time) | setAutoExitTarget (Trade Settings checkbox) | HIGH |
 | `manualLevels` | handleExecuteTrade in PlaybackControls, setTargetRR (guard) | useChartDrawings RR tool, clearManualLevels | HIGH — guards TP recalculation |
-| `candles` | AdvancedChart, SessionStats, PlaybackControls | setCandles (data load), restoreSessionState | MEDIUM |
+| `candles` | AdvancedChart, SessionStats, PlaybackControls | loadCandles (data load), addLiveCandle, restoreSessionState | MEDIUM |
 | `trades` | TradeHistoryDialog, SessionStats | executeTrade, deleteTrade, editTrade | MEDIUM |
 | `drawings` | useChartDrawings (primary), AdvancedChart (primary) | setDrawings (auto-patches Firestore 2s debounce) | LOW |
 | `secondaryDrawings` | useChartDrawings (secondary), AdvancedChart (secondary) | setSecondaryDrawings (auto-patches Firestore 2s debounce) | LOW |
 | `sessionConfig` | PlaybackControls (Data Settings form) | performDataReload | MEDIUM |
 
-### Store actions — impact chains
+---
+
+## backtestActions.ts
+
+Owns all backtest-only logic. Every action guards `if (get().isLiveMode) return` at the top.
+
+#### `loadCandles(candles, instrument, config)`
+→ blocked when `position.liveOptionToken` is set (active live option) — not by `isLiveMode` broadly
+→ resets trades, position, playback state, manualLevels
+
+**Check when changing:** live position guard condition, state fields reset list
+
+#### `initiateTrade(type, qty, sl, target)`
+→ called from PlaybackControls handleExecuteTrade
+→ uses `manualLevels` (if set) OR pivot-based SL/TP with `targetRR`
+→ clears `manualLevels` after use
+
+**Check when changing:** manualLevels clearing, targetRR snapshot at entry
+
+#### `resolveExitRequest(confirm, journal)`
+→ called when user confirms/dismisses SL or TP dialog
+→ on confirm: calls `executeTrade()` with the pending exit type
+→ on dismiss: marks `slDialogShown`/`tpDialogShown` so dialog won't re-fire
+
+**Check when changing:** flag reset logic, pendingExitRequest cleared path
+
+#### `resetSession()`
+→ blocked in live mode (notifies user)
+→ resets index, trades, position, playback state
+
+---
+
+## sharedActions.ts
+
+Handles logic that runs in both modes. Live path is always top-guarded with an early return so backtest code below is never reached in live mode.
 
 #### `setTargetRR(rr)`
 → updates `targetRR`
@@ -45,26 +93,19 @@ The central store. Changes here have the widest blast radius.
 **Check when changing:** Live mode sync, notification spam, flag reset side-effects
 
 #### `executeTrade(type, qty, price)`
-→ FIFO P&L calculation
-→ updates `position`, pushes to `trades[]`
-→ opens TradeJournalDialog (on entry) or TradeExitDialog (on close)
-→ if position closed: realized P&L calculated, position reset
+→ **Live path (top guard):** calls `executeLiveOrder()` in `liveExecutionService.ts` → returns early if result is null
+→ **Shared path:** FIFO P&L calculation, updates `position`, pushes to `trades[]`
+→ if new position and live mode: calls `registerMonitorIfNeeded()`
+→ if `pendingOrderId` set and live mode: calls `pollOrderFillStatus()` 2s later
 
-**Check when changing:** P&L math (FIFO), TradeJournalDialog, TradeExitDialog, SessionStats
+**Check when changing:** P&L math (FIFO), TradeJournalDialog, TradeExitDialog, SessionStats, live monitor registration
 
-#### `checkSLTPHits(candle)`
-→ called on **every candle advance** in PlaybackControls
-→ reads `position.stopLoss`, `position.target`, `autoExitTarget`, `tpDialogShown`
-→ may trigger `executeSmartExit()` or show TP/SL dialog
+#### `checkSLTPHits(index, currentPrice?)`
+→ called on every candle advance (backtest) and on every live price tick
+→ **Live option guard (hard return at line ~136):** if `isLiveMode && liveOptionToken`, updates hit flags for display only and returns — backtest dialog/auto-exit code is physically unreachable
+→ **Backtest path:** may trigger `pendingExitRequest` dialog or auto-exit TP
 
-**Check when changing:** Any flag reset logic, autoExitTarget read timing, dialog trigger conditions
-
-#### `initiateTrade(type, qty, sl, target)`
-→ called from PlaybackControls handleExecuteTrade
-→ uses `manualLevels` (if set) OR pivot-based SL/TP with `targetRR`
-→ clears `manualLevels` after use
-
-**Check when changing:** manualLevels clearing, targetRR snapshot at entry
+**Check when changing:** live guard condition, flag reset logic, autoExitTarget read timing, dialog trigger conditions
 
 #### `restoreSessionState(state)`
 → restores all fields from Firestore snapshot
@@ -72,6 +113,46 @@ The central store. Changes here have the widest blast radius.
 → **Known gap:** restored `targetRR` and `position.target` may be inconsistent if RR was changed between saves
 
 **Check when changing:** What fields are included in snapshot, field ordering, default fallbacks
+
+---
+
+## liveActions.ts
+
+#### `setLiveMode(isLive)`
+→ starts/clears the 3s `syncLivePositions` interval (interval scoped inside closure — not module-level)
+→ on enable: jumps `currentIndex` to latest candle, fires initial sync
+
+#### `syncLivePositions()`
+→ polls `getLivePositions()` from broker every 3s
+→ matches by `liveOptionToken` if store has one, otherwise takes first open FNO position
+→ if no broker position found and store has one: clears store position (notifies user)
+
+**Check when changing:** token matching logic, position clear condition, notification spam
+
+#### `addLiveCandle(candle)`
+→ if same timestamp as last candle: updates OHLCV in-place (sets `isLivePriceUpdate = true`)
+→ if new timestamp: appends new candle (sets `isLivePriceUpdate = false`)
+→ `isLivePriceUpdate` flag lets AdvancedChart skip expensive rebuilds on price-only ticks
+
+---
+
+## liveExecutionService.ts
+
+All Dhan broker API calls live here. Called only from `sharedActions.ts` executeTrade live path.
+
+#### `executeLiveOrder(input, notify)`
+→ resolves ATM option (NIFTY/BANKNIFTY) or uses existing `liveOptionToken` for exits
+→ for SL exits: fetches option LTP → fires `executeSmartExit()` (3-step chaser)
+→ for other orders: places LIMIT (with LTP) or MARKET fallback
+→ returns `{ atmOptionToken, tradeOptionType, finalQuantity, pendingOrderId }` or `null` if blocked/failed
+→ **Guard:** never sends index token (`IDX_I`, securityId 13/25) to Dhan — throws on violation
+
+#### `pollOrderFillStatus(orderId, callbacks)`
+→ polls `getOrderStatus()` 2s after placement
+→ calls `onRejected` / `onPartialFill` / `onFilled` — state updates handled by caller (sharedActions)
+→ unregisters backend monitor on rejection to prevent phantom position
+
+**Check when changing:** token validation guard, smart exit vs LIMIT/MARKET selection logic, fill callback contract
 
 ---
 
