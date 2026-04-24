@@ -108,7 +108,7 @@ async function performRestPoll(clientID: string) {
                     io?.to(`instrument:${token}`).emit('tick', {
                         token,
                         price: lastClose,
-                        timestamp: Number(lastTs),
+                        timestamp: Math.floor(Date.now() / 1000),
                         volume: 0,
                     });
                     // Notify position monitor (runs even when no frontend is connected)

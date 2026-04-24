@@ -30,7 +30,12 @@
       "Read(//f/projects/personal project/back-test/$\\(pwd\\)/frontend/**)",
       "Read(//f/projects/personal project/back-test/$\\(pwd\\)/frontend/src/**)",
       "Read(//f/projects/personal project/back-test/$\\(pwd\\)/frontend/src/components/**)",
-      "Bash(xargs grep:*)"
+      "Bash(xargs grep:*)",
+      "Bash(npx tsc *)",
+      "Bash(Get-ChildItem -Path \"f:\\\\projects\\\\personal project\\\\back-test\" -Recurse -Depth 2)",
+      "Bash(Select-Object FullName, PSIsContainer)",
+      "Bash(Get-ChildItem -Path . -Recurse -Include \"AdvancedChart.tsx\" -ErrorAction SilentlyContinue)",
+      "Bash(Select-Object -First 5)"
     ]
   }
 }

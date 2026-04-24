@@ -619,10 +619,8 @@ export function AdvancedChart({
 
       } else if (bucketStart > lastCandle.time) {
         // ── New timeframe boundary ─────────────────────────────────────────
-        // FIX: open = close of previous candle (price continuity).
-        // tick.price arrives ~1 min late via REST poll so using lastCandle.close
-        // as the open gives correct OHLC instead of a mid-bucket price.
-        const openPrice = lastCandle.close;
+        // open = first tick of the new period (matches TradingView OHLC).
+        const openPrice = tick.price;
         const newCandle = {
           time: bucketStart as any,
           open: openPrice,
@@ -714,12 +712,15 @@ export function AdvancedChart({
         case 'ema60': data = calculateEMA(visibleCandles, 60); color = '#D81B60'; break;
       }
 
-      if (data.length > 0) {
-        let lineSeries = indicatorSeriesRef.current.get(indicator);
-        if (!lineSeries) {
-          lineSeries = chart.addSeries(LineSeries, { color, lineWidth: 2 });
-          indicatorSeriesRef.current.set(indicator, lineSeries);
-        }
+      let lineSeries = indicatorSeriesRef.current.get(indicator);
+      if (!lineSeries && data.length > 0) {
+        // Only create a new series when there is data — avoids empty phantom series
+        lineSeries = chart.addSeries(LineSeries, { color, lineWidth: 2 });
+        indicatorSeriesRef.current.set(indicator, lineSeries);
+      }
+      if (lineSeries) {
+        // Always call setData — even with [] — so old data is cleared when jumping
+        // to a position with fewer candles than the indicator period
         lineSeries.setData(data);
       }
     });
