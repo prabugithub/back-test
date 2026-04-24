@@ -115,14 +115,14 @@ export function InstrumentSelector() {
     setSearchQuery('');
   };
 
-  // Helper to find index by date
-  const findIndexByDate = (candles: any[], dateStr: string) => {
-    if (!dateStr) return 0;
+  // Helper to find index by date. Returns -1 if not found.
+  const findIndexByDate = (candles: any[], dateStr: string): number => {
+    if (!dateStr) return -1;
     const targetTs = new Date(dateStr).getTime() / 1000;
     for (let i = 0; i < candles.length; i++) {
       if (candles[i].timestamp >= targetTs) return i;
     }
-    return 0;
+    return -1;
   };
 
   const handleFetch = async (overrideConfig?: any) => {
@@ -175,7 +175,7 @@ export function InstrumentSelector() {
           // Apply initial jump if requested
           if (!overrideConfig && jumpToDate) {
             const index = findIndexByDate(response.data, jumpToDate);
-            if (index > 0) setCurrentIndex(index);
+            if (index >= 0) setCurrentIndex(index);
           }
         } else {
           setError('No data received from API');
@@ -226,7 +226,7 @@ export function InstrumentSelector() {
             // Apply initial jump if requested
             if (!overrideConfig && jumpToDate) {
               const index = findIndexByDate(resampledCandles, jumpToDate);
-              if (index > 0) setCurrentIndex(index);
+              if (index >= 0) setCurrentIndex(index);
             }
           } else {
             setError('No candles generated from local data');
