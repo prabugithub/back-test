@@ -250,6 +250,15 @@ export function createSharedActions(set: StoreSet, get: StoreGet) {
 
       // ── LIVE PATH ────────────────────────────────────────────────────────────
       if (isLiveMode && sessionConfig) {
+        // Block fresh entries after 2:36 PM IST; exits (currentQty !== 0) are always allowed
+        if (currentQty === 0) {
+          const istNow = new Date(Date.now() + 5.5 * 60 * 60 * 1000);
+          const totalMinutes = istNow.getUTCHours() * 60 + istNow.getUTCMinutes();
+          if (totalMinutes >= 14 * 60 + 36) {
+            useNotificationStore.getState().notify('Fresh entries blocked after 2:36 PM', 'warning');
+            return;
+          }
+        }
         try {
           const notify = (msg: string, t: any) => useNotificationStore.getState().notify(msg, t);
           const result = await executeLiveOrder(
