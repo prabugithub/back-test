@@ -255,5 +255,29 @@ export function createLiveActions(set: StoreSet, get: StoreGet) {
         ...(isLiveMode ? { currentIndex: newCandles.length - 1 } : {}),
       });
     },
+
+    patchLiveCandle: (candle: import('../types').Candle) => {
+      const { candles } = get();
+      const idx = candles.findIndex(c => c.timestamp === candle.timestamp);
+      if (idx === -1) return;
+      const existing = candles[idx];
+      // Never overwrite open — first tick of period is canonical.
+      // isLivePriceUpdate = true keeps the React setData effect skipped;
+      // the chart is updated imperatively by the correction timer in AdvancedChart.
+      set({
+        candles: [
+          ...candles.slice(0, idx),
+          {
+            ...existing,
+            high:   candle.high,
+            low:    candle.low,
+            close:  candle.close,
+            volume: candle.volume ?? existing.volume,
+          },
+          ...candles.slice(idx + 1),
+        ],
+        isLivePriceUpdate: true,
+      });
+    },
   };
 }

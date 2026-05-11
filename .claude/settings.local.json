@@ -35,7 +35,8 @@
       "Bash(Get-ChildItem -Path \"f:\\\\projects\\\\personal project\\\\back-test\" -Recurse -Depth 2)",
       "Bash(Select-Object FullName, PSIsContainer)",
       "Bash(Get-ChildItem -Path . -Recurse -Include \"AdvancedChart.tsx\" -ErrorAction SilentlyContinue)",
-      "Bash(Select-Object -First 5)"
+      "Bash(Select-Object -First 5)",
+      "Bash(Get-ChildItem -Path \"f:\\\\projects\\\\personal project\\\\back-test\\\\backend\" -Recurse -Name)"
     ]
   }
 }

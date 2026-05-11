@@ -17,7 +17,7 @@ import { useChartDrawings } from '../hooks/useChartDrawings';
 import type { Point } from '../hooks/useChartDrawings';
 import { format } from 'date-fns';
 import { TextInputDialog } from './TextInputDialog';
-import { uploadScreenshot } from '../services/api';
+import { uploadScreenshot, fetchCandles } from '../services/api';
 import { useNotificationStore } from '../stores/notificationStore';
 import { ScreenshotSaveDialog } from './ScreenshotSaveDialog';
 
@@ -45,6 +45,7 @@ export function AdvancedChart({
   const markersPrimitiveRef = useRef<any>(null);
   const indicatorSeriesRef = useRef<Map<string, any>>(new Map());
   const lastCandleRef = useRef<any>(null);
+  const correctionTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const prevCumulativeVolumeRef = useRef<number>(0);
   const seenFirstTickRef = useRef<boolean>(false);
 
@@ -503,6 +504,22 @@ export function AdvancedChart({
       volumeSeries.setData(volumeData);
     }
 
+    // Tick handler is the sole owner of lastCandleRef between setData calls.
+    // Initialize it here so no React re-render can overwrite tick-handler mutations.
+    if (dedupedCandles.length > 0) {
+      const last = dedupedCandles[dedupedCandles.length - 1];
+      lastCandleRef.current = {
+        time: last.timestamp as any,
+        open: last.open,
+        high: last.high,
+        low: last.low,
+        close: last.close,
+        volume: last.volume || 0,
+      };
+    } else {
+      lastCandleRef.current = null;
+    }
+
     lastSetDataCountRef.current = dedupedCandles.length;
     lastSetDataTimeRef.current = dedupedCandles.length > 0 ? (dedupedCandles[dedupedCandles.length - 1].timestamp as number) : 0;
 
@@ -515,22 +532,6 @@ export function AdvancedChart({
     }
   }, [visibleCandles, series, volumeSeries, chart, isLiveMode]);
 
-  // Keep a mutable ref of the last candle for live ticking without full re-renders
-  useEffect(() => {
-    if (visibleCandles.length > 0) {
-      const last = visibleCandles[visibleCandles.length - 1];
-      lastCandleRef.current = {
-        time: last.timestamp as any,
-        open: last.open,
-        high: last.high,
-        low: last.low,
-        close: last.close,
-        volume: last.volume,
-      };
-    } else {
-      lastCandleRef.current = null;
-    }
-  }, [visibleCandles]);
 
   const lastSetDataCountRef = useRef(0);
   const lastSetDataTimeRef = useRef(0);
@@ -621,6 +622,10 @@ export function AdvancedChart({
 
       } else if (bucketStart > lastCandle.time) {
         // ── New timeframe boundary ─────────────────────────────────────────
+        // Capture before overwriting lastCandleRef so the correction timer
+        // knows which candle just closed.
+        const closedCandleTime = lastCandle.time;
+
         // open = first tick of the new period (matches TradingView OHLC).
         const openPrice = tick.price;
         const newCandle = {
@@ -661,12 +666,83 @@ export function AdvancedChart({
             volume: newCandle.volume
           });
         }
+
+        // ── Exchange OHLCV correction for the just-closed candle ──────────
+        // Dhan WebSocket delivers LTP ticks, not every trade. The accumulated
+        // high/low can miss intra-tick extremes. After 3s Dhan's REST endpoint
+        // has the authoritative exchange OHLCV — fetch it and patch the chart.
+        if (!isSecondary && sessionConfig) {
+          if (correctionTimerRef.current) clearTimeout(correctionTimerRef.current);
+          correctionTimerRef.current = setTimeout(async () => {
+            try {
+              // Use IST date (markets are IST; Date.now() is UTC)
+              const istNow = new Date(Date.now() + 19800 * 1000);
+              const today = istNow.toISOString().split('T')[0];
+
+              const result = await fetchCandles({
+                securityId:      sessionConfig.securityId,
+                exchangeSegment: sessionConfig.exchangeSegment,
+                instrument:      sessionConfig.instrumentType,
+                interval:        sessionConfig.interval,
+                fromDate:        today,
+                toDate:          today,
+              });
+
+              const corrected = result.data.find(c => c.timestamp === closedCandleTime);
+              if (!corrected) return;
+
+              const store = useSessionStore.getState();
+              const existing = store.candles.find(c => c.timestamp === closedCandleTime);
+              if (!existing) return;
+
+              // Skip if tick-accumulated values already match exchange data
+              if (
+                existing.high  === corrected.high &&
+                existing.low   === corrected.low  &&
+                existing.close === corrected.close
+              ) return;
+
+              // Patch store (open is preserved inside patchLiveCandle)
+              store.patchLiveCandle(corrected);
+
+              // Patch chart — series.update() can't reach non-last bars,
+              // so use setData() with visible-range restore to avoid scroll jump.
+              const range = chart.timeScale().getVisibleRange();
+              const latest = useSessionStore.getState().candles;
+              series.setData(
+                latest.map(c => ({
+                  time:  c.timestamp as any,
+                  open:  c.open,
+                  high:  c.high,
+                  low:   c.low,
+                  close: c.close,
+                }))
+              );
+              if (range) chart.timeScale().setVisibleRange(range);
+
+              if (volumeSeries) {
+                volumeSeries.setData(
+                  latest.map(c => ({
+                    time:  c.timestamp as any,
+                    value: c.volume,
+                    color: c.close >= c.open ? '#26a69a40' : '#ef535040',
+                  }))
+                );
+              }
+            } catch {
+              // Silent fail — tick-accumulated data remains as fallback
+            }
+          }, 3000);
+        }
       } else {
         console.warn('[Chart] Stale tick ignored: bucket', bucketStart, '< lastCandle.time', lastCandle.time);
       }
     });
 
-    return unsubscribe;
+    return () => {
+      unsubscribe();
+      if (correctionTimerRef.current) clearTimeout(correctionTimerRef.current);
+    };
   }, [series, chart, volumeSeries, isSecondary, secondaryTimeframe, sessionConfig]);
 
   // Reset on new data only if it's a major data reload (len decreased or jumped > 5)
