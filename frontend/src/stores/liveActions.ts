@@ -1,9 +1,51 @@
 // @live-only — this file must never import backtestActions or playback logic.
 // WebSocket lifecycle, live tick handling, live candle updates, and position sync live here.
 
-import { getLivePositions } from '../services/api';
+import { getLivePositions, fetchCandles } from '../services/api';
+import { resampleCandles, getISTBucket } from '../utils/resampler';
 import { useNotificationStore } from './notificationStore';
-import type { SessionStore, StoreSet, StoreGet } from './sessionStore';
+import type { StoreSet, StoreGet } from './sessionStore';
+
+// Maps secondary TF string (minutes) → { Dhan API interval, resample target (null = direct) }
+// Dhan intraday endpoint supports: 1, 5, 15, 25, 60 only.
+// Unsupported intervals (30, 120, 240) are fetched at the nearest supported interval then
+// resampled client-side. '1440' (1 Day) routes to Dhan's historical endpoint.
+const HTF_INTERVAL_MAP: Record<string, { apiInterval: string; resampleTo: number | null; isIntraday: boolean }> = {
+  '15':   { apiInterval: '15',   resampleTo: null, isIntraday: true },
+  '30':   { apiInterval: '15',   resampleTo: 30,   isIntraday: true },
+  '60':   { apiInterval: '60',   resampleTo: null, isIntraday: true },
+  '120':  { apiInterval: '60',   resampleTo: 120,  isIntraday: true },
+  '240':  { apiInterval: '60',   resampleTo: 240,  isIntraday: true },
+  '1440': { apiInterval: '1440', resampleTo: null, isIntraday: false },
+};
+
+// Lookback days per TF to yield ~3000 candles with a 1.5x holiday buffer
+const HTF_LOOKBACK_DAYS: Record<string, number> = {
+  '15':   175,
+  '30':   350,
+  '60':   700,
+  '120':  1400,
+  '240':  2800,
+  '1440': 5000,
+};
+
+// Dhan intraday API is capped at 90 days per request — build chunk windows
+function buildDateChunks(from: Date, to: Date, maxDays: number): Array<{ from: Date; to: Date }> {
+  const chunks: Array<{ from: Date; to: Date }> = [];
+  let cursor = new Date(from);
+  while (cursor < to) {
+    const chunkEnd = new Date(cursor);
+    chunkEnd.setDate(chunkEnd.getDate() + maxDays);
+    chunks.push({ from: new Date(cursor), to: chunkEnd > to ? new Date(to) : chunkEnd });
+    cursor = new Date(chunkEnd);
+    cursor.setDate(cursor.getDate() + 1);
+  }
+  return chunks;
+}
+
+function fmtDate(d: Date): string {
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+}
 
 export function createLiveActions(set: StoreSet, get: StoreGet) {
   // Scoped to this closure so multiple store instances don't share interval state
@@ -12,9 +54,10 @@ export function createLiveActions(set: StoreSet, get: StoreGet) {
     setLiveMode: (isLive: boolean) => {
       set({ isLiveMode: isLive });
       if (isLive) {
-        const { candles } = get();
+        const { candles, secondaryTimeframe } = get();
         if (candles.length > 0) set({ currentIndex: candles.length - 1 });
         get().syncLivePositions();
+        if (secondaryTimeframe) get().loadSecondaryCandles();
         // Clear any stale interval before starting a fresh one
         if (syncIntervalId) clearInterval(syncIntervalId);
         syncIntervalId = setInterval(() => {
@@ -25,6 +68,52 @@ export function createLiveActions(set: StoreSet, get: StoreGet) {
           clearInterval(syncIntervalId);
           syncIntervalId = null;
         }
+      }
+    },
+
+    loadSecondaryCandles: async () => {
+      const { sessionConfig, secondaryTimeframe } = get();
+      if (!sessionConfig || !secondaryTimeframe) return;
+
+      const resolved = HTF_INTERVAL_MAP[secondaryTimeframe];
+      if (!resolved) return;
+
+      const lookbackDays = HTF_LOOKBACK_DAYS[secondaryTimeframe] ?? 700;
+      const toDate = new Date();
+      const fromDate = new Date();
+      fromDate.setDate(fromDate.getDate() - lookbackDays);
+
+      const base = {
+        securityId: sessionConfig.securityId,
+        exchangeSegment: sessionConfig.exchangeSegment,
+        instrument: sessionConfig.instrumentType,
+        interval: resolved.apiInterval,
+      };
+
+      try {
+        let allCandles: import('../types').Candle[] = [];
+
+        if (resolved.isIntraday) {
+          // Dhan intraday endpoint: max 90 days per request, rate-limited per user.
+          // Throttle chunks with a 600ms gap to stay within DH-904 limits.
+          const chunks = buildDateChunks(fromDate, toDate, 90);
+          for (let i = 0; i < chunks.length; i++) {
+            if (i > 0) await new Promise((r) => setTimeout(r, 600));
+            const resp = await fetchCandles({ ...base, fromDate: fmtDate(chunks[i].from), toDate: fmtDate(chunks[i].to) });
+            if (resp.success && resp.data?.length) allCandles = allCandles.concat(resp.data);
+          }
+        } else {
+          // Historical endpoint (daily) — no 90-day limit
+          const resp = await fetchCandles({ ...base, fromDate: fmtDate(fromDate), toDate: fmtDate(toDate) });
+          if (resp.success && resp.data?.length) allCandles = resp.data;
+        }
+
+        if (!allCandles.length) return;
+
+        if (resolved.resampleTo) allCandles = resampleCandles(allCandles, resolved.resampleTo);
+        set({ secondaryCandles: allCandles.slice(-3000) });
+      } catch (err) {
+        console.warn('Failed to load secondary HTF candles', err);
       }
     },
 
@@ -107,7 +196,7 @@ export function createLiveActions(set: StoreSet, get: StoreGet) {
     },
 
     addLiveCandle: (candle: import('../types').Candle) => {
-      const { candles, isLiveMode } = get();
+      const { candles, isLiveMode, secondaryCandles, secondaryTimeframe } = get();
       const lastCandle = candles[candles.length - 1];
       let newCandles: typeof candles;
       if (lastCandle && lastCandle.timestamp === candle.timestamp) {
@@ -125,9 +214,44 @@ export function createLiveActions(set: StoreSet, get: StoreGet) {
         newCandles = [...candles, candle];
       }
       const isLivePriceUpdate = !!(lastCandle && lastCandle.timestamp === candle.timestamp);
+
+      // Incrementally update the pre-fetched HTF secondary candle
+      let newSecondaryCandles = secondaryCandles;
+      if (secondaryTimeframe && secondaryCandles.length > 0) {
+        const tfMinutes = secondaryTimeframe === '1D' ? 1440 : parseInt(secondaryTimeframe, 10);
+        const bucket = getISTBucket(candle.timestamp, tfMinutes);
+        const last = secondaryCandles[secondaryCandles.length - 1];
+
+        if (last.timestamp === bucket) {
+          newSecondaryCandles = [
+            ...secondaryCandles.slice(0, -1),
+            {
+              ...last,
+              close: candle.close,
+              high: Math.max(last.high, candle.high),
+              low: Math.min(last.low, candle.low),
+              volume: (last.volume ?? 0) + (candle.volume ?? 0),
+            },
+          ];
+        } else {
+          newSecondaryCandles = [
+            ...secondaryCandles,
+            {
+              timestamp: bucket,
+              open: candle.open,
+              high: candle.high,
+              low: candle.low,
+              close: candle.close,
+              volume: candle.volume ?? 0,
+            },
+          ];
+        }
+      }
+
       set({
         candles: newCandles,
         isLivePriceUpdate,
+        secondaryCandles: newSecondaryCandles,
         ...(isLiveMode ? { currentIndex: newCandles.length - 1 } : {}),
       });
     },

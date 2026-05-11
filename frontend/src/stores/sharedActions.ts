@@ -691,12 +691,13 @@ export function createSharedActions(set: StoreSet, get: StoreGet) {
     togglePivotRR: () => set((s) => ({ showPivotRR: !s.showPivotRR })),
 
     setSecondaryTimeframe: (timeframe: string | null) => {
-      const { candles } = get();
+      const { candles, isLiveMode } = get();
       if (!timeframe || candles.length === 0) {
         set({ secondaryTimeframe: timeframe, secondaryCandles: [] });
         return;
       }
       set({ secondaryTimeframe: timeframe });
+      if (isLiveMode) get().loadSecondaryCandles();
     },
 
     toggleSecondaryChart: () => set((s) => ({ showSecondaryChart: !s.showSecondaryChart })),

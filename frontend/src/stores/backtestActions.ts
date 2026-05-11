@@ -7,10 +7,11 @@ import type { SessionStore, StoreSet, StoreGet } from './sessionStore';
 export function createBacktestActions(set: StoreSet, get: StoreGet) {
   return {
     loadCandles: (candles: SessionStore['candles'], instrument: string, config?: SessionStore['sessionConfig']) => {
-      // Block only when a live broker-backed position is open — loading candles would
-      // wipe liveOptionToken and the open position record.
+      // Block only when a live broker-backed position is open AND we are NOT reloading
+      // the live chart. For live reloads (dataSource === 'live'), restoreSessionState()
+      // is called immediately after and puts the position back — so blocking here is wrong.
       const activePos = get().position as any;
-      if (activePos?.liveOptionToken) {
+      if (activePos?.liveOptionToken && config?.dataSource !== 'live') {
         console.warn('[Safety] loadCandles blocked — active live option position open');
         useNotificationStore.getState().notify(
           'Cannot load new data while a live option position is open. Close the position first.',

@@ -84,6 +84,7 @@ export function AdvancedChart({
   const useAtrForSignals = useSessionStore((s) => s.useAtrForSignals);
   const showPivotRR = useSessionStore((s) => s.showPivotRR);
   const secondaryTimeframe = useSessionStore((s) => s.secondaryTimeframe);
+  const secondaryCandles = useSessionStore((s) => s.secondaryCandles);
   const isLiveMode = useSessionStore((s) => s.isLiveMode);
   const sessionConfig = useSessionStore((s) => s.sessionConfig);
 
@@ -92,15 +93,16 @@ export function AdvancedChart({
     const primaryVisible = isLiveMode ? candles : candles.slice(0, currentIndex + 1);
 
     if (isSecondary && secondaryTimeframe) {
-      // Map interval string to minutes for resampling
+      // Live mode: use pre-fetched HTF candles (3000 candles from API)
+      if (isLiveMode && secondaryCandles.length > 0) return secondaryCandles;
+
+      // Backtest mode: resample on-the-fly from primary candles
       let tfMinutes = parseInt(secondaryTimeframe);
       if (secondaryTimeframe === '1D') tfMinutes = 1440;
-
-      // Return HTF candles formed by the primary candles up to current LTF index
       return resampleCandles(primaryVisible, tfMinutes);
     }
     return primaryVisible;
-  }, [candles, currentIndex, isSecondary, secondaryTimeframe, isLiveMode]);
+  }, [candles, currentIndex, isSecondary, secondaryTimeframe, isLiveMode, secondaryCandles]);
 
   const isFirstLoadRef = useRef(true);
   const canvasRef = useRef<HTMLCanvasElement | null>(null);

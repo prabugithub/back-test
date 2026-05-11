@@ -90,6 +90,7 @@ export interface SessionStore {
   syncLivePositions: () => Promise<void>;
   updateLivePrice: (price: number) => void;
   addLiveCandle: (candle: Candle) => void;
+  loadSecondaryCandles: () => Promise<void>;
 
   // ── Actions (shared) ─────────────────────────────────────────────────────────
   setDrawings: (drawings: Drawing[]) => void;

@@ -37,6 +37,7 @@ Keep this updated whenever the architecture changes (new component, store action
 | `drawings` | useChartDrawings (primary), AdvancedChart (primary) | setDrawings (auto-patches Firestore 2s debounce) | LOW |
 | `secondaryDrawings` | useChartDrawings (secondary), AdvancedChart (secondary) | setSecondaryDrawings (auto-patches Firestore 2s debounce) | LOW |
 | `sessionConfig` | PlaybackControls (Data Settings form) | performDataReload | MEDIUM |
+| `secondaryCandles` | AdvancedChart (secondary chart in live mode) | loadSecondaryCandles, addLiveCandle, setSecondaryTimeframe | LOW — live mode only; backtest ignores this field |
 
 ---
 
@@ -129,10 +130,21 @@ Handles logic that runs in both modes. Live path is always top-guarded with an e
 
 **Check when changing:** token matching logic, position clear condition, notification spam
 
+#### `loadSecondaryCandles()`
+→ fetches HTF candles from Dhan API for the active `secondaryTimeframe`
+→ Dhan-unsupported intervals (30min, 2hr, 4hr) are fetched at the nearest supported interval then resampled
+→ trims result to the last 3000 candles and writes to `secondaryCandles`
+→ called automatically on `setLiveMode(true)` (if secondary TF is set) and on `setSecondaryTimeframe()` in live mode
+
+**Check when changing:** `HTF_INTERVAL_MAP` / `HTF_LOOKBACK_DAYS` constants in liveActions.ts, `sessionConfig` shape (securityId, exchangeSegment, instrumentType)
+
 #### `addLiveCandle(candle)`
 → if same timestamp as last candle: updates OHLCV in-place (sets `isLivePriceUpdate = true`)
 → if new timestamp: appends new candle (sets `isLivePriceUpdate = false`)
 → `isLivePriceUpdate` flag lets AdvancedChart skip expensive rebuilds on price-only ticks
+→ also incrementally updates `secondaryCandles`: extends last HTF candle if tick is in same IST bucket, otherwise appends a new HTF candle
+
+**Check when changing:** `getISTBucket()` in resampler.ts (bucket alignment must match `loadSecondaryCandles` resampling)
 
 ---
 

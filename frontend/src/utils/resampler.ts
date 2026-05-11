@@ -93,6 +93,24 @@ export function resampleCandles(candles: Candle[], timeframeMinutes: number): Ca
 }
 
 /**
+ * Returns the IST-aligned bucket start timestamp (UTC epoch seconds) for a given
+ * candle timestamp and timeframe. Used by the live candle updater to decide
+ * whether to extend the last HTF candle or open a new one.
+ */
+export function getISTBucket(timestamp: number, timeframeMinutes: number): number {
+    const timeframeSeconds = timeframeMinutes * 60;
+    const IST_OFFSET = 19800;
+    const SESSION_START = 9 * 3600 + 15 * 60;
+
+    const tsIst = timestamp + IST_OFFSET;
+    const timeInDay = tsIst % 86400;
+    const istDayStart = tsIst - timeInDay;
+    const sincOpen = timeInDay - SESSION_START;
+    const bucketIdx = Math.max(0, Math.floor(sincOpen / timeframeSeconds));
+    return (istDayStart + SESSION_START + bucketIdx * timeframeSeconds) - IST_OFFSET;
+}
+
+/**
  * Helper to aggregate a list of candles into one
  */
 function aggregateCandles(candles: Candle[], timestamp: number): Candle {
