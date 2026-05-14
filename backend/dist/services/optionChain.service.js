@@ -104,6 +104,47 @@ async function fetchATMLTPFromChain(instrumentName, expiry, spotPrice, optionTyp
     return { ltp: 0, atmStrike };
 }
 /**
+ * Fetches the most recent 1-min closed candle's close price for a given option.
+ * Used as a fallback limit-price anchor when option chain LTP is unavailable.
+ * Returns 0 if intraday data cannot be fetched.
+ */
+async function fetchOptionLastClose(securityId) {
+    const accessToken = process.env.DHAN_ACCESS_TOKEN;
+    const clientID = process.env.DHAN_CLIENT_ID;
+    if (!accessToken || !clientID)
+        return 0;
+    const today = new Date().toISOString().split('T')[0];
+    try {
+        const response = await axios_1.default.post('https://api.dhan.co/v2/charts/intraday', {
+            securityId,
+            exchangeSegment: 'NSE_FNO',
+            instrument: 'OPTIDX',
+            interval: '1',
+            fromDate: today,
+            toDate: today,
+        }, {
+            headers: {
+                'access-token': accessToken,
+                'client-id': clientID,
+                'Content-Type': 'application/json',
+            },
+            timeout: 5000,
+        });
+        const closes = response.data?.close || [];
+        // Prefer second-to-last (previous fully closed candle); fall back to last
+        const idx = closes.length >= 2 ? closes.length - 2 : closes.length - 1;
+        const price = closes[idx] ? Number(closes[idx]) : 0;
+        if (price > 0) {
+            logger_1.default.info(`[OptionLTP Fallback] Used intraday candle close for ${securityId}: ${price}`);
+        }
+        return price;
+    }
+    catch (err) {
+        logger_1.default.warn(`[OptionLTP Fallback] Intraday fetch failed for ${securityId}: ${err.message}`);
+        return 0;
+    }
+}
+/**
  * Main function: given spot price and option type, returns the security ID (from CSV)
  * and live LTP (from option chain API) for the nearest weekly ATM option.
  */
@@ -126,10 +167,18 @@ async function getATMOptionForOrder(spotPrice, optionType, instrumentName = 'NIF
         throw new Error(`Security ID not found in Symbol Master for ${instrumentName} ${optionType} strike ~${atmStrike}. ` +
             `Symbol master may be stale — restart server to refresh.`);
     }
+    // Step 4: If option chain returned no LTP, fall back to previous 1-min candle close
+    let resolvedLtp = ltp;
+    if (resolvedLtp === 0) {
+        resolvedLtp = await fetchOptionLastClose(symbolEntry.securityId);
+        if (resolvedLtp === 0) {
+            logger_1.default.warn(`[OptionLTP] No price from chain or intraday candles for ${symbolEntry.tradingSymbol} — order will use MARKET`);
+        }
+    }
     return {
         securityId: symbolEntry.securityId,
         tradingSymbol: symbolEntry.tradingSymbol,
-        ltp,
+        ltp: resolvedLtp,
         expiry: weeklyExpiry,
         atmStrike,
         lotSize: symbolEntry.lotSize,
