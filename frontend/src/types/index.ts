@@ -114,7 +114,8 @@ export interface Point {
   x: number;
   y: number;
   price?: number;
-  time?: number;
+  time?: number;    // logical bar index — kept for backward compat & cIdx gating
+  barTime?: number; // actual candle Unix timestamp — stable across reloads
 }
 
 export interface Drawing {

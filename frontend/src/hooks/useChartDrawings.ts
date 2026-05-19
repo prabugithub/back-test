@@ -105,8 +105,10 @@ export function useChartDrawings({
     if (chartApi && seriesApi) {
       const timeScale = chartApi.timeScale();
       const logical = timeScale.coordinateToLogical(x);
+      const bt = timeScale.coordinateToTime(x);
       const price = seriesApi.coordinateToPrice(y);
       if (logical !== null) point.time = logical;
+      if (bt !== null) point.barTime = bt as number;
       if (price !== null) point.price = price;
     }
     return point;
@@ -116,7 +118,20 @@ export function useChartDrawings({
     if (!chartApi || !seriesApi) return point;
     const timeScale = chartApi.timeScale();
     let x = point.x;
-    if (point.time !== undefined) {
+
+    if (point.barTime !== undefined) {
+      // Stable path: use actual candle timestamp (survives bar-count changes on reload)
+      const coord = timeScale.timeToCoordinate(point.barTime as any);
+      if (coord !== null) x = coord;
+      else {
+        const visibleRange = timeScale.getVisibleLogicalRange();
+        if (visibleRange) {
+          if ((point.time ?? 0) < visibleRange.from) x = -10000;
+          else x = 10000;
+        }
+      }
+    } else if (point.time !== undefined) {
+      // Legacy path: logical bar index (kept for backward compat with old saved drawings)
       const coord = timeScale.logicalToCoordinate(point.time as any);
       if (coord !== null) x = coord;
       else {
@@ -127,6 +142,7 @@ export function useChartDrawings({
         }
       }
     }
+
     let y = point.y;
     if (point.price !== undefined) {
       const coord = seriesApi.priceToCoordinate(point.price as any);
@@ -377,8 +393,9 @@ export function useChartDrawings({
         if (d.id !== selectedDrawingIdRef.current) return d;
         const ts = chartApi.timeScale();
         const logical = ts.coordinateToLogical(point.x);
+        const bt = ts.coordinateToTime(point.x);
         const price = seriesApi.coordinateToPrice(point.y);
-        const newPoints = d.points.map((p, i) => i === hIdx ? { ...p, x: point.x, y: point.y, time: logical ?? p.time, price: price ?? p.price } : p);
+        const newPoints = d.points.map((p, i) => i === hIdx ? { ...p, x: point.x, y: point.y, time: logical ?? p.time, barTime: bt !== null ? bt as number : p.barTime, price: price ?? p.price } : p);
         if (d.type === 'riskReward') {
            const p1 = newPoints[0].price, p2 = newPoints[1]?.price;
            if (p1 && p2 && Math.abs(p1 - p2) > 0) {
@@ -405,8 +422,8 @@ export function useChartDrawings({
         const dy = (point.y - dragOffsetRef.current.y) - pts[0].y;
         const newPoints = pts.map(p => {
           const nx = p.x + dx, ny = p.y + dy;
-          const ts = chartApi.timeScale(), logical = ts.coordinateToLogical(nx), pr = seriesApi.coordinateToPrice(ny);
-          return { ...p, x: nx, y: ny, time: logical ?? p.time, price: pr ?? p.price };
+          const ts = chartApi.timeScale(), logical = ts.coordinateToLogical(nx), bt = ts.coordinateToTime(nx), pr = seriesApi.coordinateToPrice(ny);
+          return { ...p, x: nx, y: ny, time: logical ?? p.time, barTime: bt !== null ? bt as number : p.barTime, price: pr ?? p.price };
         });
         if (d.type === 'riskReward') {
           const p1 = newPoints[0].price, p2 = newPoints[1]?.price;
