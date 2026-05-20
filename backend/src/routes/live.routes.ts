@@ -3,7 +3,7 @@ import { placeOrder, getOptionLTP } from '../adapters/dhan.adapter';
 import { getFeedStatus, emitTestTick } from '../adapters/dhanFeed.adapter';
 import { getATMOptionForOrder } from '../adapters/optionChain.adapter';
 import { executeSmartExit } from '../services/smartExit.service';
-import { registerPosition, unregisterPosition, getMonitoredPositions, updatePositionTarget, updatePositionQuantity } from '../services/positionMonitor.service';
+import { registerPosition, unregisterPosition, getMonitoredPositions, updatePositionTarget, updatePositionQuantity, confirmPositionFill } from '../services/positionMonitor.service';
 import logger from '../utils/logger';
 
 const router = Router();
@@ -198,7 +198,7 @@ router.get('/order/:orderId', async (req: Request, res: Response) => {
  */
 router.post('/monitor', (req: Request, res: Response) => {
     try {
-        const { id, spotToken, spotSegment, direction, stopLoss, target, optionSecurityId, optionExchangeSegment, quantity, entryPrice, productType } = req.body;
+        const { id, spotToken, spotSegment, direction, stopLoss, target, optionSecurityId, optionExchangeSegment, quantity, entryPrice, productType, pendingFill } = req.body;
 
         if (!id || !spotToken || !direction || !optionSecurityId || !quantity) {
             return res.status(400).json({
@@ -225,6 +225,7 @@ router.post('/monitor', (req: Request, res: Response) => {
             quantity: Number(quantity),
             entryPrice: Number(entryPrice) || 0,
             productType: resolvedProductType,
+            pendingFill: pendingFill === true,
         });
 
         res.json({ success: true, message: `Position ${id} registered for backend monitoring` });
@@ -253,10 +254,10 @@ router.delete('/monitor/:id', (req: Request, res: Response) => {
  */
 router.patch('/monitor/:id', (req: Request, res: Response) => {
     const { id } = req.params;
-    const { target, quantity } = req.body;
+    const { target, quantity, pendingFill } = req.body;
 
-    if (target === undefined && quantity === undefined) {
-        return res.status(400).json({ error: 'Provide at least one of: target, quantity' });
+    if (target === undefined && quantity === undefined && pendingFill === undefined) {
+        return res.status(400).json({ error: 'Provide at least one of: target, quantity, pendingFill' });
     }
 
     let updated = false;
@@ -273,6 +274,11 @@ router.patch('/monitor/:id', (req: Request, res: Response) => {
             return res.status(400).json({ error: 'quantity must be a positive number' });
         }
         updated = updatePositionQuantity(id, Number(quantity)) || updated;
+    }
+
+    // pendingFill: false confirms the entry order was filled — enables SL/TP exit monitoring
+    if (pendingFill === false) {
+        updated = confirmPositionFill(id) || updated;
     }
 
     if (!updated) {

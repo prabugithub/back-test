@@ -8,6 +8,7 @@ exports.registerPosition = registerPosition;
 exports.unregisterPosition = unregisterPosition;
 exports.updatePositionQuantity = updatePositionQuantity;
 exports.updatePositionTarget = updatePositionTarget;
+exports.confirmPositionFill = confirmPositionFill;
 exports.getMonitoredPositions = getMonitoredPositions;
 exports.onTick = onTick;
 const dhan_adapter_1 = require("../adapters/dhan.adapter");
@@ -53,6 +54,7 @@ function initPositionMonitor(io) {
                 quantity: r.quantity,
                 entryPrice: r.entry_price,
                 productType: (r.product_type || 'INTRADAY'),
+                pendingFill: r.pending_fill === 1,
                 exitTriggered: false,
                 registeredAt: r.registered_at,
             };
@@ -82,8 +84,8 @@ function registerPosition(params) {
         const db = (0, database_1.getDatabase)();
         db.prepare(`INSERT OR REPLACE INTO monitored_positions
              (id, spot_token, spot_segment, direction, stop_loss, target,
-              option_security_id, option_exchange_segment, quantity, entry_price, product_type, registered_at)
-             VALUES (?,?,?,?,?,?,?,?,?,?,?,?)`).run(entry.id, entry.spotToken, entry.spotSegment, entry.direction, entry.stopLoss, entry.target, entry.optionSecurityId, entry.optionExchangeSegment, entry.quantity, entry.entryPrice, entry.productType, entry.registeredAt);
+              option_security_id, option_exchange_segment, quantity, entry_price, product_type, pending_fill, registered_at)
+             VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)`).run(entry.id, entry.spotToken, entry.spotSegment, entry.direction, entry.stopLoss, entry.target, entry.optionSecurityId, entry.optionExchangeSegment, entry.quantity, entry.entryPrice, entry.productType, entry.pendingFill ? 1 : 0, entry.registeredAt);
     }
     catch (err) {
         logger_1.default.error('[PositionMonitor] Failed to persist position to DB:', err.message);
@@ -152,6 +154,26 @@ function updatePositionTarget(id, target) {
     return true;
 }
 /**
+ * Confirm that the entry order for a registered position has been filled.
+ * Until confirmed, onTick will not fire any exits for the position.
+ * Called by the frontend once the broker fill poll returns TRADED.
+ */
+function confirmPositionFill(id) {
+    const pos = monitoredPositions.get(id);
+    if (!pos || pos.exitTriggered)
+        return false;
+    pos.pendingFill = false;
+    try {
+        const db = (0, database_1.getDatabase)();
+        db.prepare('UPDATE monitored_positions SET pending_fill = 0 WHERE id = ?').run(id);
+    }
+    catch (err) {
+        logger_1.default.error('[PositionMonitor] Failed to confirm fill in DB:', err.message);
+    }
+    logger_1.default.info(`[PositionMonitor] Fill confirmed | id:${id} — exits now active`);
+    return true;
+}
+/**
  * Return a sanitized snapshot of all monitored positions (no internal flags leaked).
  */
 function getMonitoredPositions() {
@@ -172,6 +194,9 @@ async function onTick(token, price) {
             continue;
         // Guard: skip if exit is already in-flight
         if (pos.exitTriggered)
+            continue;
+        // Guard: skip if entry order has not yet been confirmed filled at broker
+        if (pos.pendingFill)
             continue;
         const { stopLoss, target, direction } = pos;
         const isLong = direction === 'LONG';

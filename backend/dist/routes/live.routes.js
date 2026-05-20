@@ -209,7 +209,7 @@ router.get('/order/:orderId', async (req, res) => {
  */
 router.post('/monitor', (req, res) => {
     try {
-        const { id, spotToken, spotSegment, direction, stopLoss, target, optionSecurityId, optionExchangeSegment, quantity, entryPrice, productType } = req.body;
+        const { id, spotToken, spotSegment, direction, stopLoss, target, optionSecurityId, optionExchangeSegment, quantity, entryPrice, productType, pendingFill } = req.body;
         if (!id || !spotToken || !direction || !optionSecurityId || !quantity) {
             return res.status(400).json({
                 error: 'Missing required parameters',
@@ -233,6 +233,7 @@ router.post('/monitor', (req, res) => {
             quantity: Number(quantity),
             entryPrice: Number(entryPrice) || 0,
             productType: resolvedProductType,
+            pendingFill: pendingFill === true,
         });
         res.json({ success: true, message: `Position ${id} registered for backend monitoring` });
     }
@@ -259,9 +260,9 @@ router.delete('/monitor/:id', (req, res) => {
  */
 router.patch('/monitor/:id', (req, res) => {
     const { id } = req.params;
-    const { target, quantity } = req.body;
-    if (target === undefined && quantity === undefined) {
-        return res.status(400).json({ error: 'Provide at least one of: target, quantity' });
+    const { target, quantity, pendingFill } = req.body;
+    if (target === undefined && quantity === undefined && pendingFill === undefined) {
+        return res.status(400).json({ error: 'Provide at least one of: target, quantity, pendingFill' });
     }
     let updated = false;
     if (target !== undefined) {
@@ -275,6 +276,10 @@ router.patch('/monitor/:id', (req, res) => {
             return res.status(400).json({ error: 'quantity must be a positive number' });
         }
         updated = (0, positionMonitor_service_1.updatePositionQuantity)(id, Number(quantity)) || updated;
+    }
+    // pendingFill: false confirms the entry order was filled — enables SL/TP exit monitoring
+    if (pendingFill === false) {
+        updated = (0, positionMonitor_service_1.confirmPositionFill)(id) || updated;
     }
     if (!updated) {
         return res.status(404).json({ error: `Position ${id} not found or already exited` });

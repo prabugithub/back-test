@@ -79,12 +79,21 @@ function createSchema(database) {
       quantity INTEGER NOT NULL,
       entry_price REAL NOT NULL,
       product_type TEXT NOT NULL DEFAULT 'INTRADAY',
+      pending_fill INTEGER NOT NULL DEFAULT 0,
       registered_at INTEGER NOT NULL
     );
   `);
     // Migrate existing databases — add product_type if the column is missing
     try {
         database.exec(`ALTER TABLE monitored_positions ADD COLUMN product_type TEXT NOT NULL DEFAULT 'INTRADAY'`);
+    }
+    catch (e) {
+        if (!e.message?.includes('duplicate column'))
+            throw e;
+    }
+    // Migrate: add pending_fill column (guards against exits firing on unfilled entry orders)
+    try {
+        database.exec(`ALTER TABLE monitored_positions ADD COLUMN pending_fill INTEGER NOT NULL DEFAULT 0`);
     }
     catch (e) {
         if (!e.message?.includes('duplicate column'))

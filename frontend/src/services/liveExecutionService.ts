@@ -254,9 +254,9 @@ export function pollOrderFillStatus(orderId: string, callbacks: PollCallbacks): 
       const status: string = order.orderStatus || '';
       const filled: number = order.tradedQuantity ?? order.filledQty ?? 0;
 
-      if (status === 'REJECTED') {
+      if (status === 'REJECTED' || status === 'CANCELLED') {
         notify(
-          `Order REJECTED: ${order.rejectedReason || 'Unknown reason'}. Clearing position.`,
+          `Order ${status}: ${order.rejectedReason || 'Unknown reason'}. Clearing position.`,
           'error'
         );
         const rejectedToken = getPosition()?.liveOptionToken;
@@ -265,6 +265,10 @@ export function pollOrderFillStatus(orderId: string, callbacks: PollCallbacks): 
         if (rejectedToken && isLiveMode()) {
           unregisterPositionMonitor(rejectedToken).catch(() => {});
         }
+      } else if (status === 'PENDING' || status === 'TRANSIT') {
+        // Order still in-flight — leave pendingOrderId intact so exit guards remain active.
+        // syncLivePositions will detect the fill when it appears on the broker and sync state.
+        notify('Order still pending at broker. Waiting for fill confirmation.', 'info');
       } else if (status === 'PARTIALLY_TRADED') {
         notify(
           `Order PARTIAL FILL: ${filled} filled, ${order.remainingQuantity ?? 0} pending.`,
@@ -276,6 +280,7 @@ export function pollOrderFillStatus(orderId: string, callbacks: PollCallbacks): 
           updatePositionMonitor(token, { quantity: filled }).catch(() => {});
         }
       } else {
+        // TRADED or any unrecognised confirmed status
         onFilled(filled);
       }
     } catch (e) {

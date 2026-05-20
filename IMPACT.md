@@ -96,21 +96,23 @@ Handles logic that runs in both modes. Live path is always top-guarded with an e
 #### `executeTrade(type, qty, price)`
 → **Live path (top guard):** calls `executeLiveOrder()` in `liveExecutionService.ts` → returns early if result is null
 → **Shared path:** FIFO P&L calculation, updates `position`, pushes to `trades[]`
-→ if new position and live mode: calls `registerMonitorIfNeeded()`
-→ if `pendingOrderId` set and live mode: calls `pollOrderFillStatus()` 2s later
+→ if new position and live mode and **no** `pendingOrderId`: calls `registerMonitorIfNeeded()` immediately
+→ if `pendingOrderId` set and live mode: calls `pollOrderFillStatus()` 2s later; `registerMonitorIfNeeded()` is called inside `onFilled`/`onPartialFill` callbacks (not before fill confirmation)
 
-**Check when changing:** P&L math (FIFO), TradeJournalDialog, TradeExitDialog, SessionStats, live monitor registration
+**Check when changing:** P&L math (FIFO), TradeJournalDialog, TradeExitDialog, SessionStats, live monitor registration, pending-order guard in checkSLTPHits
 
 #### `checkSLTPHits(index, currentPrice?)`
 → called on every candle advance (backtest) and on every live price tick
+→ **Pending-order guard (line ~72):** if `position.pendingOrderId` is set, returns immediately — entry order not yet confirmed filled, exits must not fire on a phantom position
 → **Live option guard (hard return at line ~136):** if `isLiveMode && liveOptionToken`, updates hit flags for display only and returns — backtest dialog/auto-exit code is physically unreachable
 → **Backtest path:** may trigger `pendingExitRequest` dialog or auto-exit TP
 
-**Check when changing:** live guard condition, flag reset logic, autoExitTarget read timing, dialog trigger conditions
+**Check when changing:** live guard condition, pending-order guard, flag reset logic, autoExitTarget read timing, dialog trigger conditions
 
 #### `restoreSessionState(state)`
 → restores all fields from Firestore snapshot
 → restores `uiSettings` (targetRR, autoExitTarget, drawings, etc.) + `position` + `trades`
+→ if restoring a live position with `liveOptionToken` and no `pendingOrderId`: calls `registerMonitorIfNeeded()` so backend monitor is active after page refresh
 → **Known gap:** restored `targetRR` and `position.target` may be inconsistent if RR was changed between saves
 
 **Check when changing:** What fields are included in snapshot, field ordering, default fallbacks
@@ -126,9 +128,10 @@ Handles logic that runs in both modes. Live path is always top-guarded with an e
 #### `syncLivePositions()`
 → polls `getLivePositions()` from broker every 3s
 → matches by `liveOptionToken` if store has one, otherwise takes first open FNO position
-→ if no broker position found and store has one: clears store position (notifies user)
+→ if broker position found: updates store and calls `registerMonitorIfNeeded()` (covers page-refresh path where monitor was lost)
+→ if no broker position found and store has one: clears store position (notifies user) — **skips clear if `pendingOrderId` is set** (entry order still pending fill at broker)
 
-**Check when changing:** token matching logic, position clear condition, notification spam
+**Check when changing:** token matching logic, position clear condition, pending-order guard, notification spam, monitor re-registration
 
 #### `loadSecondaryCandles()`
 → fetches HTF candles from Dhan API for the active `secondaryTimeframe`
@@ -204,10 +207,13 @@ All Dhan broker API calls live here. Called only from `sharedActions.ts` execute
 
 - Only active during **live trading** (`isLiveMode = true`)
 - Reads `MonitoredPosition.target` and `MonitoredPosition.stopLoss` on every tick
+- `onTick` skips positions where `pendingFill: true` — entry order not yet confirmed filled
+- `pendingFill` is set by the `POST /api/live/monitor` request body; cleared by `confirmPositionFill()` (called via `PATCH /api/live/monitor/:id` with `{ pendingFill: false }`)
 - Updated via `updatePositionMonitor(token, { target, stopLoss })`
 - Called from: `updatePositionTarget`, `updatePositionSL` (when live)
+- `pending_fill` column persisted in SQLite; migrated via `ALTER TABLE` in `database.ts`
 
-**Check when changing:** ensure frontend always syncs changes to backend when live
+**Check when changing:** ensure frontend always syncs changes to backend when live; `pendingFill` guard must match fill-confirmation path in `pollOrderFillStatus` callbacks
 
 ---
 
@@ -269,7 +275,8 @@ sessionConfig
 | `GET /api/candles` | Fetch + cache candles; triggers frontend reload |
 | `POST /api/live/order` | Place real Dhan order |
 | `POST /api/live/smart-exit` | Start order chaser loop |
-| `PUT /api/live/monitor/:id` | Update live position SL/TP in backend monitor |
+| `POST /api/live/monitor` | Register position; `pendingFill: true` blocks exits until fill confirmed |
+| `PATCH /api/live/monitor/:id` | Update `target`, `quantity`, or `pendingFill: false` (confirm fill → enables exits) |
 | `POST /api/screenshot/upload` | Upload chart PNG to Google Drive |
 | `POST /api/options/backtest` | Run options P&L simulation via Dhan rolling option API |
 

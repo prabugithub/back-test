@@ -4,6 +4,7 @@
 import { getLivePositions, fetchCandles } from '../services/api';
 import { resampleCandles, getISTBucket } from '../utils/resampler';
 import { useNotificationStore } from './notificationStore';
+import { registerMonitorIfNeeded } from '../services/liveExecutionService';
 import type { StoreSet, StoreGet } from './sessionStore';
 
 // Maps secondary TF string (minutes) → { Dhan API interval, resample target (null = direct) }
@@ -164,8 +165,14 @@ export function createLiveActions(set: StoreSet, get: StoreGet) {
                 slDialogShown: currentStorePos?.slDialogShown,
                 tpDialogShown: currentStorePos?.tpDialogShown,
                 hitFirst: currentStorePos?.hitFirst,
+                // pendingOrderId intentionally omitted — broker confirmed position exists
               },
             });
+
+            // Ensure backend monitor is registered (covers page-refresh + fill-after-refresh paths)
+            const sessionCfg = get().sessionConfig;
+            const syncedPos = get().position;
+            if (syncedPos && sessionCfg) registerMonitorIfNeeded(syncedPos, sessionCfg);
 
             if (!currentStorePos && qty !== 0) {
               useNotificationStore
@@ -177,6 +184,8 @@ export function createLiveActions(set: StoreSet, get: StoreGet) {
             }
           } else {
             if (get().position) {
+              // Don't clear if entry order is still awaiting fill confirmation at broker
+              if ((get().position as any)?.pendingOrderId) return;
               set({ position: null });
               useNotificationStore
                 .getState()

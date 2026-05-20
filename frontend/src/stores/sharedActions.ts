@@ -69,6 +69,8 @@ export function createSharedActions(set: StoreSet, get: StoreGet) {
     checkSLTPHits: (index: number, currentPrice?: number) => {
       const { candles, position } = get();
       if (!position || (!position.stopLoss && !position.target)) return;
+      // Entry order not yet confirmed filled — exits must not fire on a phantom position
+      if ((position as any).pendingOrderId) return;
 
       const candle = candles[index];
       if (!candle && !currentPrice) return;
@@ -394,9 +396,14 @@ export function createSharedActions(set: StoreSet, get: StoreGet) {
       set({ trades: [...trades, trade], position: nextPosition, manualLevels: null });
 
       // ── LIVE: register backend position monitor ───────────────────────────────
+      // Only register immediately when order is NOT awaiting fill confirmation.
+      // If pendingOrderId is set, registration is deferred to onFilled/onPartialFill
+      // below to prevent the backend monitor from firing exits on an unfilled entry.
       if (get().isLiveMode) {
         const sessionCfg = get().sessionConfig;
-        if (nextPosition && sessionCfg) registerMonitorIfNeeded(nextPosition, sessionCfg);
+        if (nextPosition && sessionCfg && !(newPositionState as any).pendingOrderId) {
+          registerMonitorIfNeeded(nextPosition, sessionCfg);
+        }
       }
 
       // ── LIVE: poll Dhan for fill status ~2 s after placement ─────────────────
@@ -416,12 +423,20 @@ export function createSharedActions(set: StoreSet, get: StoreGet) {
               if (!s.position || (s.position as any).pendingOrderId !== orderIdToCheck) return s;
               return { position: { ...s.position, filledQty: filled, pendingOrderId: undefined } };
             });
+            // Register backend monitor now that partial fill is confirmed
+            const currentPos = get().position;
+            const sessionCfg = get().sessionConfig;
+            if (currentPos && sessionCfg) registerMonitorIfNeeded(currentPos, sessionCfg);
           },
           onFilled: (filled) => {
             set((s) => {
               if (!s.position || (s.position as any).pendingOrderId !== orderIdToCheck) return s;
               return { position: { ...s.position, filledQty: filled, pendingOrderId: undefined } };
             });
+            // Register backend monitor now that fill is confirmed
+            const currentPos = get().position;
+            const sessionCfg = get().sessionConfig;
+            if (currentPos && sessionCfg) registerMonitorIfNeeded(currentPos, sessionCfg);
           },
           notify,
         });
@@ -566,6 +581,12 @@ export function createSharedActions(set: StoreSet, get: StoreGet) {
 
     restoreSessionState: (trades: Trade[], position: Position | null, currentIndex: number, uiSettings?: any) => {
       set((state) => ({ ...state, trades, position, currentIndex, ...(uiSettings || {}) }));
+      // Re-register backend monitor if restoring a filled live position (covers page-refresh path).
+      // Skip if pendingOrderId is set — fill not yet confirmed, monitor will be registered in onFilled.
+      if (position && (position as any).liveOptionToken && !(position as any).pendingOrderId && get().isLiveMode) {
+        const sessionCfg = get().sessionConfig;
+        if (sessionCfg) registerMonitorIfNeeded(position, sessionCfg);
+      }
     },
 
     restoreRemoteBackup: async (historyId?: string) => {
