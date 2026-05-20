@@ -499,6 +499,9 @@ export function AdvancedChart({
       color: c.close >= c.open ? '#26a69a40' : '#ef535040',
     }));
 
+    const timeScale = chart ? chart.timeScale() : null;
+    const savedLogicalRange = (!isFirstLoadRef.current && timeScale) ? timeScale.getVisibleLogicalRange() : null;
+
     series.setData(candleData);
     if (volumeSeries) {
       volumeSeries.setData(volumeData);
@@ -523,11 +526,12 @@ export function AdvancedChart({
     lastSetDataCountRef.current = dedupedCandles.length;
     lastSetDataTimeRef.current = dedupedCandles.length > 0 ? (dedupedCandles[dedupedCandles.length - 1].timestamp as number) : 0;
 
-    if (chart && dedupedCandles.length > 0) {
-      const timeScale = chart.timeScale();
+    if (timeScale && dedupedCandles.length > 0) {
       if (isFirstLoadRef.current) {
         timeScale.fitContent();
         isFirstLoadRef.current = false;
+      } else if (savedLogicalRange) {
+        timeScale.setVisibleLogicalRange(savedLogicalRange);
       }
     }
   }, [visibleCandles, series, volumeSeries, chart, isLiveMode]);
