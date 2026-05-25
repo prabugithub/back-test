@@ -162,10 +162,13 @@ export function createSharedActions(set: StoreSet, get: StoreGet) {
 
       let dialogToTrigger: 'SL' | 'TP' | null = null;
       let autoExitTP = false;
+      let autoExitSL = false;
+      const { autoExitSL: autoExitSLEnabled } = get();
 
       if (isLong) {
         if (sl > 0 && effectiveClose <= sl && !nextSlDialogShown) {
-          dialogToTrigger = 'SL';
+          if (autoExitSLEnabled) autoExitSL = true;
+          else dialogToTrigger = 'SL';
           nextSlDialogShown = true;
         } else if (tp > 0 && effectiveClose >= tp && !nextTpDialogShown) {
           if (autoExitTarget) autoExitTP = true;
@@ -174,7 +177,8 @@ export function createSharedActions(set: StoreSet, get: StoreGet) {
         }
       } else {
         if (sl > 0 && effectiveClose >= sl && !nextSlDialogShown) {
-          dialogToTrigger = 'SL';
+          if (autoExitSLEnabled) autoExitSL = true;
+          else dialogToTrigger = 'SL';
           nextSlDialogShown = true;
         } else if (tp > 0 && effectiveClose <= tp && !nextTpDialogShown) {
           if (autoExitTarget) autoExitTP = true;
@@ -190,7 +194,7 @@ export function createSharedActions(set: StoreSet, get: StoreGet) {
         nextSlDialogShown !== position.slDialogShown ||
         nextTpDialogShown !== position.tpDialogShown;
 
-      if (hasChanged || dialogToTrigger || autoExitTP) {
+      if (hasChanged || dialogToTrigger || autoExitTP || autoExitSL) {
         const updatedPosition = {
           ...position,
           slHit: nextSlHit,
@@ -200,7 +204,13 @@ export function createSharedActions(set: StoreSet, get: StoreGet) {
           tpDialogShown: nextTpDialogShown,
         };
 
-        if (autoExitTP) {
+        if (autoExitSL) {
+          set({ position: updatedPosition });
+          useNotificationStore
+            .getState()
+            .notify(`Stop Loss Hit at ${sl.toFixed(2)}. Auto Exiting.`, 'warning');
+          get().executeTrade(isLong ? 'SELL' : 'BUY', Math.abs(position.quantity), undefined, undefined, undefined, 'SL');
+        } else if (autoExitTP) {
           set({ position: updatedPosition });
           useNotificationStore
             .getState()

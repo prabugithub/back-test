@@ -1,5 +1,5 @@
 import { useState, useEffect, useMemo, useCallback, useRef } from 'react';
-import { Play, Pause, ChevronLeft, ChevronRight, FastForward, CalendarClock, Settings, X, Calendar, Activity, SlidersHorizontal } from 'lucide-react';
+import { Play, Pause, ChevronLeft, ChevronRight, FastForward, CalendarClock, Settings, X, Calendar, Activity, SlidersHorizontal, Zap } from 'lucide-react';
 import { useSessionStore } from '../stores/sessionStore';
 import { useNotificationStore } from '../stores/notificationStore';
 import { formatTimestamp } from '../utils/formatters';
@@ -7,6 +7,8 @@ import { parseColumnarData, resampleCandles, type ColumnarData } from '../utils/
 import { calculatePivotPoints } from '../utils/indicators';
 
 import { fetchCandles } from '../services/api';
+import { AutoBacktestPanel } from './AutoBacktestPanel';
+import { getCurrentMarketState } from '../utils/autoBacktestEngine';
 
 // Dynamic import for local data
 const loadNiftyData = () => import('../assets/market-data/nifty5min_data.json');
@@ -179,11 +181,17 @@ export function PlaybackControls({ onOpenHistory, onOpenDashboard }: { onOpenHis
   } = useSessionStore();
 
   const currentCandle = useSessionStore((s) => s.candles[s.currentIndex] || null);
+  const autoBTEnabled = useSessionStore((s) => s.autoBacktestConfig.enabled);
 
   const memoizedPivots = useMemo(() => {
     if (candles.length === 0) return [];
     return calculatePivotPoints(candles.slice(0, currentIndex + 1));
   }, [candles, currentIndex]);
+
+  const marketState = useMemo(
+    () => getCurrentMarketState(candles, currentIndex),
+    [candles, currentIndex]
+  );
 
   const recentPivot = memoizedPivots.length > 0 ? memoizedPivots[memoizedPivots.length - 1] : null;
 
@@ -235,6 +243,7 @@ export function PlaybackControls({ onOpenHistory, onOpenDashboard }: { onOpenHis
   const [customJump, setCustomJump] = useState('10');
   const [showSettings, setShowSettings] = useState(false);
   const [showTradeSettings, setShowTradeSettings] = useState(false);
+  const [showAutoBTPanel, setShowAutoBTPanel] = useState(false);
   const [draftRR, setDraftRR] = useState<string>(String(targetRR));
   // Keep draft in sync when targetRR changes externally (e.g. session restore)
   useEffect(() => { setDraftRR(String(targetRR)); }, [targetRR]);
@@ -669,11 +678,24 @@ export function PlaybackControls({ onOpenHistory, onOpenDashboard }: { onOpenHis
             )}
           </div>
           {!isLiveMode && (
-            <div className="w-full max-w-[12rem] bg-gray-200 rounded-full h-1.5 mt-1 mb-0.5 overflow-hidden">
+            <div className="flex items-center gap-2 w-full justify-center">
+              <div className="w-full max-w-[8rem] bg-gray-200 rounded-full h-1.5 mt-1 mb-0.5 overflow-hidden">
                 <div
-                className="bg-blue-500 h-full transition-all duration-200"
-                style={{ width: `${progress}%` }}
+                  className="bg-blue-500 h-full transition-all duration-200"
+                  style={{ width: `${progress}%` }}
                 />
+              </div>
+              <span
+                className={`text-[10px] font-semibold px-1.5 py-0.5 rounded whitespace-nowrap ${
+                  marketState.regime === 'uptrend' ? 'bg-green-50 text-green-700' :
+                  marketState.regime === 'downtrend' ? 'bg-red-50 text-red-700' :
+                  marketState.regime === 'reversal' ? 'bg-purple-50 text-purple-700' :
+                  'bg-amber-50 text-amber-700'
+                }`}
+                title={`LT: ${marketState.ltMarket} | HT: ${marketState.htMarket}`}
+              >
+                {marketState.ltMarket.replace('Bull-', '▲ ').replace('Bear-', '▼ ')}
+              </span>
             </div>
           )}
         </div>
@@ -711,14 +733,25 @@ export function PlaybackControls({ onOpenHistory, onOpenDashboard }: { onOpenHis
             <Activity size={16} />
           </button>
           <button
-            onClick={() => { setShowTradeSettings(!showTradeSettings); setShowSettings(false); }}
+            onClick={() => { setShowTradeSettings(!showTradeSettings); setShowSettings(false); setShowAutoBTPanel(false); }}
             className="p-1.5 text-gray-700 bg-gray-50 hover:bg-gray-100 rounded border border-gray-200"
             title="Trade Settings"
           >
             <SlidersHorizontal size={16} />
           </button>
           <button
-            onClick={() => { setShowSettings(!showSettings); setShowTradeSettings(false); }}
+            onClick={() => { setShowAutoBTPanel(!showAutoBTPanel); setShowSettings(false); setShowTradeSettings(false); }}
+            className={`p-1.5 rounded border transition-colors ${
+              autoBTEnabled
+                ? 'text-indigo-700 bg-indigo-100 hover:bg-indigo-200 border-indigo-400'
+                : 'text-gray-700 bg-gray-50 hover:bg-gray-100 border-gray-200'
+            }`}
+            title="Auto Backtesting Engine"
+          >
+            <Zap size={16} />
+          </button>
+          <button
+            onClick={() => { setShowSettings(!showSettings); setShowTradeSettings(false); setShowAutoBTPanel(false); }}
             className="p-1.5 text-gray-700 bg-gray-50 hover:bg-gray-100 rounded border border-gray-200"
             title="Data Settings"
           >
@@ -921,6 +954,11 @@ export function PlaybackControls({ onOpenHistory, onOpenDashboard }: { onOpenHis
             </div>
           </div>
         </div>
+      )}
+
+      {/* Auto Backtesting Panel */}
+      {showAutoBTPanel && (
+        <AutoBacktestPanel onClose={() => setShowAutoBTPanel(false)} />
       )}
 
       {/* Date Picker Modal */}

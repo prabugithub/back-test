@@ -4,6 +4,8 @@ import type { SessionState } from '../services/firebaseSessionService';
 import { createBacktestActions } from './backtestActions';
 import { createLiveActions } from './liveActions';
 import { createSharedActions } from './sharedActions';
+import { createAutoBacktestActions } from './autoBacktestActions';
+import { type AutoBacktestConfig, defaultAutoBacktestConfig } from '../utils/autoBacktestEngine';
 
 export interface SessionConfig {
   securityId: string;
@@ -12,13 +14,13 @@ export interface SessionConfig {
   interval: string;
   fromDate: string;
   toDate: string;
-  dataSource: 'api' | 'local';
+  dataSource: 'api' | 'local' | 'live';
 }
 
 // Shared set/get types imported by all action modules — avoids `set as any` casts.
 export type StoreSet = (
   partial: SessionStore | Partial<SessionStore> | ((state: SessionStore) => SessionStore | Partial<SessionStore>),
-  replace?: boolean
+  replace?: false
 ) => void;
 export type StoreGet = () => SessionStore;
 
@@ -63,6 +65,11 @@ export interface SessionStore {
   // false when a genuinely new candle is appended. Lets AdvancedChart skip expensive
   // indicator / marker rebuilds on price-only ticks.
   isLivePriceUpdate: boolean;
+
+  // ── Auto backtesting ─────────────────────────────────────────────────────────
+  autoBacktestConfig: AutoBacktestConfig;
+  autoExitSL: boolean;
+  lastAutoSignalReason: string;
 
   // ── Chart tool / indicator state ─────────────────────────────────────────────
   activeChartId: 'primary' | 'secondary';
@@ -130,6 +137,10 @@ export interface SessionStore {
   setSharedActiveTool: (tool: string) => void;
   setSharedActiveIndicators: (indicators: string[]) => void;
   toggleSharedIndicator: (indicator: string, chartId?: 'primary' | 'secondary') => void;
+
+  // ── Actions (auto backtesting) ───────────────────────────────────────────────
+  setAutoBacktestConfig: (config: AutoBacktestConfig) => void;
+  runAutoBacktestCheck: (index: number) => void;
 }
 
 export const useSessionStore = create<SessionStore>((set, get) => ({
@@ -168,8 +179,14 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
   secondaryDrawings: [],
   isLivePriceUpdate: false,
 
+  // ── Auto backtesting initial state ───────────────────────────────────────────
+  autoBacktestConfig: defaultAutoBacktestConfig,
+  autoExitSL: false,
+  lastAutoSignalReason: '',
+
   // ── Actions composed from isolated modules ───────────────────────────────────
   ...createBacktestActions(set, get),
   ...createLiveActions(set, get),
   ...createSharedActions(set, get),
+  ...createAutoBacktestActions(set, get),
 }));

@@ -173,7 +173,7 @@ export function analyzeMarketStructure(candles: Candle[], pivots: PivotPoint[]):
 /**
  * Determines the LLHH-Pivot pattern based on recent pivot points
  */
-function determineLLHHPivot(pivots: PivotPoint[]): 'HH-HL' | 'HH-LL' | 'LH-HL' | 'LH-LL' | '' {
+export function determineLLHHPivot(pivots: PivotPoint[]): 'HH-HL' | 'HH-LL' | 'LH-HL' | 'LH-LL' | '' {
     // Find the last bullish and bearish pivots
     let lastBullishPivot: PivotPoint | null = null;
     let lastBearishPivot: PivotPoint | null = null;
