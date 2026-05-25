@@ -500,11 +500,7 @@ export function AdvancedChart({
     }));
 
     const timeScale = chart ? chart.timeScale() : null;
-    // Use time-based range (not logical/index-based) — same pattern as the correction timer
-    // at line ~754 which is proven to survive setData without a scroll jump.
-    // setVisibleLogicalRange is unreliable in LWC v5 after setData because LWC's deferred
-    // RAF render overrides it; setVisibleRange (timestamp-based) is applied correctly.
-    const savedRange = (!isFirstLoadRef.current && timeScale) ? timeScale.getVisibleRange() : null;
+    const savedLogicalRange = (!isFirstLoadRef.current && timeScale) ? timeScale.getVisibleLogicalRange() : null;
 
     series.setData(candleData);
     if (volumeSeries) {
@@ -534,8 +530,8 @@ export function AdvancedChart({
       if (isFirstLoadRef.current) {
         timeScale.fitContent();
         isFirstLoadRef.current = false;
-      } else if (savedRange) {
-        timeScale.setVisibleRange(savedRange);
+      } else if (savedLogicalRange) {
+        timeScale.setVisibleLogicalRange(savedLogicalRange);
       }
     }
   }, [visibleCandles, series, volumeSeries, chart, isLiveMode]);
