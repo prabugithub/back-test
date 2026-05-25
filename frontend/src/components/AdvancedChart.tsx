@@ -501,6 +501,7 @@ export function AdvancedChart({
 
     const timeScale = chart ? chart.timeScale() : null;
     const savedLogicalRange = (!isFirstLoadRef.current && timeScale) ? timeScale.getVisibleLogicalRange() : null;
+    const prevBarCount = lastSetDataCountRef.current;
 
     series.setData(candleData);
     if (volumeSeries) {
@@ -531,7 +532,17 @@ export function AdvancedChart({
         timeScale.fitContent();
         isFirstLoadRef.current = false;
       } else if (savedLogicalRange) {
-        timeScale.setVisibleLogicalRange(savedLogicalRange);
+        const addedBars = dedupedCandles.length - prevBarCount;
+        // If user was at the right edge (last candle visible), scroll forward to keep new candle in view
+        const wasAtRightEdge = prevBarCount > 0 && savedLogicalRange.to >= prevBarCount - 1.5;
+        if (wasAtRightEdge && addedBars > 0) {
+          timeScale.setVisibleLogicalRange({
+            from: savedLogicalRange.from + addedBars,
+            to: savedLogicalRange.to + addedBars,
+          });
+        } else {
+          timeScale.setVisibleLogicalRange(savedLogicalRange);
+        }
       }
     }
   }, [visibleCandles, series, volumeSeries, chart, isLiveMode]);
