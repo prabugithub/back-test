@@ -4,6 +4,16 @@ import type { StoreSet, StoreGet } from './sessionStore';
 import { type AutoBacktestConfig, evaluateAutoSignals } from '../utils/autoBacktestEngine';
 import type { TradeJournal } from '../types';
 
+function candleTimeMinutes(timestampSec: number): number {
+  const d = new Date(timestampSec * 1000);
+  return d.getHours() * 60 + d.getMinutes(); // local time = IST (browser timezone)
+}
+
+function parseHHMM(hhmm: string): number {
+  const [h, m] = hhmm.split(':').map(Number);
+  return h * 60 + (m || 0);
+}
+
 export function createAutoBacktestActions(set: StoreSet, get: StoreGet) {
   return {
     setAutoBacktestConfig: (config: AutoBacktestConfig) => {
@@ -28,12 +38,31 @@ export function createAutoBacktestActions(set: StoreSet, get: StoreGet) {
 
       const { candles, autoBacktestConfig, tradeQuantity } = state;
 
+      // Time window guard — check candle's IST time against configured window
+      const candle = candles[index];
+      const candleMin = candleTimeMinutes(candle.timestamp);
+      if (candleMin < parseHHMM(autoBacktestConfig.tradeStartTime) ||
+          candleMin > parseHHMM(autoBacktestConfig.tradeEndTime)) {
+        return;
+      }
+
       const signal = evaluateAutoSignals(candles, index, autoBacktestConfig);
 
       if (!signal) {
-        // Clear last signal reason only if a new bar and no signal
-        // (keep previous reason visible until a new one fires)
         return;
+      }
+
+      // Quantity calculation
+      let qty: number;
+      if (autoBacktestConfig.useAutoQty) {
+        const riskPoints = Math.abs(signal.entryPrice - signal.sl);
+        qty = riskPoints > 0 ? Math.floor(autoBacktestConfig.riskPerTrade / riskPoints) : 0;
+        if (qty < autoBacktestConfig.minQuantity) {
+          set({ lastAutoSignalReason: `Skipped: qty ${qty} < min ${autoBacktestConfig.minQuantity} (SL ${riskPoints.toFixed(1)} pts too wide)` });
+          return;
+        }
+      } else {
+        qty = tradeQuantity;
       }
 
       set({ lastAutoSignalReason: signal.reason });
@@ -55,7 +84,7 @@ export function createAutoBacktestActions(set: StoreSet, get: StoreGet) {
       // Call executeTrade directly — bypasses the manual dialog flow
       state.executeTrade(
         signal.type,
-        tradeQuantity,
+        qty,
         signal.sl,
         signal.tp,
         undefined,        // priceOverride — use candle close

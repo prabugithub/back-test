@@ -274,7 +274,18 @@ export function AutoBacktestPanel({ onClose }: AutoBacktestPanelProps) {
 
   const applyPreset = (name: string) => {
     const preset = AUTO_BT_PRESETS[name];
-    if (preset) setAutoBacktestConfig({ ...defaultAutoBacktestConfig, ...preset, enabled: config.enabled });
+    if (!preset) return;
+    setAutoBacktestConfig({
+      ...defaultAutoBacktestConfig,
+      ...preset,
+      enabled: config.enabled,
+      // Preserve session-level settings — presets only change regime rules
+      tradeStartTime: config.tradeStartTime,
+      tradeEndTime: config.tradeEndTime,
+      useAutoQty: config.useAutoQty,
+      riskPerTrade: config.riskPerTrade,
+      minQuantity: config.minQuantity,
+    });
   };
 
   const regimes: RegimeKey[] = ['uptrend', 'downtrend', 'range', 'reversal'];
@@ -311,6 +322,63 @@ export function AutoBacktestPanel({ onClose }: AutoBacktestPanelProps) {
               className="w-3 h-3" />
             <span className="text-[10px] text-gray-600">Skip if open</span>
           </label>
+        </div>
+
+        {/* Trading time window */}
+        <div className="flex items-center gap-2 mt-2">
+          <span className="text-[10px] text-gray-500 w-14 shrink-0">Window</span>
+          <input
+            type="time"
+            value={config.tradeStartTime}
+            onChange={e => updateGlobal({ tradeStartTime: e.target.value })}
+            className="px-1.5 py-0.5 text-[11px] border rounded w-24"
+          />
+          <span className="text-[10px] text-gray-400">→</span>
+          <input
+            type="time"
+            value={config.tradeEndTime}
+            onChange={e => updateGlobal({ tradeEndTime: e.target.value })}
+            className="px-1.5 py-0.5 text-[11px] border rounded w-24"
+          />
+          <span className="text-[10px] text-gray-400 ml-1">IST</span>
+        </div>
+
+        {/* Auto quantity */}
+        <div className="flex items-center gap-2 mt-1.5 flex-wrap">
+          <span className="text-[10px] text-gray-500 w-14 shrink-0">Qty</span>
+          <label className="flex items-center gap-1 cursor-pointer select-none">
+            <input
+              type="checkbox"
+              checked={config.useAutoQty}
+              onChange={e => updateGlobal({ useAutoQty: e.target.checked })}
+              className="w-3 h-3"
+            />
+            <span className="text-[10px] text-gray-600">Auto</span>
+          </label>
+          {config.useAutoQty ? (
+            <>
+              <div className="flex items-center gap-1">
+                <span className="text-[10px] text-gray-500">₹</span>
+                <input
+                  type="number" step={1000} min={100} value={config.riskPerTrade}
+                  onChange={e => updateGlobal({ riskPerTrade: Number(e.target.value) })}
+                  className="w-20 px-1.5 py-0.5 text-[11px] border rounded text-right"
+                  title="Risk per trade (₹)"
+                />
+              </div>
+              <div className="flex items-center gap-1">
+                <span className="text-[10px] text-gray-500">Min:</span>
+                <input
+                  type="number" min={1} value={config.minQuantity}
+                  onChange={e => updateGlobal({ minQuantity: Number(e.target.value) })}
+                  className="w-12 px-1.5 py-0.5 text-[11px] border rounded text-center"
+                  title="Minimum quantity — skip trade if auto-qty is below this"
+                />
+              </div>
+            </>
+          ) : (
+            <span className="text-[10px] text-gray-400">Using manual qty from trade panel</span>
+          )}
         </div>
       </div>
 

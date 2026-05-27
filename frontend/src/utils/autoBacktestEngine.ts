@@ -44,9 +44,16 @@ export interface RegimeRules {
 
 export interface AutoBacktestConfig {
   enabled: boolean;
-
-  // Skip new entry if a position is already open
   skipIfPositionOpen: boolean;
+
+  // Trading time window (IST, 24h "HH:MM" — applied to candle timestamps)
+  tradeStartTime: string;  // e.g. "09:15" — skip entries before this
+  tradeEndTime: string;    // e.g. "14:30" — skip entries after this
+
+  // Auto quantity sizing
+  useAutoQty: boolean;     // false = use manual tradeQuantity from store
+  riskPerTrade: number;    // ₹ risked per trade when useAutoQty is true
+  minQuantity: number;     // block trade if auto-qty < this
 
   // Per-regime rule sets
   uptrend: RegimeRules;   // Bull-Trend, Bull-Trending-range
@@ -121,6 +128,11 @@ const defaultRangeRules: RegimeRules = {
 export const defaultAutoBacktestConfig: AutoBacktestConfig = {
   enabled: false,
   skipIfPositionOpen: true,
+  tradeStartTime: '09:15',
+  tradeEndTime: '14:30',
+  useAutoQty: false,
+  riskPerTrade: 10000,
+  minQuantity: 1,
   uptrend: { ...defaultLongRules, enabled: true },
   downtrend: { ...defaultShortRules, enabled: true },
   range: { ...defaultRangeRules, enabled: false },
