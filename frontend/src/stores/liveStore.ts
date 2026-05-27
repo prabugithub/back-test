@@ -88,6 +88,12 @@ export const useLiveStore = create<LiveState>((set, get) => ({
                             'Backend exited your position (SL/TP hit while offline). Syncing state.',
                             'warning'
                         );
+                        // Mark so syncLivePositions bypasses the post-fill grace period
+                        useSessionStore.setState((s) => ({
+                            position: s.position?.liveOptionToken === currentToken
+                                ? { ...s.position, exitTriggeredByBackend: true }
+                                : s.position,
+                        }));
                         // Clear local position — syncLivePositions will reconcile with broker next tick
                         session.syncLivePositions();
                     }

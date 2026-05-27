@@ -431,7 +431,7 @@ export function createSharedActions(set: StoreSet, get: StoreGet) {
           onPartialFill: (filled) => {
             set((s) => {
               if (!s.position || (s.position as any).pendingOrderId !== orderIdToCheck) return s;
-              return { position: { ...s.position, filledQty: filled, pendingOrderId: undefined } };
+              return { position: { ...s.position, filledQty: filled, pendingOrderId: undefined, fillConfirmedAt: Date.now() } };
             });
             // Register backend monitor now that partial fill is confirmed
             const currentPos = get().position;
@@ -441,7 +441,7 @@ export function createSharedActions(set: StoreSet, get: StoreGet) {
           onFilled: (filled) => {
             set((s) => {
               if (!s.position || (s.position as any).pendingOrderId !== orderIdToCheck) return s;
-              return { position: { ...s.position, filledQty: filled, pendingOrderId: undefined } };
+              return { position: { ...s.position, filledQty: filled, pendingOrderId: undefined, fillConfirmedAt: Date.now() } };
             });
             // Register backend monitor now that fill is confirmed
             const currentPos = get().position;

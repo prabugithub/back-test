@@ -186,6 +186,13 @@ export function createLiveActions(set: StoreSet, get: StoreGet) {
             if (get().position) {
               // Don't clear if entry order is still awaiting fill confirmation at broker
               if ((get().position as any)?.pendingOrderId) return;
+              // Grace period after fill confirmation: Dhan's position API can lag 10-15s after
+              // an order fills. pollOrderFillStatus clears pendingOrderId at ~2s, but the broker
+              // position won't appear here until the API catches up. Without this guard,
+              // syncLivePositions clears the local position before the broker reflects it.
+              const pos = get().position as any;
+              // Bypass grace if the backend already confirmed an exit — don't delay the clear.
+              if (pos?.fillConfirmedAt && !pos?.exitTriggeredByBackend && Date.now() - pos.fillConfirmedAt < 20000) return;
               set({ position: null });
               useNotificationStore
                 .getState()
