@@ -18,7 +18,7 @@ export function InstrumentSelector() {
   const [interval, setInterval] = useState('5');
   const [fromDate, setFromDate] = useState('2021-01-01');
   const [toDate, setToDate] = useState('2026-01-20');
-  const [jumpToDate, setJumpToDate] = useState('');
+  const [jumpToDate, setJumpToDate] = useState('2021-01-01');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [useDateBasedLoading, setUseDateBasedLoading] = useState(false);

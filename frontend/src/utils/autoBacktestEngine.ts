@@ -159,6 +159,7 @@ export const AUTO_BT_PRESETS: Record<string, Partial<AutoBacktestConfig>> = {
       ltPivotSequence: 'HH-HL',
       maFilter: 'above_ema21',
       htStructureFilter: 'bull_trend',
+
       slMethod: 'pivot',
       slAtrMultiplier: 1.5,
       slFixedPoints: 50,
@@ -173,6 +174,7 @@ export const AUTO_BT_PRESETS: Record<string, Partial<AutoBacktestConfig>> = {
       ltPivotSequence: 'LH-LL',
       maFilter: 'above_ema21',
       htStructureFilter: 'bear_trend',
+
       slMethod: 'pivot',
       slAtrMultiplier: 1.5,
       slFixedPoints: 50,
@@ -187,6 +189,7 @@ export const AUTO_BT_PRESETS: Record<string, Partial<AutoBacktestConfig>> = {
       ltPivotSequence: 'any',
       maFilter: 'on_or_above_ema21',
       htStructureFilter: 'any',
+
       slMethod: 'pivot',
       slAtrMultiplier: 1.5,
       slFixedPoints: 50,
@@ -201,6 +204,7 @@ export const AUTO_BT_PRESETS: Record<string, Partial<AutoBacktestConfig>> = {
       ltPivotSequence: 'any',
       maFilter: 'on_or_above_ema21',
       htStructureFilter: 'any',
+
       slMethod: 'atr',
       slAtrMultiplier: 1.5,
       slFixedPoints: 50,
@@ -220,6 +224,7 @@ export const AUTO_BT_PRESETS: Record<string, Partial<AutoBacktestConfig>> = {
       ltPivotSequence: 'any',
       maFilter: 'on_or_above_ema21',
       htStructureFilter: 'any',
+
       slMethod: 'pivot',
       slAtrMultiplier: 1.5,
       slFixedPoints: 50,

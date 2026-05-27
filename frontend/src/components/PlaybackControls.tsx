@@ -617,6 +617,9 @@ export function PlaybackControls({ onOpenHistory, onOpenDashboard }: { onOpenHis
               <option value={2}>2x</option>
               <option value={5}>5x</option>
               <option value={10}>10x</option>
+              <option value={20}>20x</option>
+              <option value={50}>50x</option>
+              <option value={100}>100x</option>
             </select>
           )}
 

@@ -70,6 +70,7 @@ export interface SessionStore {
   autoBacktestConfig: AutoBacktestConfig;
   autoExitSL: boolean;
   lastAutoSignalReason: string;
+  isBatchBacktestRunning: boolean;
 
   // ── Chart tool / indicator state ─────────────────────────────────────────────
   activeChartId: 'primary' | 'secondary';
@@ -142,6 +143,7 @@ export interface SessionStore {
   setAutoBacktestConfig: (config: AutoBacktestConfig) => void;
   runAutoBacktestCheck: (index: number) => void;
   runAutoSquareOff: (index: number) => void;
+  runBatchAutoBacktest: () => void;
 }
 
 export const useSessionStore = create<SessionStore>((set, get) => ({
@@ -184,6 +186,7 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
   autoBacktestConfig: defaultAutoBacktestConfig,
   autoExitSL: false,
   lastAutoSignalReason: '',
+  isBatchBacktestRunning: false,
 
   // ── Actions composed from isolated modules ───────────────────────────────────
   ...createBacktestActions(set, get),
