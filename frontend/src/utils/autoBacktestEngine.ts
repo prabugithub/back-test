@@ -30,6 +30,9 @@ export interface RegimeRules {
   // MA filter
   maFilter: 'none' | 'above_ema21' | 'on_or_above_ema21' | 'above_ema60';
 
+  // Higher timeframe structure required for this regime
+  htStructureFilter: 'any' | 'bull_trend' | 'bear_trend';
+
   // Risk
   slMethod: 'pivot' | 'atr' | 'fixed';
   slAtrMultiplier: number;
@@ -41,9 +44,6 @@ export interface RegimeRules {
 
 export interface AutoBacktestConfig {
   enabled: boolean;
-
-  // Global HT filter — applies across all regimes
-  htStructureFilter: 'any' | 'bull_trend' | 'bear_trend';
 
   // Skip new entry if a position is already open
   skipIfPositionOpen: boolean;
@@ -86,6 +86,7 @@ const defaultLongRules: RegimeRules = {
   confluenceLookback: 5,
   ltPivotSequence: 'any',
   maFilter: 'above_ema21',
+  htStructureFilter: 'bull_trend',
   slMethod: 'pivot',
   slAtrMultiplier: 1.5,
   slFixedPoints: 50,
@@ -100,6 +101,7 @@ const defaultShortRules: RegimeRules = {
   allowL1: true,
   allowL2: true,
   maFilter: 'above_ema21',
+  htStructureFilter: 'bear_trend',
 };
 
 const defaultRangeRules: RegimeRules = {
@@ -108,6 +110,7 @@ const defaultRangeRules: RegimeRules = {
   entryMode: 'PIVOT',
   ltPivotSequence: 'any',
   maFilter: 'on_or_above_ema21',
+  htStructureFilter: 'any',
   targetRR: 1.5,
   allowH1: true,
   allowH2: true,
@@ -117,7 +120,6 @@ const defaultRangeRules: RegimeRules = {
 
 export const defaultAutoBacktestConfig: AutoBacktestConfig = {
   enabled: false,
-  htStructureFilter: 'any',
   skipIfPositionOpen: true,
   uptrend: { ...defaultLongRules, enabled: true },
   downtrend: { ...defaultShortRules, enabled: true },
@@ -129,7 +131,6 @@ export const defaultAutoBacktestConfig: AutoBacktestConfig = {
 
 export const AUTO_BT_PRESETS: Record<string, Partial<AutoBacktestConfig>> = {
   'Trend Follow': {
-    htStructureFilter: 'any',
     skipIfPositionOpen: true,
     uptrend: {
       enabled: true,
@@ -139,6 +140,7 @@ export const AUTO_BT_PRESETS: Record<string, Partial<AutoBacktestConfig>> = {
       confluenceLookback: 5,
       ltPivotSequence: 'HH-HL',
       maFilter: 'above_ema21',
+      htStructureFilter: 'bull_trend',
       slMethod: 'pivot',
       slAtrMultiplier: 1.5,
       slFixedPoints: 50,
@@ -152,6 +154,7 @@ export const AUTO_BT_PRESETS: Record<string, Partial<AutoBacktestConfig>> = {
       confluenceLookback: 5,
       ltPivotSequence: 'LH-LL',
       maFilter: 'above_ema21',
+      htStructureFilter: 'bear_trend',
       slMethod: 'pivot',
       slAtrMultiplier: 1.5,
       slFixedPoints: 50,
@@ -165,6 +168,7 @@ export const AUTO_BT_PRESETS: Record<string, Partial<AutoBacktestConfig>> = {
       confluenceLookback: 5,
       ltPivotSequence: 'any',
       maFilter: 'on_or_above_ema21',
+      htStructureFilter: 'any',
       slMethod: 'pivot',
       slAtrMultiplier: 1.5,
       slFixedPoints: 50,
@@ -178,6 +182,7 @@ export const AUTO_BT_PRESETS: Record<string, Partial<AutoBacktestConfig>> = {
       confluenceLookback: 5,
       ltPivotSequence: 'any',
       maFilter: 'on_or_above_ema21',
+      htStructureFilter: 'any',
       slMethod: 'atr',
       slAtrMultiplier: 1.5,
       slFixedPoints: 50,
@@ -185,7 +190,6 @@ export const AUTO_BT_PRESETS: Record<string, Partial<AutoBacktestConfig>> = {
     },
   },
   'Range Trader': {
-    htStructureFilter: 'any',
     skipIfPositionOpen: true,
     uptrend: { ...defaultLongRules, enabled: false },
     downtrend: { ...defaultShortRules, enabled: false },
@@ -197,6 +201,7 @@ export const AUTO_BT_PRESETS: Record<string, Partial<AutoBacktestConfig>> = {
       confluenceLookback: 5,
       ltPivotSequence: 'any',
       maFilter: 'on_or_above_ema21',
+      htStructureFilter: 'any',
       slMethod: 'pivot',
       slAtrMultiplier: 1.5,
       slFixedPoints: 50,
@@ -205,7 +210,6 @@ export const AUTO_BT_PRESETS: Record<string, Partial<AutoBacktestConfig>> = {
     reversal: { ...defaultRangeRules, enabled: false },
   },
   'All Regimes': {
-    htStructureFilter: 'any',
     skipIfPositionOpen: true,
     uptrend: { ...defaultLongRules, enabled: true },
     downtrend: { ...defaultShortRules, enabled: true },
@@ -253,8 +257,8 @@ export function evaluateAutoSignals(
   const regime = getRegimeKey(ltMarket);
   const regimeRules = config[regime];
 
-  // Global HT filter
-  if (!passesHtFilter(config.htStructureFilter, htMarket)) return null;
+  // Per-regime HT filter
+  if (!passesHtFilter(regimeRules.htStructureFilter, htMarket)) return null;
 
   // Regime must be enabled
   if (!regimeRules.enabled) return null;

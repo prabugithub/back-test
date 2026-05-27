@@ -188,6 +188,18 @@ function RegimeEditor({ regime, rules, onChange }: RegimeEditorProps) {
             <option value="LH-LL">LH-LL (Bear)</option>
           </select>
         </div>
+        <div className="col-span-2">
+          <p className="text-[10px] text-gray-400 mb-0.5 uppercase tracking-wide font-medium">HT Structure</p>
+          <select
+            value={rules.htStructureFilter}
+            onChange={e => up({ htStructureFilter: e.target.value as RegimeRules['htStructureFilter'] })}
+            className="w-full px-1.5 py-1 text-[11px] border rounded"
+          >
+            <option value="any">Any</option>
+            <option value="bull_trend">Bull Trend (HT)</option>
+            <option value="bear_trend">Bear Trend (HT)</option>
+          </select>
+        </div>
       </div>
 
       {/* Risk */}
@@ -292,19 +304,6 @@ export function AutoBacktestPanel({ onClose }: AutoBacktestPanelProps) {
               {config.enabled ? 'Running' : 'Off'}
             </span>
           </label>
-
-          <div className="flex items-center gap-1.5">
-            <span className="text-[10px] text-gray-500">HT:</span>
-            <select
-              value={config.htStructureFilter}
-              onChange={e => updateGlobal({ htStructureFilter: e.target.value as AutoBacktestConfig['htStructureFilter'] })}
-              className="px-1.5 py-0.5 text-[10px] border rounded"
-            >
-              <option value="any">Any</option>
-              <option value="bull_trend">Bull</option>
-              <option value="bear_trend">Bear</option>
-            </select>
-          </div>
 
           <label className="flex items-center gap-1 cursor-pointer select-none ml-auto">
             <input type="checkbox" checked={config.skipIfPositionOpen}
