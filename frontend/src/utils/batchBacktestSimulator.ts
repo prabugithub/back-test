@@ -38,12 +38,15 @@ export function runBatchSimulation(
   startIndex: number,
   instrument: string,
   tradeQuantity: number,
-  sessionInterval?: string
+  sessionInterval?: string,
+  onProgress?: (percent: number) => void
 ): BatchSimResult {
   const trades: Trade[] = [];
   let position: SimPosition | null = null;
   let tradeCounter = 0;
   const interval = sessionInterval || '5';
+  const total = candles.length - startIndex;
+  const reportEvery = Math.max(1, Math.floor(total / 20));
 
   function enterPosition(candle: Candle, signal: AutoSignal, qty: number, candleIndex: number) {
     const entryPrice = candle.close;
@@ -112,6 +115,9 @@ export function runBatchSimulation(
   }
 
   for (let i = startIndex; i < candles.length; i++) {
+    if (onProgress && (i - startIndex) % reportEvery === 0) {
+      onProgress(Math.round(((i - startIndex) / total) * 100));
+    }
     const candle = candles[i];
 
     // ── 1. SL/TP check — exits when candle.close crosses the level ──────────

@@ -18,6 +18,7 @@ interface RoundTrip {
   entryPrice: number;
   sl: number;
   tp: number;
+  atrDepth: number;
 }
 
 interface GroupStats {
@@ -46,6 +47,16 @@ const HTF_LABEL: Record<string, string> = {
 const LTF_REGIME_ORDER: RegimeKey[] = ['uptrend', 'downtrend', 'reversal', 'range'];
 
 const PIVOT_ORDER = ['HH-HL', 'LH-LL', 'HH-LL', 'LH-HL', '—'];
+
+const ATR_DEPTH_ORDER = ['<0.5', '0.5-1', '1-1.5', '1.5-2', '>2'];
+
+function atrBucket(d: number): string {
+  if (d < 0.5) return '<0.5';
+  if (d < 1.0) return '0.5-1';
+  if (d < 1.5) return '1-1.5';
+  if (d < 2.0) return '1.5-2';
+  return '>2';
+}
 
 const EXIT_ORDER = ['TP', 'SL', 'TIME_OVER', 'MANUAL'];
 const EXIT_LABEL: Record<string, string> = {
@@ -78,6 +89,7 @@ function pairTrades(trades: Trade[]): RoundTrip[] {
         entryPrice: pending.price,
         sl: pending.stopLoss ?? 0,
         tp: pending.target ?? 0,
+        atrDepth: pending.atrDepthAtEntry ?? 0,
       });
       pending = null;
     }
@@ -374,6 +386,21 @@ function OverviewTab({ trips }: { trips: RoundTrip[] }) {
         rowLabel={r => r}
         colLabel={c => HTF_LABEL[c] ?? c}
         data={byLTFHTF as Map<string, Map<string, GroupStats>>}
+      />
+
+      <SectionHeader>ATR Depth at Entry</SectionHeader>
+      <BreakdownTable
+        rows={ATR_DEPTH_ORDER}
+        data={groupBy(trips, t => atrBucket(t.atrDepth))}
+      />
+
+      <SectionHeader>ATR Depth × LTF Regime</SectionHeader>
+      <Heatmap
+        rows={ATR_DEPTH_ORDER}
+        cols={ltfRegimeLabels}
+        rowLabel={r => r}
+        colLabel={c => c}
+        data={groupBy2D(trips, t => atrBucket(t.atrDepth), t => t.ltRegime) as Map<string, Map<string, GroupStats>>}
       />
 
       <p className="text-[9px] text-gray-400 mt-2">Cell = Win% (count). Hover for W/L and P&L.</p>

@@ -201,6 +201,32 @@ function RegimeEditor({ regime, rules, onChange }: RegimeEditorProps) {
             <option value="bear_trend">Bear Trend (HT)</option>
           </select>
         </div>
+        <div>
+          <p className="text-[10px] text-gray-400 mb-0.5 uppercase tracking-wide font-medium">ATR Depth</p>
+          <select
+            value={rules.atrDepthFilter ?? 'none'}
+            onChange={e => up({ atrDepthFilter: e.target.value as RegimeRules['atrDepthFilter'] })}
+            className="w-full px-1.5 py-1 text-[11px] border rounded"
+          >
+            <option value="none">None</option>
+            <option value="max">≤ X ATR (Trend)</option>
+            <option value="min">≥ X ATR (Gap/Range)</option>
+          </select>
+        </div>
+        {(rules.atrDepthFilter ?? 'none') !== 'none' && (
+          <div>
+            <p className="text-[10px] text-gray-400 mb-0.5 uppercase tracking-wide font-medium">Threshold</p>
+            <div className="flex items-center gap-1">
+              <input
+                type="number" step={0.25} min={0.25} max={10}
+                value={rules.atrDepthThreshold ?? 1.5}
+                onChange={e => up({ atrDepthThreshold: Number(e.target.value) })}
+                className="w-full px-1.5 py-1 text-[11px] border rounded text-center"
+              />
+              <span className="text-[10px] text-gray-400 whitespace-nowrap">ATR</span>
+            </div>
+          </div>
+        )}
       </div>
 
       {/* Risk */}
@@ -260,6 +286,7 @@ export function AutoBacktestPanel({ onClose }: AutoBacktestPanelProps) {
   const currentIndex = useSessionStore(s => s.currentIndex);
   const runBatchAutoBacktest = useSessionStore(s => s.runBatchAutoBacktest);
   const isBatchRunning = useSessionStore(s => s.isBatchBacktestRunning);
+  const batchProgress = useSessionStore(s => s.batchBacktestProgress);
   const trades = useSessionStore(s => s.trades);
 
   const [activeRegime, setActiveRegime] = useState<RegimeKey>('uptrend');
@@ -550,6 +577,21 @@ export function AutoBacktestPanel({ onClose }: AutoBacktestPanelProps) {
               </>
             )}
           </button>
+
+          {isBatchRunning && (
+            <div className="mt-2">
+              <div className="flex justify-between text-[10px] text-gray-500 mb-1">
+                <span>Processing candles…</span>
+                <span>{batchProgress}%</span>
+              </div>
+              <div className="w-full h-1.5 bg-gray-100 rounded-full overflow-hidden">
+                <div
+                  className="h-full bg-indigo-500 rounded-full transition-all duration-150"
+                  style={{ width: `${batchProgress}%` }}
+                />
+              </div>
+            </div>
+          )}
         </div>
 
         {/* Entry Metrics Dashboard — shown when batch trades with journal data exist */}

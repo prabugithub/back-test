@@ -27,6 +27,7 @@ export interface SessionState {
         autoExitTarget?: boolean;
         useAtrForSignals?: boolean;
         showPivotRR?: boolean;
+        autoBacktestConfig?: any;
     };
 }
 

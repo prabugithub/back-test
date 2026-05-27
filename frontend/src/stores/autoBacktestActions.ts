@@ -2,7 +2,6 @@
 
 import type { StoreSet, StoreGet } from './sessionStore';
 import { type AutoBacktestConfig, evaluateAutoSignals } from '../utils/autoBacktestEngine';
-import { runBatchSimulation } from '../utils/batchBacktestSimulator';
 import { useNotificationStore } from './notificationStore';
 import type { TradeJournal } from '../types';
 import { analyzeManualEntry } from '../utils/pivotAnalysis';
@@ -101,28 +100,49 @@ export function createAutoBacktestActions(set: StoreSet, get: StoreGet) {
       const state = get();
       if (state.isLiveMode) return;
       if (state.candles.length === 0) return;
+      if (state.isBatchBacktestRunning) return;
 
-      set({ isBatchBacktestRunning: true, isPlaying: false });
+      set({ isBatchBacktestRunning: true, isPlaying: false, batchBacktestProgress: 0 });
 
-      // Defer to next macrotask so React renders the spinner before the blocking computation
-      setTimeout(() => {
-        const { candles, autoBacktestConfig, instrument, tradeQuantity, sessionConfig } = get();
-        const result = runBatchSimulation(
-          candles,
-          autoBacktestConfig,
-          0,
-          instrument,
-          tradeQuantity,
-          sessionConfig?.interval
-        );
+      const { candles, autoBacktestConfig, instrument, tradeQuantity, sessionConfig } = get();
+
+      const worker = new Worker(
+        new URL('../utils/batchBacktestWorker.ts', import.meta.url),
+        { type: 'module' }
+      );
+
+      worker.onmessage = (e: MessageEvent) => {
+        if (e.data.type === 'progress') {
+          set({ batchBacktestProgress: e.data.percent });
+          return;
+        }
+        const result = e.data.result;
         set({
           trades: result.trades,
           position: result.finalPosition,
           currentIndex: candles.length - 1,
           isBatchBacktestRunning: false,
+          batchBacktestProgress: 100,
           lastAutoSignalReason: `Batch complete: ${result.tradeCount} trades, P&L ₹${result.totalPnL.toFixed(2)}`,
         });
-      }, 0);
+        worker.terminate();
+      };
+
+      worker.onerror = (err) => {
+        console.error('Batch backtest worker error:', err);
+        set({ isBatchBacktestRunning: false });
+        useNotificationStore.getState().notify('Batch backtest failed', 'error');
+        worker.terminate();
+      };
+
+      worker.postMessage({
+        candles,
+        config: autoBacktestConfig,
+        startIndex: 0,
+        instrument,
+        tradeQuantity,
+        sessionInterval: sessionConfig?.interval,
+      });
     },
 
     runAutoSquareOff: (index: number) => {

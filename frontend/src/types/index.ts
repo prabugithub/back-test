@@ -44,6 +44,7 @@ export interface Trade {
   trendReversedPnL?: number;
   withTrendSeen?: boolean;
   journal?: TradeJournal;
+  atrDepthAtEntry?: number;
   interval?: string;
   liveOptionToken?: string;
   optionType?: 'CE' | 'PE';

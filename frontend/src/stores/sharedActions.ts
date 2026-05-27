@@ -11,7 +11,7 @@ import {
   type SessionState,
 } from '../services/firebaseSessionService';
 import { useNotificationStore } from './notificationStore';
-import { calculatePivotPoints } from '../utils/indicators';
+import { calculatePivotPoints, calculateATR, calculateEMA } from '../utils/indicators';
 import { analyzeMarketStructure } from '../utils/pivotAnalysis';
 import {
   executeLiveOrder,
@@ -297,6 +297,12 @@ export function createSharedActions(set: StoreSet, get: StoreGet) {
       const visibleCandlesForEntry = candles.slice(0, currentIndex + 1);
       const pivotsForEntry = calculatePivotPoints(visibleCandlesForEntry);
       const { ltMarket } = analyzeMarketStructure(visibleCandlesForEntry, pivotsForEntry);
+
+      const atrSeries = calculateATR(visibleCandlesForEntry, 14);
+      const emaSeries = calculateEMA(visibleCandlesForEntry, 21);
+      const atrVal = atrSeries[atrSeries.length - 1]?.value ?? 0;
+      const emaVal = emaSeries[emaSeries.length - 1]?.value ?? 0;
+      const atrDepthAtEntry = atrVal > 0 ? Math.abs(currentPrice - emaVal) / atrVal : 0;
       const isInitialWith =
         (type === 'BUY' && ltMarket.startsWith('Bull')) ||
         (type === 'SELL' && ltMarket.startsWith('Bear'));
@@ -345,6 +351,7 @@ export function createSharedActions(set: StoreSet, get: StoreGet) {
         trendReversedPnL: position?.trendReversedPnL,
         withTrendSeen: isSameSide ? position?.withTrendSeen || isInitialWith : isInitialWith,
         journal: journal || undefined,
+        atrDepthAtEntry: !isReducing ? atrDepthAtEntry : undefined,
         interval: sessionConfig?.interval || '5',
       };
 
@@ -533,6 +540,7 @@ export function createSharedActions(set: StoreSet, get: StoreGet) {
         instrument, trades, position, currentIndex, sessionConfig,
         drawings, secondaryDrawings, primaryIndicators, secondaryIndicators, secondaryTimeframe,
         showSecondaryChart, tradeQuantity, riskPerTrade, targetRR, autoExitTarget, useAtrForSignals, showPivotRR,
+        autoBacktestConfig,
       } = get();
       if (!sessionConfig) {
         useNotificationStore.getState().notify('Cannot save: Missing session configuration. Please reload data.', 'error');
@@ -553,7 +561,7 @@ export function createSharedActions(set: StoreSet, get: StoreGet) {
         currentIndex,
         trades: sanitizedTrades,
         position,
-        uiSettings: { drawings, secondaryDrawings, primaryIndicators, secondaryIndicators, secondaryTimeframe, showSecondaryChart, tradeQuantity, riskPerTrade, targetRR, autoExitTarget, useAtrForSignals, showPivotRR },
+        uiSettings: { drawings, secondaryDrawings, primaryIndicators, secondaryIndicators, secondaryTimeframe, showSecondaryChart, tradeQuantity, riskPerTrade, targetRR, autoExitTarget, useAtrForSignals, showPivotRR, autoBacktestConfig },
       };
       set({ isLoading: true });
       try {
@@ -590,7 +598,10 @@ export function createSharedActions(set: StoreSet, get: StoreGet) {
     },
 
     restoreSessionState: (trades: Trade[], position: Position | null, currentIndex: number, uiSettings?: any) => {
-      set((state) => ({ ...state, trades, position, currentIndex, ...(uiSettings || {}) }));
+      const extraState = uiSettings?.autoBacktestConfig
+        ? { autoExitSL: uiSettings.autoBacktestConfig.enabled }
+        : {};
+      set((state) => ({ ...state, trades, position, currentIndex, ...(uiSettings || {}), ...extraState }));
       // Re-register backend monitor if restoring a filled live position (covers page-refresh path).
       // Skip if pendingOrderId is set — fill not yet confirmed, monitor will be registered in onFilled.
       if (position && (position as any).liveOptionToken && !(position as any).pendingOrderId && get().isLiveMode) {
@@ -624,6 +635,7 @@ export function createSharedActions(set: StoreSet, get: StoreGet) {
         instrument, trades, position, currentIndex, sessionConfig,
         drawings, secondaryDrawings, primaryIndicators, secondaryIndicators, secondaryTimeframe,
         showSecondaryChart, tradeQuantity, riskPerTrade, targetRR, autoExitTarget, useAtrForSignals, showPivotRR,
+        autoBacktestConfig,
       } = get();
       if (!sessionConfig) {
         useNotificationStore.getState().notify('Cannot save snapshot: Missing configuration', 'error');
@@ -639,7 +651,7 @@ export function createSharedActions(set: StoreSet, get: StoreGet) {
         currentIndex,
         trades,
         position,
-        uiSettings: { drawings, secondaryDrawings, primaryIndicators, secondaryIndicators, secondaryTimeframe, showSecondaryChart, tradeQuantity, riskPerTrade, targetRR, autoExitTarget, useAtrForSignals, showPivotRR },
+        uiSettings: { drawings, secondaryDrawings, primaryIndicators, secondaryIndicators, secondaryTimeframe, showSecondaryChart, tradeQuantity, riskPerTrade, targetRR, autoExitTarget, useAtrForSignals, showPivotRR, autoBacktestConfig },
       };
       set({ isLoading: true });
       try {

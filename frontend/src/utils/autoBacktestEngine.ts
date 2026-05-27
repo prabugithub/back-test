@@ -30,6 +30,12 @@ export interface RegimeRules {
   // MA filter
   maFilter: 'none' | 'above_ema21' | 'on_or_above_ema21' | 'above_ema60';
 
+  // ATR depth filter — distance of entry price from EMA21 in ATR units
+  // 'max': entry must be within threshold ATRs of EMA21 (trend: avoid overextended)
+  // 'min': entry must be at least threshold ATRs from EMA21 (range/gap-opposite)
+  atrDepthFilter?: 'none' | 'max' | 'min';
+  atrDepthThreshold?: number;
+
   // Higher timeframe structure required for this regime
   htStructureFilter: 'any' | 'bull_trend' | 'bear_trend';
 
@@ -351,6 +357,8 @@ function evalLong(
   if (!passesMa(rules.maFilter, candle, ema21, ema60, true)) return null;
 
   const entry = candle.close;
+  if (!passesAtrDepth(rules, entry, ema21, atr)) return null;
+
   const sl = slLong(rules, entry, pivotForSl, atr);
   if (sl <= 0 || sl >= entry) return null;
   const risk = entry - sl;
@@ -413,6 +421,8 @@ function evalShort(
   if (!passesMa(rules.maFilter, candle, ema21, ema60, false)) return null;
 
   const entry = candle.close;
+  if (!passesAtrDepth(rules, entry, ema21, atr)) return null;
+
   const sl = slShort(rules, entry, pivotForSl, atr);
   if (sl <= 0 || sl <= entry) return null;
   const risk = sl - entry;
@@ -425,6 +435,16 @@ function evalShort(
 }
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
+
+function passesAtrDepth(rules: RegimeRules, entry: number, ema21: number | null, atr: number): boolean {
+  const filter = rules.atrDepthFilter ?? 'none';
+  const threshold = rules.atrDepthThreshold ?? 1.5;
+  if (filter === 'none' || !ema21 || atr <= 0) return true;
+  const depth = Math.abs(entry - ema21) / atr;
+  if (filter === 'max') return depth <= threshold;
+  if (filter === 'min') return depth >= threshold;
+  return true;
+}
 
 function passesHtFilter(filter: string, htMarket: string): boolean {
   if (filter === 'any') return true;
