@@ -15,6 +15,7 @@ import { groupTradesIntoPositions, calculatePerformanceStats, type GroupedPositi
 import { formatCurrency, formatTimestamp } from '../utils/formatters';
 import { OptionBacktestModal } from './OptionBacktestModal';
 import { ShieldCheck } from 'lucide-react';
+import { EntryMetricsDashboardFromPositions } from './EntryMetricsDashboard';
 
 interface PerformanceDashboardProps {
     onBack: () => void;
@@ -32,7 +33,7 @@ export function PerformanceDashboard({ onBack, liveInstrument }: PerformanceDash
     const [selectedSnapshotIds, setSelectedSnapshotIds] = useState<Set<string> | null>(null); // null = all
     const [selectedInstrument, setSelectedInstrument] = useState<string>('All');
     const [selectedCategory, setSelectedCategory] = useState<string>('All');
-    const [activeTab, setActiveTab] = useState<'dashboard' | 'log'>('dashboard');
+    const [activeTab, setActiveTab] = useState<'dashboard' | 'log' | 'entry'>('dashboard');
     const [searchQuery, setSearchQuery] = useState('');
     const [isOptionModalOpen, setIsOptionModalOpen] = useState(false);
 
@@ -272,6 +273,12 @@ export function PerformanceDashboard({ onBack, liveInstrument }: PerformanceDash
                         className={`px-4 py-1.5 text-sm font-bold rounded-md transition-all ${activeTab === 'dashboard' ? 'text-blue-700 bg-white shadow-sm' : 'text-slate-500 hover:text-slate-700'}`}
                     >
                         Dashboard
+                    </button>
+                    <button
+                        onClick={() => setActiveTab('entry')}
+                        className={`px-4 py-1.5 text-sm font-bold rounded-md transition-all ${activeTab === 'entry' ? 'text-blue-700 bg-white shadow-sm' : 'text-slate-500 hover:text-slate-700'}`}
+                    >
+                        Entry Analytics
                     </button>
                     <button
                         onClick={() => setActiveTab('log')}
@@ -741,6 +748,21 @@ export function PerformanceDashboard({ onBack, liveInstrument }: PerformanceDash
                                             </div>
                                         </div>
                                     </>
+                                ) : activeTab === 'entry' ? (
+                                    <div className="max-w-3xl">
+                                        <div className="bg-white rounded-2xl border border-slate-200 shadow-sm p-6">
+                                            <div className="flex items-center gap-3 mb-6">
+                                                <div className="bg-indigo-600 p-2 rounded-xl text-white">
+                                                    <BarChart3 size={18} />
+                                                </div>
+                                                <div>
+                                                    <h3 className="font-bold text-slate-800">Entry Position Analytics</h3>
+                                                    <p className="text-xs text-slate-500">Performance breakdown by entry position, LTF regime, HTF trend, exit reason and pivot sequence</p>
+                                                </div>
+                                            </div>
+                                            <EntryMetricsDashboardFromPositions positions={filteredPositions} />
+                                        </div>
+                                    </div>
                                 ) : (
                                     <DetailedLogView positions={filteredPositions} searchQuery={searchQuery} onSearch={setSearchQuery} />
                                 )}

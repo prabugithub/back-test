@@ -2,8 +2,10 @@
 
 import type { StoreSet, StoreGet } from './sessionStore';
 import { type AutoBacktestConfig, evaluateAutoSignals } from '../utils/autoBacktestEngine';
+import { runBatchSimulation } from '../utils/batchBacktestSimulator';
 import { useNotificationStore } from './notificationStore';
 import type { TradeJournal } from '../types';
+import { analyzeManualEntry } from '../utils/pivotAnalysis';
 
 function candleTimeMinutes(timestampSec: number): number {
   const d = new Date(timestampSec * 1000);
@@ -68,10 +70,11 @@ export function createAutoBacktestActions(set: StoreSet, get: StoreGet) {
 
       set({ lastAutoSignalReason: signal.reason });
 
+      const maAnalysis = analyzeManualEntry(candles, index, signal.type);
       const journal: TradeJournal = {
         ltMarket: signal.ltMarket,
         htMarket: signal.htMarket,
-        entryPosition: '',
+        entryPosition: maAnalysis.entryPosition,
         llhhPivot: signal.llhhPivot,
         entrySign: signal.reason,
         notes: `[Auto BT] ${signal.reason}`,
@@ -92,6 +95,34 @@ export function createAutoBacktestActions(set: StoreSet, get: StoreGet) {
         'MANUAL',
         journal
       );
+    },
+
+    runBatchAutoBacktest: () => {
+      const state = get();
+      if (state.isLiveMode) return;
+      if (state.candles.length === 0) return;
+
+      set({ isBatchBacktestRunning: true, isPlaying: false });
+
+      // Defer to next macrotask so React renders the spinner before the blocking computation
+      setTimeout(() => {
+        const { candles, autoBacktestConfig, instrument, tradeQuantity, sessionConfig } = get();
+        const result = runBatchSimulation(
+          candles,
+          autoBacktestConfig,
+          0,
+          instrument,
+          tradeQuantity,
+          sessionConfig?.interval
+        );
+        set({
+          trades: result.trades,
+          position: result.finalPosition,
+          currentIndex: candles.length - 1,
+          isBatchBacktestRunning: false,
+          lastAutoSignalReason: `Batch complete: ${result.tradeCount} trades, P&L ₹${result.totalPnL.toFixed(2)}`,
+        });
+      }, 0);
     },
 
     runAutoSquareOff: (index: number) => {

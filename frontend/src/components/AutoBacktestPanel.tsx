@@ -1,6 +1,7 @@
 import { useMemo, useState } from 'react';
-import { X, Zap, TrendingUp, TrendingDown, Minus, RefreshCw } from 'lucide-react';
+import { X, Zap, TrendingUp, TrendingDown, Minus, RefreshCw, BarChart2 } from 'lucide-react';
 import { useSessionStore } from '../stores/sessionStore';
+import { EntryMetricsDashboard } from './EntryMetricsDashboard';
 import {
   type AutoBacktestConfig,
   type RegimeRules,
@@ -257,8 +258,12 @@ export function AutoBacktestPanel({ onClose }: AutoBacktestPanelProps) {
   const position = useSessionStore(s => s.position);
   const candles = useSessionStore(s => s.candles);
   const currentIndex = useSessionStore(s => s.currentIndex);
+  const runBatchAutoBacktest = useSessionStore(s => s.runBatchAutoBacktest);
+  const isBatchRunning = useSessionStore(s => s.isBatchBacktestRunning);
+  const trades = useSessionStore(s => s.trades);
 
   const [activeRegime, setActiveRegime] = useState<RegimeKey>('uptrend');
+  const [showMetrics, setShowMetrics] = useState(false);
 
   // Live market state
   const marketState = useMemo(
@@ -522,6 +527,51 @@ export function AutoBacktestPanel({ onClose }: AutoBacktestPanelProps) {
             <span className="text-gray-400">Enable to start scanning</span>
           )}
         </div>
+
+        {/* Batch run — processes all candles instantly without visual playback */}
+        <div className="mt-2">
+          <button
+            onClick={runBatchAutoBacktest}
+            disabled={isBatchRunning || candles.length === 0 || !config.enabled}
+            className="w-full py-2 px-3 bg-indigo-600 hover:bg-indigo-700 disabled:opacity-50 disabled:cursor-not-allowed text-white text-xs font-bold rounded-lg flex items-center justify-center gap-2 transition-colors"
+          >
+            {isBatchRunning ? (
+              <>
+                <svg className="animate-spin h-3.5 w-3.5" viewBox="0 0 24 24" fill="none">
+                  <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                  <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8z" />
+                </svg>
+                Running...
+              </>
+            ) : (
+              <>
+                <Zap size={13} />
+                Run Full Backtest (instant)
+              </>
+            )}
+          </button>
+        </div>
+
+        {/* Entry Metrics Dashboard — shown when batch trades with journal data exist */}
+        {trades.some(t => t.journal?.ltMarket) && (
+          <div className="mt-2 border border-indigo-100 rounded-lg overflow-hidden">
+            <button
+              onClick={() => setShowMetrics(v => !v)}
+              className="w-full flex items-center justify-between px-3 py-2 bg-indigo-50 hover:bg-indigo-100 text-[11px] font-semibold text-indigo-700 transition-colors"
+            >
+              <span className="flex items-center gap-1.5">
+                <BarChart2 size={12} />
+                Entry Position Metrics
+              </span>
+              <span className="text-[10px] text-indigo-400">{showMetrics ? '▲' : '▼'}</span>
+            </button>
+            {showMetrics && (
+              <div className="px-3 pb-3">
+                <EntryMetricsDashboard trades={trades} />
+              </div>
+            )}
+          </div>
+        )}
       </div>
     </div>
   );
