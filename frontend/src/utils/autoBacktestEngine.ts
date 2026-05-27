@@ -55,6 +55,10 @@ export interface AutoBacktestConfig {
   riskPerTrade: number;    // ₹ risked per trade when useAutoQty is true
   minQuantity: number;     // block trade if auto-qty < this
 
+  // Intraday auto square-off
+  autoSquareOff: boolean;  // close any open position at squareOffTime
+  squareOffTime: string;   // "HH:MM" IST — default "15:10"
+
   // Per-regime rule sets
   uptrend: RegimeRules;   // Bull-Trend, Bull-Trending-range
   downtrend: RegimeRules; // Bear-Trend, Bear-Trending-range
@@ -133,6 +137,8 @@ export const defaultAutoBacktestConfig: AutoBacktestConfig = {
   useAutoQty: false,
   riskPerTrade: 10000,
   minQuantity: 1,
+  autoSquareOff: false,
+  squareOffTime: '15:10',
   uptrend: { ...defaultLongRules, enabled: true },
   downtrend: { ...defaultShortRules, enabled: true },
   range: { ...defaultRangeRules, enabled: false },

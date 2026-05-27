@@ -2,6 +2,7 @@
 
 import type { StoreSet, StoreGet } from './sessionStore';
 import { type AutoBacktestConfig, evaluateAutoSignals } from '../utils/autoBacktestEngine';
+import { useNotificationStore } from './notificationStore';
 import type { TradeJournal } from '../types';
 
 function candleTimeMinutes(timestampSec: number): number {
@@ -90,6 +91,32 @@ export function createAutoBacktestActions(set: StoreSet, get: StoreGet) {
         undefined,        // priceOverride — use candle close
         'MANUAL',
         journal
+      );
+    },
+
+    runAutoSquareOff: (index: number) => {
+      const state = get();
+      if (state.isLiveMode) return;
+      if (!state.autoBacktestConfig.autoSquareOff) return;
+      if (!state.position) return;
+
+      const candle = state.candles[index];
+      if (!candle) return;
+
+      const candleMin = candleTimeMinutes(candle.timestamp);
+      if (candleMin < parseHHMM(state.autoBacktestConfig.squareOffTime)) return;
+
+      const isLong = state.position.quantity > 0;
+      useNotificationStore
+        .getState()
+        .notify(`Auto Square-Off at ${state.autoBacktestConfig.squareOffTime} IST`, 'info');
+      state.executeTrade(
+        isLong ? 'SELL' : 'BUY',
+        Math.abs(state.position.quantity),
+        undefined,
+        undefined,
+        undefined,
+        'TIME_OVER'
       );
     },
   };

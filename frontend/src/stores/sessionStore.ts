@@ -141,6 +141,7 @@ export interface SessionStore {
   // ── Actions (auto backtesting) ───────────────────────────────────────────────
   setAutoBacktestConfig: (config: AutoBacktestConfig) => void;
   runAutoBacktestCheck: (index: number) => void;
+  runAutoSquareOff: (index: number) => void;
 }
 
 export const useSessionStore = create<SessionStore>((set, get) => ({

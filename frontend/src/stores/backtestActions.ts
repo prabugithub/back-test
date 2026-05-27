@@ -51,6 +51,7 @@ export function createBacktestActions(set: StoreSet, get: StoreGet) {
         set({ currentIndex: nextIndex });
         get().checkTrendReversal(nextIndex);
         get().checkSLTPHits(nextIndex);
+        get().runAutoSquareOff(nextIndex);
         get().runAutoBacktestCheck(nextIndex);
       } else if (direction === 'backward' && currentIndex > 0) {
         set({ currentIndex: currentIndex - 1 });

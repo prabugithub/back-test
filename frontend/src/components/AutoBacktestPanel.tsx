@@ -380,6 +380,32 @@ export function AutoBacktestPanel({ onClose }: AutoBacktestPanelProps) {
             <span className="text-[10px] text-gray-400">Using manual qty from trade panel</span>
           )}
         </div>
+
+        {/* Auto square-off */}
+        <div className="flex items-center gap-2 mt-1.5">
+          <span className="text-[10px] text-gray-500 w-14 shrink-0">Square-off</span>
+          <label className="flex items-center gap-1 cursor-pointer select-none">
+            <input
+              type="checkbox"
+              checked={config.autoSquareOff}
+              onChange={e => updateGlobal({ autoSquareOff: e.target.checked })}
+              className="w-3 h-3"
+            />
+            <span className="text-[10px] text-gray-600">Auto</span>
+          </label>
+          {config.autoSquareOff && (
+            <input
+              type="time"
+              value={config.squareOffTime}
+              onChange={e => updateGlobal({ squareOffTime: e.target.value })}
+              className="px-1.5 py-0.5 text-[11px] border rounded w-24"
+              title="Close any open position at this IST time"
+            />
+          )}
+          {config.autoSquareOff && (
+            <span className="text-[10px] text-orange-600 font-medium">IST</span>
+          )}
+        </div>
       </div>
 
       <div className="px-4 pb-4">
