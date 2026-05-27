@@ -154,10 +154,24 @@ function RegimeEditor({ regime, rules, onChange }: RegimeEditorProps) {
             onChange={e => up({ maFilter: e.target.value as RegimeRules['maFilter'] })}
             className="w-full px-1.5 py-1 text-[11px] border rounded"
           >
-            <option value="none">None</option>
-            <option value="above_ema21">Above EMA 21</option>
-            <option value="on_or_above_ema21">On / Above EMA 21</option>
-            <option value="above_ema60">Above EMA 60</option>
+            {(() => {
+              const isShort = rules.direction === 'SHORT_ONLY';
+              const isBoth  = rules.direction === 'BOTH';
+              return (
+                <>
+                  <option value="none">None</option>
+                  <option value="above_ema21">
+                    {isBoth ? 'EMA 21 side' : isShort ? 'Below EMA 21' : 'Above EMA 21'}
+                  </option>
+                  <option value="on_or_above_ema21">
+                    {isBoth ? 'EMA 21 touch' : isShort ? 'On / Below EMA 21' : 'On / Above EMA 21'}
+                  </option>
+                  <option value="above_ema60">
+                    {isBoth ? 'EMA 60 side' : isShort ? 'Below EMA 60' : 'Above EMA 60'}
+                  </option>
+                </>
+              );
+            })()}
           </select>
         </div>
         <div>
