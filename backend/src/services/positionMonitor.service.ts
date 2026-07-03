@@ -1,4 +1,4 @@
-import { placeOrder, getOrderStatus } from '../adapters/dhan.adapter';
+import { placeOrder, getOrderStatus, getPositions } from '../adapters/dhan.adapter';
 import { subscribeToInstrument } from '../adapters/dhanFeed.adapter';
 import { getDatabase } from '../config/database';
 import logger from '../utils/logger';
@@ -267,12 +267,8 @@ export async function onTick(token: string, price: number): Promise<void> {
 
         // Fire the exit order asynchronously so we don't block tick processing
         triggerExit(pos, reason, price).catch((err: any) => {
-            logger.error(`[PositionMonitor] triggerExit failed for ${pos.id}: ${err.message}`);
-            ioInstance?.emit('position:exit-failed', {
-                positionId: pos.id,
-                reason,
-                error: err.message,
-            });
+            // triggerExit handles all failure cases internally — this is a last-resort safety net
+            logger.error(`[PositionMonitor] Unhandled triggerExit error for ${pos.id}: ${err.message}`);
         });
     }
 }
@@ -285,6 +281,47 @@ export async function onTick(token: string, price: number): Promise<void> {
  * is open. This path is the fallback for browser-closed scenarios.
  */
 async function triggerExit(pos: MonitoredPosition, reason: 'SL' | 'TP', triggerPrice: number): Promise<void> {
+    // Guard A: abort if position was manually removed between exitTriggered being set (sync) and
+    // this async execution — prevents a double exit when the frontend DELETE races with onTick.
+    if (!monitoredPositions.has(pos.id)) {
+        logger.info(`[PositionMonitor] Position ${pos.id} already removed (manual exit) — aborting backend exit`);
+        return;
+    }
+
+    // Guard B: verify the option position still exists at the broker before placing an exit order.
+    // If it was closed externally (broker app, circuit, expiry), we must NOT place an order and
+    // must clean up the monitor — otherwise REJECTED exits would retry indefinitely.
+    try {
+        const raw = await getPositions();
+        const brokerPositions: any[] = Array.isArray(raw) ? raw : [];
+        const stillOpen = brokerPositions.some(
+            (p: any) =>
+                String(p.securityId) === String(pos.optionSecurityId) &&
+                p.positionType !== 'CLOSED' &&
+                p.buyQty !== p.sellQty &&
+                p.exchangeSegment === 'NSE_FNO'
+        );
+        if (!stillOpen) {
+            logger.warn(
+                `[PositionMonitor] No open broker position for ${pos.optionSecurityId} ` +
+                `(id:${pos.id}) — cleaning up without placing exit order`
+            );
+            monitoredPositions.delete(pos.id);
+            try {
+                const db = getDatabase();
+                db.prepare('DELETE FROM monitored_positions WHERE id = ?').run(pos.id);
+            } catch (dbErr: any) {
+                logger.error('[PositionMonitor] Failed to remove no-position entry from DB:', dbErr.message);
+            }
+            ioInstance?.emit('position:no-position-found', { positionId: pos.id, reason, triggerPrice });
+            return;
+        }
+    } catch (posErr: any) {
+        // If the broker positions check itself fails (network error etc.), fall through and attempt
+        // the exit order anyway — a failed pre-check must not block a legitimate exit.
+        logger.warn(`[PositionMonitor] Broker position pre-check failed for ${pos.id}: ${posErr.message} — proceeding with exit attempt`);
+    }
+
     let placedOrderId: string | undefined;
     try {
         const result = await placeOrder({
@@ -299,9 +336,22 @@ async function triggerExit(pos: MonitoredPosition, reason: 'SL' | 'TP', triggerP
         logger.info(`[PositionMonitor] ${reason} MARKET exit placed for ${pos.id} | orderId:${placedOrderId} | triggerPrice:${triggerPrice}`);
     } catch (err: any) {
         logger.error(`[PositionMonitor] Exit order failed for ${pos.id}: ${err.message}`);
-        // Reset flag so the next tick can retry — prevents silent permanent failure
-        pos.exitTriggered = false;
-        throw err;
+        // Do NOT reset exitTriggered — no retry. Notify frontend to act manually.
+        ioInstance?.emit('position:exit-failed', {
+            positionId: pos.id,
+            reason,
+            triggerPrice,
+            error: err.message,
+        });
+        // Remove from monitoring — position is in an unknown broker state, user must act manually
+        monitoredPositions.delete(pos.id);
+        try {
+            const db = getDatabase();
+            db.prepare('DELETE FROM monitored_positions WHERE id = ?').run(pos.id);
+        } catch (dbErr: any) {
+            logger.error('[PositionMonitor] Failed to remove failed position from DB:', dbErr.message);
+        }
+        return; // Error is handled — don't throw, don't retry
     }
 
     // Poll order status after 3 s to confirm TRADED. If REJECTED, reset the trigger flag
@@ -314,14 +364,29 @@ async function triggerExit(pos: MonitoredPosition, reason: 'SL' | 'TP', triggerP
                 if (status === 'REJECTED') {
                     const reason_str = resp?.rejectedReason || resp?.data?.rejectedReason || 'unknown reason';
                     logger.error(`[PositionMonitor] Exit order REJECTED for ${pos.id}: ${reason_str}`);
-                    // Reset so next tick retries
-                    pos.exitTriggered = false;
-                    ioInstance?.emit('position:exit-failed', {
-                        positionId: pos.id,
-                        reason,
-                        error: `Exit order REJECTED: ${reason_str}. Retrying on next tick.`,
-                    });
-                    return; // Don't clean up — position still open
+                    // "No position" rejections (closed externally) must not retry — clean up instead.
+                    // Transient rejections (network, price slip) should retry on next tick.
+                    const isNoPositionError = /position|holding|insufficient|no open/i.test(reason_str);
+                    if (isNoPositionError) {
+                        logger.warn(`[PositionMonitor] Rejection indicates no open position for ${pos.id} — cleaning up`);
+                        monitoredPositions.delete(pos.id);
+                        try {
+                            const db = getDatabase();
+                            db.prepare('DELETE FROM monitored_positions WHERE id = ?').run(pos.id);
+                        } catch (dbErr: any) {
+                            logger.error('[PositionMonitor] Failed to remove rejected position from DB:', dbErr.message);
+                        }
+                        ioInstance?.emit('position:no-position-found', { positionId: pos.id, reason });
+                    } else {
+                        // Transient error — allow retry on next tick
+                        pos.exitTriggered = false;
+                        ioInstance?.emit('position:exit-failed', {
+                            positionId: pos.id,
+                            reason,
+                            error: `Exit order REJECTED: ${reason_str}. Retrying on next tick.`,
+                        });
+                    }
+                    return;
                 }
                 logger.info(`[PositionMonitor] Exit order confirmed ${status} for ${pos.id}`);
             } catch (pollErr: any) {

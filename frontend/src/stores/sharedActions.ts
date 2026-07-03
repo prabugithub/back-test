@@ -171,8 +171,7 @@ export function createSharedActions(set: StoreSet, get: StoreGet) {
           else dialogToTrigger = 'SL';
           nextSlDialogShown = true;
         } else if (tp > 0 && effectiveClose >= tp && !nextTpDialogShown) {
-          if (autoExitTarget) autoExitTP = true;
-          else dialogToTrigger = 'TP';
+          dialogToTrigger = 'TP';
           nextTpDialogShown = true;
         }
       } else {
@@ -181,8 +180,7 @@ export function createSharedActions(set: StoreSet, get: StoreGet) {
           else dialogToTrigger = 'SL';
           nextSlDialogShown = true;
         } else if (tp > 0 && effectiveClose <= tp && !nextTpDialogShown) {
-          if (autoExitTarget) autoExitTP = true;
-          else dialogToTrigger = 'TP';
+          dialogToTrigger = 'TP';
           nextTpDialogShown = true;
         }
       }

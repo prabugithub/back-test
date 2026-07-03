@@ -296,4 +296,21 @@ router.get('/monitor', (_req: Request, res: Response) => {
     res.json({ success: true, data: getMonitoredPositions() });
 });
 
+/**
+ * POST /api/live/auth-refresh
+ * Manually trigger a Dhan TOTP login to get a fresh access token.
+ * Useful when the token expires and restarting the server isn't practical.
+ */
+router.post('/auth-refresh', async (_req: Request, res: Response) => {
+    try {
+        const { loginDhan } = await import('../services/dhan.service');
+        await loginDhan();
+        logger.info('Manual Dhan token refresh succeeded');
+        res.json({ success: true, message: 'Dhan access token refreshed successfully' });
+    } catch (error: any) {
+        logger.error('Manual Dhan token refresh failed:', error.message);
+        res.status(500).json({ success: false, error: 'Token refresh failed', message: error.message });
+    }
+});
+
 export default router;

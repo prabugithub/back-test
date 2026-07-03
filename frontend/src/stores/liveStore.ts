@@ -146,20 +146,35 @@ export const useLiveStore = create<LiveState>((set, get) => ({
             useSessionStore.getState().syncLivePositions();
         });
 
-        // Backend exit order failed — alert user to act manually
+        // Backend detected no open position at broker (closed externally) — monitor cleaned up, sync local state
+        socket.on('position:no-position-found', (data: { positionId: string; reason: 'SL' | 'TP'; triggerPrice?: number }) => {
+            useNotificationStore.getState().notify(
+                `Position not found at broker (${data.reason} triggered). It may have been closed externally. Syncing state.`,
+                'warning'
+            );
+            useSessionStore.setState((s) => ({
+                position: s.position?.liveOptionToken === data.positionId
+                    ? { ...s.position, exitTriggeredByBackend: true }
+                    : s.position,
+            }));
+            useSessionStore.getState().syncLivePositions();
+        });
+
+        // Backend exit order failed — notify user to close manually, backend will NOT retry
         socket.on('position:exit-failed', (data: { positionId: string; reason: 'SL' | 'TP'; error: string }) => {
             console.error('[LiveStore] Backend exit failed:', data);
             useNotificationStore.getState().notify(
-                `CRITICAL: Backend ${data.reason} exit FAILED (${data.error}). Please close position manually!`,
+                `⚠️ ${data.reason} hit but backend exit FAILED — Close position manually in broker app!`,
                 'error'
             );
-            // Reset the dialog-shown flag so checkSLTPHits can re-fire on the next tick.
-            // Without this, the frontend permanently suppresses SL/TP notifications after one failure.
+            // Backend gave up (no retry) — clear exitTriggeredByBackend so the frontend doesn't
+            // remain locked assuming the backend handled the exit.
             useSessionStore.setState((s) => {
                 if (s.position?.liveOptionToken !== data.positionId) return {};
                 return {
                     position: {
                         ...s.position,
+                        exitTriggeredByBackend: false,
                         slDialogShown: data.reason === 'SL' ? false : s.position.slDialogShown,
                         tpDialogShown: data.reason === 'TP' ? false : s.position.tpDialogShown,
                     },
