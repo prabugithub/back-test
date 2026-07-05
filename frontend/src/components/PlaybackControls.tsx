@@ -1,5 +1,5 @@
 import { useState, useEffect, useMemo, useCallback, useRef } from 'react';
-import { Play, Pause, ChevronLeft, ChevronRight, FastForward, CalendarClock, Settings, X, Calendar, Activity, SlidersHorizontal, Zap } from 'lucide-react';
+import { Play, Pause, ChevronLeft, ChevronRight, FastForward, CalendarClock, Settings, X, Calendar, Activity, SlidersHorizontal, Zap, Columns2 } from 'lucide-react';
 import { useSessionStore } from '../stores/sessionStore';
 import { useNotificationStore } from '../stores/notificationStore';
 import { formatTimestamp } from '../utils/formatters';
@@ -734,6 +734,17 @@ export function PlaybackControls({ onOpenHistory, onOpenDashboard }: { onOpenHis
             title="Performance Analysis Dashboard"
           >
             <Activity size={16} />
+          </button>
+          <button
+            onClick={() => toggleSecondaryChart()}
+            className={`p-1.5 rounded border transition-colors ${
+              showSecondaryChart
+                ? 'text-blue-700 bg-blue-100 hover:bg-blue-200 border-blue-400'
+                : 'text-gray-700 bg-gray-50 hover:bg-gray-100 border-gray-200'
+            }`}
+            title="Toggle Parallel Timeframe (Multi Layout)"
+          >
+            <Columns2 size={16} />
           </button>
           <button
             onClick={() => { setShowTradeSettings(!showTradeSettings); setShowSettings(false); setShowAutoBTPanel(false); }}
