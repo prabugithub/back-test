@@ -81,6 +81,9 @@ export interface AutoBacktestConfig {
   ema21SlopeLookback: number; // bars looked back for EMA21 slope (default 10)
   ema50SlopeLookback: number; // bars looked back for EMA50 slope (default 20)
 
+  // EMA20 interaction (Brooks gap-bar / always-in) instrumentation — recorded on trade entries
+  emaInteractionLookback: number; // bars looked back for EMA20 gap-bar/always-in interaction stats (default 20)
+
   // Per-regime rule sets
   uptrend: RegimeRules;   // Bull-Trend, Bull-Trending-range
   downtrend: RegimeRules; // Bear-Trend, Bear-Trending-range
@@ -167,6 +170,7 @@ export const defaultAutoBacktestConfig: AutoBacktestConfig = {
   barBreakLookback: 20,
   ema21SlopeLookback: 10,
   ema50SlopeLookback: 20,
+  emaInteractionLookback: 20,
   uptrend: { ...defaultLongRules, enabled: true },
   downtrend: { ...defaultShortRules, enabled: true },
   range: { ...defaultRangeRules, enabled: false },

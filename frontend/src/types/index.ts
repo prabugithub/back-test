@@ -56,6 +56,9 @@ export interface Trade {
   barBreakWindowAtEntry?: number; // actual bar-to-bar comparisons made for the two counts above (<= configured lookback)
   ema21SlopeAtEntry?: number; // EMA21 points-per-bar slope over the configured lookback ending at entry
   ema50SlopeAtEntry?: number; // EMA50 points-per-bar slope over the configured lookback ending at entry
+  ema20GapBarRatioAtEntry?: number;      // fraction of bars in window not touching EMA20 (Brooks gap bar — strong trend)
+  ema20CloseAboveRatioAtEntry?: number;  // fraction of closes above EMA20 in window (always-in bias; below = 1 - this)
+  ema20InteractionWindowAtEntry?: number; // actual window size used for the two ratios above
   interval?: string;
   liveOptionToken?: string;
   optionType?: 'CE' | 'PE';

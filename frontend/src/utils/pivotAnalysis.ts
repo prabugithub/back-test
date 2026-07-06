@@ -310,6 +310,50 @@ export function calculateEMASlope(candles: Candle[], currentIndex: number, perio
     return (current - prior) / slopeLookback;
 }
 
+export interface EMAInteractionStats {
+    gapBarRatio?: number;      // fraction of bars whose full range doesn't touch the EMA (Brooks "gap bar" — strong-trend signal)
+    closeAboveRatio?: number;  // fraction of closes above the EMA ("always-in" bias; below = 1 - this)
+    barsCompared: number;      // actual window size used (<= configured lookback, shorter early in a session, or 0 if EMA not yet defined)
+}
+
+/**
+ * Brooks-style EMA interaction stats over the lookback bars ending at
+ * currentIndex, for the given EMA period (defaults to 20 — Brooks' standard
+ * MA). Reuses the same touch/buffer tolerance as calculateMAPosition's
+ * on-MA/gap check (0.01% of the EMA value) rather than inventing a new one.
+ */
+export function calculateEMAInteraction(candles: Candle[], currentIndex: number, period: number = 20, lookback: number = 20): EMAInteractionStats {
+    const visible = candles.slice(0, currentIndex + 1);
+    const ema = calculateEMA(visible, period);
+    if (ema.length === 0) return { barsCompared: 0 };
+
+    const emaMap = new Map(ema.map(e => [e.time, e.value]));
+    const start = Math.max(period - 1, currentIndex - lookback + 1);
+    const bufferMult = 0.0001;
+
+    let touchless = 0;
+    let aboveCount = 0;
+    let barsCompared = 0;
+
+    for (let i = start; i <= currentIndex; i++) {
+        const c = candles[i];
+        const maVal = emaMap.get(c.timestamp);
+        if (maVal === undefined) continue;
+        const buffer = maVal * bufferMult;
+        const touches = c.low <= maVal + buffer && c.high >= maVal - buffer;
+        if (!touches) touchless++;
+        if (c.close > maVal) aboveCount++;
+        barsCompared++;
+    }
+
+    if (barsCompared === 0) return { barsCompared: 0 };
+    return {
+        gapBarRatio: touchless / barsCompared,
+        closeAboveRatio: aboveCount / barsCompared,
+        barsCompared,
+    };
+}
+
 /**
  * Determines the LLHH-Pivot pattern based on recent pivot points
  */

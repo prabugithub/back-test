@@ -12,7 +12,7 @@ import {
 } from '../services/firebaseSessionService';
 import { useNotificationStore } from './notificationStore';
 import { calculatePivotPoints, calculateATR, calculateEMA } from '../utils/indicators';
-import { analyzeMarketStructure, calculateBarOverlap, averageBarOverlap, calculateBarRanges, averageBarRanges, calculateEfficiencyRatio, calculateBarBreaks, calculateEMASlope } from '../utils/pivotAnalysis';
+import { analyzeMarketStructure, calculateBarOverlap, averageBarOverlap, calculateBarRanges, averageBarRanges, calculateEfficiencyRatio, calculateBarBreaks, calculateEMASlope, calculateEMAInteraction } from '../utils/pivotAnalysis';
 import {
   executeLiveOrder,
   registerMonitorIfNeeded,
@@ -309,6 +309,8 @@ export function createSharedActions(set: StoreSet, get: StoreGet) {
       const { highBreakCount, lowBreakCount, barsCompared } = calculateBarBreaks(candles, currentIndex, autoBacktestConfig.barBreakLookback ?? 20);
       const ema21SlopeAtEntry = calculateEMASlope(candles, currentIndex, 21, autoBacktestConfig.ema21SlopeLookback ?? 10);
       const ema50SlopeAtEntry = calculateEMASlope(candles, currentIndex, 50, autoBacktestConfig.ema50SlopeLookback ?? 20);
+      const { gapBarRatio, closeAboveRatio, barsCompared: emaInteractionWindow } =
+        calculateEMAInteraction(candles, currentIndex, 20, autoBacktestConfig.emaInteractionLookback ?? 20);
       const isInitialWith =
         (type === 'BUY' && ltMarket.startsWith('Bull')) ||
         (type === 'SELL' && ltMarket.startsWith('Bear'));
@@ -369,6 +371,9 @@ export function createSharedActions(set: StoreSet, get: StoreGet) {
         barBreakWindowAtEntry: !isReducing ? barsCompared : undefined,
         ema21SlopeAtEntry: !isReducing ? ema21SlopeAtEntry : undefined,
         ema50SlopeAtEntry: !isReducing ? ema50SlopeAtEntry : undefined,
+        ema20GapBarRatioAtEntry: !isReducing ? gapBarRatio : undefined,
+        ema20CloseAboveRatioAtEntry: !isReducing ? closeAboveRatio : undefined,
+        ema20InteractionWindowAtEntry: !isReducing ? emaInteractionWindow : undefined,
         interval: sessionConfig?.interval || '5',
       };
 

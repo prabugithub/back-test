@@ -502,6 +502,17 @@ export function AutoBacktestPanel({ onClose }: AutoBacktestPanelProps) {
             title="Bars looked back for EMA50 slope instrumentation on trade records"
           />
         </div>
+
+        {/* EMA20 interaction (gap-bar / always-in) instrumentation lookback */}
+        <div className="flex items-center gap-2 mt-1.5">
+          <span className="text-[10px] text-gray-500 w-14 shrink-0">EMA20 Int</span>
+          <input
+            type="number" min={5} max={50} value={config.emaInteractionLookback}
+            onChange={e => updateGlobal({ emaInteractionLookback: Number(e.target.value) })}
+            className="w-12 px-1.5 py-0.5 text-[11px] border rounded text-center"
+            title="Bars looked back for EMA20 gap-bar / always-in interaction instrumentation on trade records"
+          />
+        </div>
       </div>
 
       <div className="px-4 pb-4">
