@@ -3,7 +3,7 @@
 import type { Candle, Trade, BacktestPosition } from '../types';
 import type { TradeJournal } from '../types';
 import { type AutoBacktestConfig, type AutoSignal, evaluateAutoSignals } from './autoBacktestEngine';
-import { analyzeManualEntry, calculateBarOverlap, averageBarOverlap, calculateBarRanges, averageBarRanges } from './pivotAnalysis';
+import { analyzeManualEntry, calculateBarOverlap, averageBarOverlap, calculateBarRanges, averageBarRanges, calculateEfficiencyRatio, calculateBarBreaks, calculateEMASlope } from './pivotAnalysis';
 
 interface SimPosition {
   instrument: string;
@@ -55,6 +55,10 @@ export function runBatchSimulation(
     const barOverlapAvgAtEntry = averageBarOverlap(barOverlapAtEntry);
     const barRangeSamples = calculateBarRanges(candles, candleIndex, config.barRangeLookback ?? 20);
     const { barRangeAvg, bullBarRangeAvg, bearBarRangeAvg } = averageBarRanges(barRangeSamples);
+    const efficiencyRatioAtEntry = calculateEfficiencyRatio(candles, candleIndex, config.efficiencyRatioLookback ?? 10);
+    const { highBreakCount, lowBreakCount, barsCompared } = calculateBarBreaks(candles, candleIndex, config.barBreakLookback ?? 20);
+    const ema21SlopeAtEntry = calculateEMASlope(candles, candleIndex, 21, config.ema21SlopeLookback ?? 10);
+    const ema50SlopeAtEntry = calculateEMASlope(candles, candleIndex, 50, config.ema50SlopeLookback ?? 20);
     const journal: TradeJournal = {
       ltMarket: signal.ltMarket,
       htMarket: signal.htMarket,
@@ -84,6 +88,12 @@ export function runBatchSimulation(
       barRangeAvgAtEntry: barRangeAvg,
       bullBarRangeAvgAtEntry: bullBarRangeAvg,
       bearBarRangeAvgAtEntry: bearBarRangeAvg,
+      efficiencyRatioAtEntry,
+      highBreakCountAtEntry: highBreakCount,
+      lowBreakCountAtEntry: lowBreakCount,
+      barBreakWindowAtEntry: barsCompared,
+      ema21SlopeAtEntry,
+      ema50SlopeAtEntry,
       interval,
     });
     position = {

@@ -71,6 +71,16 @@ export interface AutoBacktestConfig {
   // Bar range instrumentation — trend-strength metric recorded on trade entries
   barRangeLookback: number; // bars looked back for bar-range trend-strength instrumentation (default 20)
 
+  // Kaufman Efficiency Ratio instrumentation — trend efficiency metric recorded on trade entries
+  efficiencyRatioLookback: number; // bars looked back for Kaufman Efficiency Ratio (default 10)
+
+  // High/low break count instrumentation — momentum/persistence metric recorded on trade entries
+  barBreakLookback: number; // bars looked back for high/low break counts (default 20)
+
+  // EMA slope instrumentation — trend momentum metric recorded on trade entries
+  ema21SlopeLookback: number; // bars looked back for EMA21 slope (default 10)
+  ema50SlopeLookback: number; // bars looked back for EMA50 slope (default 20)
+
   // Per-regime rule sets
   uptrend: RegimeRules;   // Bull-Trend, Bull-Trending-range
   downtrend: RegimeRules; // Bear-Trend, Bear-Trending-range
@@ -153,6 +163,10 @@ export const defaultAutoBacktestConfig: AutoBacktestConfig = {
   squareOffTime: '15:10',
   barOverlapLookback: 8,
   barRangeLookback: 20,
+  efficiencyRatioLookback: 10,
+  barBreakLookback: 20,
+  ema21SlopeLookback: 10,
+  ema50SlopeLookback: 20,
   uptrend: { ...defaultLongRules, enabled: true },
   downtrend: { ...defaultShortRules, enabled: true },
   range: { ...defaultRangeRules, enabled: false },

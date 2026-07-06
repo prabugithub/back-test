@@ -460,6 +460,48 @@ export function AutoBacktestPanel({ onClose }: AutoBacktestPanelProps) {
             title="Bars looked back for bull/bear bar-range (trend strength) instrumentation on trade records"
           />
         </div>
+
+        {/* Kaufman Efficiency Ratio instrumentation lookback */}
+        <div className="flex items-center gap-2 mt-1.5">
+          <span className="text-[10px] text-gray-500 w-14 shrink-0">Efficiency</span>
+          <input
+            type="number" min={3} max={30} value={config.efficiencyRatioLookback}
+            onChange={e => updateGlobal({ efficiencyRatioLookback: Number(e.target.value) })}
+            className="w-12 px-1.5 py-0.5 text-[11px] border rounded text-center"
+            title="Bars looked back for Kaufman Efficiency Ratio instrumentation on trade records"
+          />
+        </div>
+
+        {/* High/low break count instrumentation lookback */}
+        <div className="flex items-center gap-2 mt-1.5">
+          <span className="text-[10px] text-gray-500 w-14 shrink-0">Breaks</span>
+          <input
+            type="number" min={5} max={50} value={config.barBreakLookback}
+            onChange={e => updateGlobal({ barBreakLookback: Number(e.target.value) })}
+            className="w-12 px-1.5 py-0.5 text-[11px] border rounded text-center"
+            title="Bars looked back for high/low break-count instrumentation on trade records"
+          />
+        </div>
+
+        {/* EMA slope instrumentation lookbacks */}
+        <div className="flex items-center gap-2 mt-1.5">
+          <span className="text-[10px] text-gray-500 w-14 shrink-0">EMA21</span>
+          <input
+            type="number" min={3} max={30} value={config.ema21SlopeLookback}
+            onChange={e => updateGlobal({ ema21SlopeLookback: Number(e.target.value) })}
+            className="w-12 px-1.5 py-0.5 text-[11px] border rounded text-center"
+            title="Bars looked back for EMA21 slope instrumentation on trade records"
+          />
+        </div>
+        <div className="flex items-center gap-2 mt-1.5">
+          <span className="text-[10px] text-gray-500 w-14 shrink-0">EMA50</span>
+          <input
+            type="number" min={3} max={40} value={config.ema50SlopeLookback}
+            onChange={e => updateGlobal({ ema50SlopeLookback: Number(e.target.value) })}
+            className="w-12 px-1.5 py-0.5 text-[11px] border rounded text-center"
+            title="Bars looked back for EMA50 slope instrumentation on trade records"
+          />
+        </div>
       </div>
 
       <div className="px-4 pb-4">

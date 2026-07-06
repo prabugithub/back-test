@@ -246,6 +246,71 @@ export function averageBarRanges(samples: BarRangeSample[]): {
 }
 
 /**
+ * Kaufman Efficiency Ratio: net price displacement over the lookback window
+ * divided by the total bar-to-bar distance traveled within it. Bounded in
+ * [0,1] — near 1 means the window's moves were efficient/one-directional
+ * (trend), near 0 means moves cancelled out (range/chop). Undefined when
+ * there's no prior bar to measure from, or the window is perfectly flat
+ * (zero total path, which would otherwise divide by zero).
+ */
+export function calculateEfficiencyRatio(candles: Candle[], currentIndex: number, lookback: number = 10): number | undefined {
+    const start = Math.max(0, currentIndex - lookback);
+    if (start >= currentIndex) return undefined;
+    const netChange = Math.abs(candles[currentIndex].close - candles[start].close);
+    let totalPath = 0;
+    for (let i = start + 1; i <= currentIndex; i++) {
+        totalPath += Math.abs(candles[i].close - candles[i - 1].close);
+    }
+    return totalPath > 0 ? netChange / totalPath : undefined;
+}
+
+export interface BarBreakCounts {
+    highBreakCount: number; // bars where high_i > high_{i-1}
+    lowBreakCount: number;  // bars where low_i < low_{i-1}
+    barsCompared: number;   // actual bar-to-bar comparisons made (<= lookback, shorter early in a session)
+}
+
+/**
+ * Counts, over the `lookback` bars ending at `currentIndex`, how many bars broke
+ * the immediately preceding bar's high vs. how many broke its low (independent
+ * counts — an outside bar breaking both counts toward both). A momentum/
+ * persistence proxy distinct from bar overlap (range overlap) and bar range
+ * (candle size): a trend can look fine on those while new-high frequency is
+ * already dropping off, which is what this metric is meant to catch.
+ */
+export function calculateBarBreaks(candles: Candle[], currentIndex: number, lookback: number = 20): BarBreakCounts {
+    const start = Math.max(1, currentIndex - lookback + 1);
+    let highBreakCount = 0;
+    let lowBreakCount = 0;
+    let barsCompared = 0;
+    for (let i = start; i <= currentIndex; i++) {
+        const c = candles[i];
+        const prev = candles[i - 1];
+        if (c.high > prev.high) highBreakCount++;
+        if (c.low < prev.low) lowBreakCount++;
+        barsCompared++;
+    }
+    return { highBreakCount, lowBreakCount, barsCompared };
+}
+
+/**
+ * Slope (points-per-bar rate of change) of an EMA of the given period, measured
+ * over slopeLookback bars ending at currentIndex. Same formula as the inline
+ * getSlope() used by analyzeMarketStructure for regime detection, generalized
+ * to run at any historical index and return undefined (not 0) when there isn't
+ * enough history — analyzeMarketStructure's 0-default is a regime-threshold
+ * convenience specific to that function, not appropriate for raw instrumentation.
+ */
+export function calculateEMASlope(candles: Candle[], currentIndex: number, period: number, slopeLookback: number): number | undefined {
+    const visible = candles.slice(0, currentIndex + 1);
+    const ema = calculateEMA(visible, period);
+    if (ema.length < slopeLookback + 1) return undefined;
+    const current = ema[ema.length - 1].value;
+    const prior = ema[ema.length - 1 - slopeLookback].value;
+    return (current - prior) / slopeLookback;
+}
+
+/**
  * Determines the LLHH-Pivot pattern based on recent pivot points
  */
 export function determineLLHHPivot(pivots: PivotPoint[]): 'HH-HL' | 'HH-LL' | 'LH-HL' | 'LH-LL' | '' {

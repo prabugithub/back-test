@@ -12,7 +12,7 @@ import {
 } from '../services/firebaseSessionService';
 import { useNotificationStore } from './notificationStore';
 import { calculatePivotPoints, calculateATR, calculateEMA } from '../utils/indicators';
-import { analyzeMarketStructure, calculateBarOverlap, averageBarOverlap, calculateBarRanges, averageBarRanges } from '../utils/pivotAnalysis';
+import { analyzeMarketStructure, calculateBarOverlap, averageBarOverlap, calculateBarRanges, averageBarRanges, calculateEfficiencyRatio, calculateBarBreaks, calculateEMASlope } from '../utils/pivotAnalysis';
 import {
   executeLiveOrder,
   registerMonitorIfNeeded,
@@ -305,6 +305,10 @@ export function createSharedActions(set: StoreSet, get: StoreGet) {
       const barOverlapAvgAtEntry = averageBarOverlap(barOverlapAtEntry);
       const barRangeSamples = calculateBarRanges(candles, currentIndex, autoBacktestConfig.barRangeLookback ?? 20);
       const { barRangeAvg, bullBarRangeAvg, bearBarRangeAvg } = averageBarRanges(barRangeSamples);
+      const efficiencyRatioAtEntry = calculateEfficiencyRatio(candles, currentIndex, autoBacktestConfig.efficiencyRatioLookback ?? 10);
+      const { highBreakCount, lowBreakCount, barsCompared } = calculateBarBreaks(candles, currentIndex, autoBacktestConfig.barBreakLookback ?? 20);
+      const ema21SlopeAtEntry = calculateEMASlope(candles, currentIndex, 21, autoBacktestConfig.ema21SlopeLookback ?? 10);
+      const ema50SlopeAtEntry = calculateEMASlope(candles, currentIndex, 50, autoBacktestConfig.ema50SlopeLookback ?? 20);
       const isInitialWith =
         (type === 'BUY' && ltMarket.startsWith('Bull')) ||
         (type === 'SELL' && ltMarket.startsWith('Bear'));
@@ -359,6 +363,12 @@ export function createSharedActions(set: StoreSet, get: StoreGet) {
         barRangeAvgAtEntry: !isReducing ? barRangeAvg : undefined,
         bullBarRangeAvgAtEntry: !isReducing ? bullBarRangeAvg : undefined,
         bearBarRangeAvgAtEntry: !isReducing ? bearBarRangeAvg : undefined,
+        efficiencyRatioAtEntry: !isReducing ? efficiencyRatioAtEntry : undefined,
+        highBreakCountAtEntry: !isReducing ? highBreakCount : undefined,
+        lowBreakCountAtEntry: !isReducing ? lowBreakCount : undefined,
+        barBreakWindowAtEntry: !isReducing ? barsCompared : undefined,
+        ema21SlopeAtEntry: !isReducing ? ema21SlopeAtEntry : undefined,
+        ema50SlopeAtEntry: !isReducing ? ema50SlopeAtEntry : undefined,
         interval: sessionConfig?.interval || '5',
       };
 

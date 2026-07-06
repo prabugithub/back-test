@@ -50,6 +50,12 @@ export interface Trade {
   barRangeAvgAtEntry?: number;      // mean (high-low) over last N bars ending at entry, direction-agnostic
   bullBarRangeAvgAtEntry?: number;  // mean (high-low) of only bull bars (close>open) in the same window
   bearBarRangeAvgAtEntry?: number;  // mean (high-low) of only bear bars (close<open) in the same window
+  efficiencyRatioAtEntry?: number; // Kaufman ER over last N bars ending at entry — net displacement / total path, bounded [0,1]; near 1 = efficient trend, near 0 = chop
+  highBreakCountAtEntry?: number; // count of bars whose high broke the immediately preceding bar's high, within the window
+  lowBreakCountAtEntry?: number;  // count of bars whose low broke the immediately preceding bar's low, within the same window
+  barBreakWindowAtEntry?: number; // actual bar-to-bar comparisons made for the two counts above (<= configured lookback)
+  ema21SlopeAtEntry?: number; // EMA21 points-per-bar slope over the configured lookback ending at entry
+  ema50SlopeAtEntry?: number; // EMA50 points-per-bar slope over the configured lookback ending at entry
   interval?: string;
   liveOptionToken?: string;
   optionType?: 'CE' | 'PE';
