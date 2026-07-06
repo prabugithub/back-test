@@ -262,6 +262,13 @@ Trades are fully simulated — no real money involved.
 - Lines are drawn on the chart
 - Enable `autoExitTarget` for automatic execution when levels are hit
 
+### Entry Instrumentation (raw metrics, not yet surfaced in UI)
+
+Every entry trade (manual, auto-backtest live-replay, and batch backtest) is stamped with raw regime metrics for future analysis — not shown anywhere yet, just recorded on the `Trade` record:
+- `atrDepthAtEntry` — distance from EMA21 in ATR units
+- `barOverlapAtEntry` — per-bar overlap ratio for the last N bars ending at entry (choppiness proxy). Lookback `N` is configurable via the **Overlap** field in the Auto-Backtest panel (default 8).
+- `barOverlapAvgAtEntry` — mean of `barOverlapAtEntry`, a single-number summary of the same window.
+
 ---
 
 ## 7. Position Tracking & P&L

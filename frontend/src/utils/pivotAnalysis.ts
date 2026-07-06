@@ -171,6 +171,37 @@ export function analyzeMarketStructure(candles: Candle[], pivots: PivotPoint[]):
 }
 
 /**
+ * Raw per-bar overlap ratio for the `lookback` bars ending at `currentIndex` (rolling
+ * bar-to-bar comparison, unclamped — same math as the overlap check inside
+ * analyzeMarketStructure, generalized to run at any historical index). Used to
+ * instrument trade records for later range/regime labeling; only reads indices
+ * <= currentIndex so it's safe to call at entry time without look-ahead.
+ */
+export function calculateBarOverlap(candles: Candle[], currentIndex: number, lookback: number = 8): number[] {
+    const ratios: number[] = [];
+    const start = Math.max(1, currentIndex - lookback + 1);
+    for (let i = start; i <= currentIndex; i++) {
+        const c = candles[i];
+        const prev = candles[i - 1];
+        const totalRange = Math.max(c.high, prev.high) - Math.min(c.low, prev.low);
+        const overlapRange = Math.min(c.high, prev.high) - Math.max(c.low, prev.low);
+        ratios.push(totalRange > 0 ? overlapRange / totalRange : 0);
+    }
+    return ratios;
+}
+
+/**
+ * Mean of the raw ratios from calculateBarOverlap. Kept as a separate helper
+ * (rather than inlined at each call site) so both entry-record-construction
+ * paths derive the average identically. Returns undefined when there was no
+ * prior bar to compare against (empty ratios array).
+ */
+export function averageBarOverlap(ratios: number[]): number | undefined {
+    if (ratios.length === 0) return undefined;
+    return ratios.reduce((sum, r) => sum + r, 0) / ratios.length;
+}
+
+/**
  * Determines the LLHH-Pivot pattern based on recent pivot points
  */
 export function determineLLHHPivot(pivots: PivotPoint[]): 'HH-HL' | 'HH-LL' | 'LH-HL' | 'LH-LL' | '' {

@@ -438,6 +438,17 @@ export function AutoBacktestPanel({ onClose }: AutoBacktestPanelProps) {
             <span className="text-[10px] text-orange-600 font-medium">IST</span>
           )}
         </div>
+
+        {/* Bar overlap instrumentation lookback */}
+        <div className="flex items-center gap-2 mt-1.5">
+          <span className="text-[10px] text-gray-500 w-14 shrink-0">Overlap</span>
+          <input
+            type="number" min={2} max={20} value={config.barOverlapLookback}
+            onChange={e => updateGlobal({ barOverlapLookback: Number(e.target.value) })}
+            className="w-12 px-1.5 py-0.5 text-[11px] border rounded text-center"
+            title="Bars looked back for bar-overlap instrumentation on trade records"
+          />
+        </div>
       </div>
 
       <div className="px-4 pb-4">

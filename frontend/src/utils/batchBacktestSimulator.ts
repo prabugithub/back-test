@@ -3,7 +3,7 @@
 import type { Candle, Trade, BacktestPosition } from '../types';
 import type { TradeJournal } from '../types';
 import { type AutoBacktestConfig, type AutoSignal, evaluateAutoSignals } from './autoBacktestEngine';
-import { analyzeManualEntry } from './pivotAnalysis';
+import { analyzeManualEntry, calculateBarOverlap, averageBarOverlap } from './pivotAnalysis';
 
 interface SimPosition {
   instrument: string;
@@ -51,6 +51,8 @@ export function runBatchSimulation(
   function enterPosition(candle: Candle, signal: AutoSignal, qty: number, candleIndex: number) {
     const entryPrice = candle.close;
     const maAnalysis = analyzeManualEntry(candles, candleIndex, signal.type);
+    const barOverlapAtEntry = calculateBarOverlap(candles, candleIndex, config.barOverlapLookback ?? 8);
+    const barOverlapAvgAtEntry = averageBarOverlap(barOverlapAtEntry);
     const journal: TradeJournal = {
       ltMarket: signal.ltMarket,
       htMarket: signal.htMarket,
@@ -75,6 +77,8 @@ export function runBatchSimulation(
       target: signal.tp,
       exitReason: 'MANUAL',
       journal,
+      barOverlapAtEntry,
+      barOverlapAvgAtEntry,
       interval,
     });
     position = {

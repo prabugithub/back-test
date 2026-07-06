@@ -45,6 +45,8 @@ export interface Trade {
   withTrendSeen?: boolean;
   journal?: TradeJournal;
   atrDepthAtEntry?: number;
+  barOverlapAtEntry?: number[]; // raw per-bar overlap ratio, up to N bars ending at entry candle (most recent last), unclamped — used for later range/regime labeling
+  barOverlapAvgAtEntry?: number; // mean of barOverlapAtEntry — convenience summary of the same window
   interval?: string;
   liveOptionToken?: string;
   optionType?: 'CE' | 'PE';

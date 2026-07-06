@@ -12,7 +12,7 @@ import {
 } from '../services/firebaseSessionService';
 import { useNotificationStore } from './notificationStore';
 import { calculatePivotPoints, calculateATR, calculateEMA } from '../utils/indicators';
-import { analyzeMarketStructure } from '../utils/pivotAnalysis';
+import { analyzeMarketStructure, calculateBarOverlap, averageBarOverlap } from '../utils/pivotAnalysis';
 import {
   executeLiveOrder,
   registerMonitorIfNeeded,
@@ -239,7 +239,7 @@ export function createSharedActions(set: StoreSet, get: StoreGet) {
       exitReason: 'SL' | 'TP' | 'MANUAL' | 'TIME_OVER' = 'MANUAL',
       journal?: TradeJournal
     ) => {
-      const { candles, currentIndex, trades, position, instrument, sessionConfig, isLiveMode, livePrice } = get();
+      const { candles, currentIndex, trades, position, instrument, sessionConfig, isLiveMode, livePrice, autoBacktestConfig } = get();
       const currentCandle = candles[currentIndex];
 
       if (!currentCandle) {
@@ -301,6 +301,8 @@ export function createSharedActions(set: StoreSet, get: StoreGet) {
       const atrVal = atrSeries[atrSeries.length - 1]?.value ?? 0;
       const emaVal = emaSeries[emaSeries.length - 1]?.value ?? 0;
       const atrDepthAtEntry = atrVal > 0 ? Math.abs(currentPrice - emaVal) / atrVal : 0;
+      const barOverlapAtEntry = calculateBarOverlap(candles, currentIndex, autoBacktestConfig.barOverlapLookback ?? 8);
+      const barOverlapAvgAtEntry = averageBarOverlap(barOverlapAtEntry);
       const isInitialWith =
         (type === 'BUY' && ltMarket.startsWith('Bull')) ||
         (type === 'SELL' && ltMarket.startsWith('Bear'));
@@ -350,6 +352,8 @@ export function createSharedActions(set: StoreSet, get: StoreGet) {
         withTrendSeen: isSameSide ? position?.withTrendSeen || isInitialWith : isInitialWith,
         journal: journal || undefined,
         atrDepthAtEntry: !isReducing ? atrDepthAtEntry : undefined,
+        barOverlapAtEntry: !isReducing ? barOverlapAtEntry : undefined,
+        barOverlapAvgAtEntry: !isReducing ? barOverlapAvgAtEntry : undefined,
         interval: sessionConfig?.interval || '5',
       };
 
