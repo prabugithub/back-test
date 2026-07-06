@@ -12,7 +12,7 @@ import {
 } from '../services/firebaseSessionService';
 import { useNotificationStore } from './notificationStore';
 import { calculatePivotPoints, calculateATR, calculateEMA } from '../utils/indicators';
-import { analyzeMarketStructure, calculateBarOverlap, averageBarOverlap } from '../utils/pivotAnalysis';
+import { analyzeMarketStructure, calculateBarOverlap, averageBarOverlap, calculateBarRanges, averageBarRanges } from '../utils/pivotAnalysis';
 import {
   executeLiveOrder,
   registerMonitorIfNeeded,
@@ -303,6 +303,8 @@ export function createSharedActions(set: StoreSet, get: StoreGet) {
       const atrDepthAtEntry = atrVal > 0 ? Math.abs(currentPrice - emaVal) / atrVal : 0;
       const barOverlapAtEntry = calculateBarOverlap(candles, currentIndex, autoBacktestConfig.barOverlapLookback ?? 8);
       const barOverlapAvgAtEntry = averageBarOverlap(barOverlapAtEntry);
+      const barRangeSamples = calculateBarRanges(candles, currentIndex, autoBacktestConfig.barRangeLookback ?? 20);
+      const { barRangeAvg, bullBarRangeAvg, bearBarRangeAvg } = averageBarRanges(barRangeSamples);
       const isInitialWith =
         (type === 'BUY' && ltMarket.startsWith('Bull')) ||
         (type === 'SELL' && ltMarket.startsWith('Bear'));
@@ -354,6 +356,9 @@ export function createSharedActions(set: StoreSet, get: StoreGet) {
         atrDepthAtEntry: !isReducing ? atrDepthAtEntry : undefined,
         barOverlapAtEntry: !isReducing ? barOverlapAtEntry : undefined,
         barOverlapAvgAtEntry: !isReducing ? barOverlapAvgAtEntry : undefined,
+        barRangeAvgAtEntry: !isReducing ? barRangeAvg : undefined,
+        bullBarRangeAvgAtEntry: !isReducing ? bullBarRangeAvg : undefined,
+        bearBarRangeAvgAtEntry: !isReducing ? bearBarRangeAvg : undefined,
         interval: sessionConfig?.interval || '5',
       };
 

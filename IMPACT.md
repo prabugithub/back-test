@@ -96,7 +96,7 @@ Handles logic that runs in both modes. Live path is always top-guarded with an e
 #### `executeTrade(type, qty, price)`
 → **Live path (top guard):** calls `executeLiveOrder()` in `liveExecutionService.ts` → returns early if result is null
 → **Shared path:** FIFO P&L calculation, updates `position`, pushes to `trades[]`
-→ on entry (not `isReducing`): stamps `atrDepthAtEntry` and `barOverlapAtEntry` (raw regime instrumentation, read-only for now — see `calculateBarOverlap` in `pivotAnalysis.ts`, lookback controlled by `autoBacktestConfig.barOverlapLookback`)
+→ on entry (not `isReducing`): stamps `atrDepthAtEntry`, `barOverlapAtEntry`, and `barRangeAvgAtEntry`/`bullBarRangeAvgAtEntry`/`bearBarRangeAvgAtEntry` (raw regime instrumentation, read-only for now — see `calculateBarOverlap`/`calculateBarRanges` in `pivotAnalysis.ts`, lookbacks controlled by `autoBacktestConfig.barOverlapLookback`/`barRangeLookback`)
 → if new position and live mode and **no** `pendingOrderId`: calls `registerMonitorIfNeeded()` immediately
 → if `pendingOrderId` set and live mode: calls `pollOrderFillStatus()` 2s later; `registerMonitorIfNeeded()` is called inside `onFilled`/`onPartialFill` callbacks (not before fill confirmation)
 
@@ -275,8 +275,9 @@ sessionConfig
 - **`averageBarOverlap(ratios)`** in the same file — mean of the ratios array, stamped as `Trade.barOverlapAvgAtEntry`. Kept as a shared helper (not inlined at each call site) so both entry paths compute the average identically.
 - **`AutoBacktestConfig.barOverlapLookback`** (default `8`) — global setting, editable via the "Overlap" input in `AutoBacktestPanel.tsx`. Both `executeTrade` and `runBatchSimulation` fall back to `?? 8` for sessions/configs saved before this field existed.
 - Do **not** confuse this with the pre-existing 10-bar overlap check inside `analyzeMarketStructure()` (same file) — that one is hardcoded to the tail of whatever candle slice it's given and only used to pick `Bull-Trend` vs `Bull-Trending-range` labels; it is not parameterized by index and is unrelated to per-trade instrumentation.
+- **`calculateBarRanges(candles, currentIndex, lookback)`** / **`averageBarRanges(samples)`** — same file, same shape (raw-array function + separate average helper). Range is plain `high - low` per bar (deliberately **not** the gap-adjusted true range `calculateATR` uses — different purpose, don't conflate the two). Classifies each bar `bull`/`bear`/`neutral` (`close` vs `open`); an exact doji (`close === open`) is `neutral` — excluded from the bull/bear split but still counted in the overall average. **Known limitation:** a near-doji (tiny nonzero body, big wicks) still sorts into bull or bear by sign, so it can inflate that bucket's average — no body-ratio threshold exists yet to catch this; deliberately deferred (no real data to calibrate a threshold against), same as bar-overlap thresholding. Stamped as `Trade.barRangeAvgAtEntry`/`bullBarRangeAvgAtEntry`/`bearBarRangeAvgAtEntry`; lookback is `AutoBacktestConfig.barRangeLookback` (default `20`), editable via the "Bar Range" input in `AutoBacktestPanel.tsx`.
 
-**Check when changing:** if `Trade` schema is consumed by a strict validator/export in the future, remember `barOverlapAtEntry` is `undefined` on exit/reducing trades and may be shorter than `lookback` for early-session entries.
+**Check when changing:** if `Trade` schema is consumed by a strict validator/export in the future, remember `barOverlapAtEntry`/`barRangeAvgAtEntry`/etc. are `undefined` on exit/reducing trades, may reflect a shorter-than-configured window for early-session entries, and the bull/bear range averages are `undefined` (not `0`) when their bucket has zero bars in the window.
 
 ---
 

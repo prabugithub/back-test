@@ -202,6 +202,50 @@ export function averageBarOverlap(ratios: number[]): number | undefined {
 }
 
 /**
+ * Per-bar range (high-low) and direction for the `lookback` bars ending at
+ * `currentIndex` — a trend-strength proxy (bull bars vs bear bars getting
+ * bigger/smaller). Direction is 'neutral' only for an exact doji
+ * (close === open); near-doji bars with a nonzero body still fall to
+ * whichever side their close/open sign tips. No previous-bar comparison is
+ * needed (unlike calculateBarOverlap), so the window may start at index 0.
+ */
+export interface BarRangeSample {
+    range: number; // high - low
+    direction: 'bull' | 'bear' | 'neutral';
+}
+
+export function calculateBarRanges(candles: Candle[], currentIndex: number, lookback: number = 20): BarRangeSample[] {
+    const samples: BarRangeSample[] = [];
+    const start = Math.max(0, currentIndex - lookback + 1);
+    for (let i = start; i <= currentIndex; i++) {
+        const c = candles[i];
+        const direction = c.close > c.open ? 'bull' : c.close < c.open ? 'bear' : 'neutral';
+        samples.push({ range: c.high - c.low, direction });
+    }
+    return samples;
+}
+
+/**
+ * Derives the overall/bull/bear mean range from calculateBarRanges samples.
+ * Each average is undefined when its bucket is empty (e.g. no bear bars in
+ * the window) — not 0 — mirroring averageBarOverlap's empty-input convention.
+ */
+export function averageBarRanges(samples: BarRangeSample[]): {
+    barRangeAvg?: number;
+    bullBarRangeAvg?: number;
+    bearBarRangeAvg?: number;
+} {
+    if (samples.length === 0) return {};
+    const mean = (xs: BarRangeSample[]) =>
+        xs.length > 0 ? xs.reduce((sum, x) => sum + x.range, 0) / xs.length : undefined;
+    return {
+        barRangeAvg: mean(samples),
+        bullBarRangeAvg: mean(samples.filter(s => s.direction === 'bull')),
+        bearBarRangeAvg: mean(samples.filter(s => s.direction === 'bear')),
+    };
+}
+
+/**
  * Determines the LLHH-Pivot pattern based on recent pivot points
  */
 export function determineLLHHPivot(pivots: PivotPoint[]): 'HH-HL' | 'HH-LL' | 'LH-HL' | 'LH-LL' | '' {

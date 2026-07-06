@@ -449,6 +449,17 @@ export function AutoBacktestPanel({ onClose }: AutoBacktestPanelProps) {
             title="Bars looked back for bar-overlap instrumentation on trade records"
           />
         </div>
+
+        {/* Bull/bear bar range (trend strength) instrumentation lookback */}
+        <div className="flex items-center gap-2 mt-1.5">
+          <span className="text-[10px] text-gray-500 w-14 shrink-0">Bar Range</span>
+          <input
+            type="number" min={5} max={50} value={config.barRangeLookback}
+            onChange={e => updateGlobal({ barRangeLookback: Number(e.target.value) })}
+            className="w-12 px-1.5 py-0.5 text-[11px] border rounded text-center"
+            title="Bars looked back for bull/bear bar-range (trend strength) instrumentation on trade records"
+          />
+        </div>
       </div>
 
       <div className="px-4 pb-4">

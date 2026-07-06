@@ -47,6 +47,9 @@ export interface Trade {
   atrDepthAtEntry?: number;
   barOverlapAtEntry?: number[]; // raw per-bar overlap ratio, up to N bars ending at entry candle (most recent last), unclamped — used for later range/regime labeling
   barOverlapAvgAtEntry?: number; // mean of barOverlapAtEntry — convenience summary of the same window
+  barRangeAvgAtEntry?: number;      // mean (high-low) over last N bars ending at entry, direction-agnostic
+  bullBarRangeAvgAtEntry?: number;  // mean (high-low) of only bull bars (close>open) in the same window
+  bearBarRangeAvgAtEntry?: number;  // mean (high-low) of only bear bars (close<open) in the same window
   interval?: string;
   liveOptionToken?: string;
   optionType?: 'CE' | 'PE';

@@ -68,6 +68,9 @@ export interface AutoBacktestConfig {
   // Bar overlap instrumentation — raw regime metric recorded on trade entries
   barOverlapLookback: number; // bars looked back for barOverlapAtEntry (default 8)
 
+  // Bar range instrumentation — trend-strength metric recorded on trade entries
+  barRangeLookback: number; // bars looked back for bar-range trend-strength instrumentation (default 20)
+
   // Per-regime rule sets
   uptrend: RegimeRules;   // Bull-Trend, Bull-Trending-range
   downtrend: RegimeRules; // Bear-Trend, Bear-Trending-range
@@ -149,6 +152,7 @@ export const defaultAutoBacktestConfig: AutoBacktestConfig = {
   autoSquareOff: false,
   squareOffTime: '15:10',
   barOverlapLookback: 8,
+  barRangeLookback: 20,
   uptrend: { ...defaultLongRules, enabled: true },
   downtrend: { ...defaultShortRules, enabled: true },
   range: { ...defaultRangeRules, enabled: false },

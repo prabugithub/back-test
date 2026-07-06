@@ -268,6 +268,7 @@ Every entry trade (manual, auto-backtest live-replay, and batch backtest) is sta
 - `atrDepthAtEntry` — distance from EMA21 in ATR units
 - `barOverlapAtEntry` — per-bar overlap ratio for the last N bars ending at entry (choppiness proxy). Lookback `N` is configurable via the **Overlap** field in the Auto-Backtest panel (default 8).
 - `barOverlapAvgAtEntry` — mean of `barOverlapAtEntry`, a single-number summary of the same window.
+- `barRangeAvgAtEntry` / `bullBarRangeAvgAtEntry` / `bearBarRangeAvgAtEntry` — mean candle range (high-low) over the last N bars ending at entry, overall and split by bull/bear bar direction (trend-strength proxy: bull bars shrinking vs bear bars in an uptrend is an early weakening signal). Lookback `N` is configurable via the **Bar Range** field in the Auto-Backtest panel (default 20). An exact doji (close = open) counts toward the overall average only, not bull or bear.
 
 ---
 
