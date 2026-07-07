@@ -12,7 +12,7 @@ import {
 } from '../services/firebaseSessionService';
 import { useNotificationStore } from './notificationStore';
 import { calculatePivotPoints, calculateATR, calculateEMA } from '../utils/indicators';
-import { analyzeMarketStructure, calculateBarOverlap, averageBarOverlap, calculateBarRanges, averageBarRanges, calculateEfficiencyRatio, calculateBarBreaks, calculateEMASlope, calculateEMAInteraction } from '../utils/pivotAnalysis';
+import { analyzeMarketStructure, calculateBarOverlap, averageBarOverlap, calculateBarRanges, averageBarRanges, calculateEfficiencyRatio, calculateBarBreaks, calculateEMASlope, calculateEMAInteraction, getPivotSequenceStats, averagePivotGapBars } from '../utils/pivotAnalysis';
 import {
   executeLiveOrder,
   registerMonitorIfNeeded,
@@ -321,6 +321,10 @@ export function createSharedActions(set: StoreSet, get: StoreGet) {
       const gapBarRatio = entryMetricsOverride?.ema20GapBarRatio ?? emaInteractionFallback.gapBarRatio;
       const closeAboveRatio = entryMetricsOverride?.ema20CloseAboveRatio ?? emaInteractionFallback.closeAboveRatio;
       const emaInteractionWindow = entryMetricsOverride?.ema20InteractionWindow ?? emaInteractionFallback.barsCompared;
+      const pivotSeqStatsFallback = getPivotSequenceStats(pivotsForEntry, 4);
+      const pivotHighSeq = entryMetricsOverride?.pivotHighSeq ?? pivotSeqStatsFallback.highSeq;
+      const pivotLowSeq = entryMetricsOverride?.pivotLowSeq ?? pivotSeqStatsFallback.lowSeq;
+      const pivotGapAvgBarsAtEntry = entryMetricsOverride?.pivotGapAvgBars ?? averagePivotGapBars(pivotSeqStatsFallback);
       const isInitialWith =
         (type === 'BUY' && ltMarket.startsWith('Bull')) ||
         (type === 'SELL' && ltMarket.startsWith('Bear'));
@@ -384,6 +388,9 @@ export function createSharedActions(set: StoreSet, get: StoreGet) {
         ema20GapBarRatioAtEntry: !isReducing ? gapBarRatio : undefined,
         ema20CloseAboveRatioAtEntry: !isReducing ? closeAboveRatio : undefined,
         ema20InteractionWindowAtEntry: !isReducing ? emaInteractionWindow : undefined,
+        pivotHighSeqAtEntry: !isReducing ? (pivotHighSeq.length ? pivotHighSeq.join('-') : undefined) : undefined,
+        pivotLowSeqAtEntry: !isReducing ? (pivotLowSeq.length ? pivotLowSeq.join('-') : undefined) : undefined,
+        pivotGapAvgBarsAtEntry: !isReducing ? pivotGapAvgBarsAtEntry : undefined,
         interval: sessionConfig?.interval || '5',
       };
 

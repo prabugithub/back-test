@@ -59,6 +59,9 @@ export interface Trade {
   ema20GapBarRatioAtEntry?: number;      // fraction of bars in window not touching EMA20 (Brooks gap bar — strong trend)
   ema20CloseAboveRatioAtEntry?: number;  // fraction of closes above EMA20 in window (always-in bias; below = 1 - this)
   ema20InteractionWindowAtEntry?: number; // actual window size used for the two ratios above
+  pivotHighSeqAtEntry?: string;    // last up-to-4 bearish trend labels (HH/LH), oldest→newest, joined with '-'
+  pivotLowSeqAtEntry?: string;     // last up-to-4 bullish trend labels (HL/LL), oldest→newest, joined with '-'
+  pivotGapAvgBarsAtEntry?: number; // mean bar-count gap between consecutive same-type pivots across both sequences
   interval?: string;
   liveOptionToken?: string;
   optionType?: 'CE' | 'PE';

@@ -397,6 +397,41 @@ export function determineLLHHPivot(pivots: PivotPoint[]): 'HH-HL' | 'HH-LL' | 'L
     return '';
 }
 
+export interface PivotSequenceStats {
+    highSeq: string[];      // last up-to-4 bearish trendLabels (oldest→newest), e.g. ['LH','HH','HH','HH']
+    lowSeq: string[];       // last up-to-4 bullish trendLabels (oldest→newest), e.g. ['LL','LL','HL','HL']
+    highGapsBars: number[]; // bar-count gaps between consecutive entries in highSeq (length = highSeq.length - 1)
+    lowGapsBars: number[];  // bar-count gaps between consecutive entries in lowSeq
+}
+
+/**
+ * Separately tracks the last `count` bearish-pivot labels (highs: HH/LH) and
+ * bullish-pivot labels (lows: HL/LL), plus the bar-count gap between each
+ * consecutive pivot within each sequence — a pace/acceleration proxy distinct
+ * from determineLLHHPivot's single-most-recent-pivot snapshot.
+ */
+export function getPivotSequenceStats(pivots: PivotPoint[], count: number = 4): PivotSequenceStats {
+    const bears = pivots.filter(p => p.type === 'bearish' && p.trendLabel).slice(-count);
+    const bulls = pivots.filter(p => p.type === 'bullish' && p.trendLabel).slice(-count);
+    const gaps = (arr: PivotPoint[]) => arr.slice(1).map((p, i) => p.barIndex - arr[i].barIndex);
+    return {
+        highSeq: bears.map(p => p.trendLabel!),
+        lowSeq: bulls.map(p => p.trendLabel!),
+        highGapsBars: gaps(bears),
+        lowGapsBars: gaps(bulls),
+    };
+}
+
+/**
+ * Mean bar-count gap across both the high and low sequence gaps. Undefined
+ * when there are fewer than 2 pivots of either type (no gaps to measure).
+ */
+export function averagePivotGapBars(stats: PivotSequenceStats): number | undefined {
+    const all = [...stats.highGapsBars, ...stats.lowGapsBars];
+    if (all.length === 0) return undefined;
+    return all.reduce((sum, g) => sum + g, 0) / all.length;
+}
+
 /**
  * Generic function to calculate MA position for any given 3 candles ending at 'index'
  */

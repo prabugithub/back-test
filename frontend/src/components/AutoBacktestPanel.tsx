@@ -11,7 +11,11 @@ import {
   AUTO_BT_PRESETS,
   REGIME_LABELS,
   getCurrentMarketState,
+  generateBinaryPatterns,
 } from '../utils/autoBacktestEngine';
+
+const HIGH_SEQ_PATTERNS = generateBinaryPatterns('HH', 'LH');
+const LOW_SEQ_PATTERNS = generateBinaryPatterns('HL', 'LL');
 
 interface AutoBacktestPanelProps {
   onClose: () => void;
@@ -58,9 +62,23 @@ interface RegimeEditorProps {
   onChange: (rules: RegimeRules) => void;
 }
 
+// Starting-point recommendations, not fixed rules — tune per instrument/timeframe against
+// your own batch-backtest results. Trend rows apply to both Uptrend and Downtrend (the
+// direction-aligned filters flip automatically for shorts, so the same setting works for both).
+const QUALITY_FILTER_GUIDE: { filter: string; trend: string; range: string; reversal: string }[] = [
+  { filter: 'Bar Overlap', trend: '≤0.4 (Clean/Trend)', range: '≥0.5 (Choppy) or None', reversal: 'None — structure still forming' },
+  { filter: 'Bar Range', trend: 'Dominance ≥1.0×', range: 'None', reversal: 'Dominance ≥1.0× once turn confirms' },
+  { filter: 'Break Count', trend: '≥5 (Persistent)', range: '≤3 (Exhausted/quiet)', reversal: 'None' },
+  { filter: 'EMA21 Slope', trend: '≥0 (Favor Trade)', range: '≤0.1 (Flat) or None', reversal: 'None — slope hasn’t turned yet' },
+  { filter: 'EMA50 Slope', trend: '≥0 (Favor Trade)', range: '≤0.1 (Flat) or None', reversal: 'None' },
+  { filter: 'EMA20 Gap-Bar', trend: '≥0.4 (continuation) or ≤0.3 (pullback entries)', range: '≤0.3 (still touching)', reversal: '≤0.3 (still touching)' },
+  { filter: 'EMA20 Bias', trend: '≥0.6 (Sustained)', range: 'None', reversal: '≥0.5 (early confirm)' },
+];
+
 function RegimeEditor({ regime, rules, onChange }: RegimeEditorProps) {
   const meta = REGIME_META[regime];
   const up = (patch: Partial<RegimeRules>) => onChange({ ...rules, ...patch });
+  const [showGuide, setShowGuide] = useState(false);
 
   return (
     <div className="space-y-3 pt-1">
@@ -255,10 +273,55 @@ function RegimeEditor({ regime, rules, onChange }: RegimeEditorProps) {
 
       {/* Quality-setup filters (instrumentation-based) */}
       <div>
-        <p className="text-[10px] text-gray-400 mb-1 uppercase tracking-wide font-medium">Quality Setup Filters</p>
+        <div className="flex items-center justify-between mb-1">
+          <p
+            className="text-[10px] text-gray-400 uppercase tracking-wide font-medium cursor-help"
+            title="Reject a signal outright unless its market-structure condition holds — not just recorded on the trade, but checked before entry. Directional filters (Break Count, EMA Slope, EMA20 Bias) automatically flip to match whichever side (long/short) is being evaluated, so one setting covers both directions."
+          >
+            Quality Setup Filters
+          </p>
+          <button
+            onClick={() => setShowGuide(v => !v)}
+            className="text-[10px] text-indigo-500 hover:text-indigo-700 font-medium flex items-center gap-0.5"
+          >
+            Suggested values by regime {showGuide ? '▲' : '▼'}
+          </button>
+        </div>
+        {showGuide && (
+          <div className="mb-2 border border-indigo-100 rounded-lg overflow-x-auto">
+            <table className="w-full text-[10px] border-collapse">
+              <thead>
+                <tr className="bg-indigo-50 text-indigo-700">
+                  <th className="text-left px-2 py-1 font-semibold">Filter</th>
+                  <th className="text-left px-2 py-1 font-semibold">Uptrend / Downtrend</th>
+                  <th className="text-left px-2 py-1 font-semibold">Range</th>
+                  <th className="text-left px-2 py-1 font-semibold">Reversal</th>
+                </tr>
+              </thead>
+              <tbody>
+                {QUALITY_FILTER_GUIDE.map((row, i) => (
+                  <tr key={row.filter} className={i % 2 === 0 ? 'bg-white' : 'bg-gray-50'}>
+                    <td className="px-2 py-1 font-medium text-gray-600 whitespace-nowrap">{row.filter}</td>
+                    <td className="px-2 py-1 text-gray-500">{row.trend}</td>
+                    <td className="px-2 py-1 text-gray-500">{row.range}</td>
+                    <td className="px-2 py-1 text-gray-500">{row.reversal}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+            <p className="px-2 py-1 text-[9px] text-gray-400 bg-gray-50 border-t border-indigo-100">
+              Starting points, not rules — tune against your own batch-backtest results per instrument/timeframe.
+            </p>
+          </div>
+        )}
         <div className="grid grid-cols-2 gap-2">
           <div>
-            <p className="text-[10px] text-gray-400 mb-0.5 uppercase tracking-wide font-medium">Bar Overlap</p>
+            <p
+              className="text-[10px] text-gray-400 mb-0.5 uppercase tracking-wide font-medium cursor-help"
+              title="How much each bar's range overlaps the previous bar's range, averaged over the 'Overlap' lookback (Instrumentation Lookbacks section above). Low overlap = clean directional bars; high overlap = choppy/ranging. 'Clean/Trend' requires overlap below the threshold (only enter clean trends); 'Choppy' requires it above (only enter range conditions)."
+            >
+              Bar Overlap
+            </p>
             <select
               value={rules.barOverlapFilter ?? 'none'}
               onChange={e => up({ barOverlapFilter: e.target.value as RegimeRules['barOverlapFilter'] })}
@@ -271,7 +334,12 @@ function RegimeEditor({ regime, rules, onChange }: RegimeEditorProps) {
           </div>
           {(rules.barOverlapFilter ?? 'none') !== 'none' && (
             <div>
-              <p className="text-[10px] text-gray-400 mb-0.5 uppercase tracking-wide font-medium">Overlap Threshold</p>
+              <p
+                className="text-[10px] text-gray-400 mb-0.5 uppercase tracking-wide font-medium cursor-help"
+                title="Overlap ratio cutoff, 0–1. Lower = stricter (only very clean, non-overlapping bars pass). Default 0.4."
+              >
+                Overlap Threshold
+              </p>
               <input
                 type="number" step={0.05} min={0} max={1}
                 value={rules.barOverlapThreshold ?? 0.4}
@@ -282,7 +350,12 @@ function RegimeEditor({ regime, rules, onChange }: RegimeEditorProps) {
           )}
 
           <div>
-            <p className="text-[10px] text-gray-400 mb-0.5 uppercase tracking-wide font-medium">Bar Range</p>
+            <p
+              className="text-[10px] text-gray-400 mb-0.5 uppercase tracking-wide font-medium cursor-help"
+              title="Average candle size (high-low) over the 'Bar Range' lookback. 'Bull > Bear × X' (dominance) requires bars in your trade's direction to be bigger than bars against it, by the multiplier below — confirms the trend is expanding in your favor. The 'Avg Range' min/max modes instead require the overall average bar size to clear (min) or stay under (max) a fixed points threshold — useful to avoid low-volatility chop or overextended expansion regardless of direction."
+            >
+              Bar Range
+            </p>
             <select
               value={rules.barRangeFilter ?? 'none'}
               onChange={e => up({ barRangeFilter: e.target.value as RegimeRules['barRangeFilter'] })}
@@ -296,7 +369,12 @@ function RegimeEditor({ regime, rules, onChange }: RegimeEditorProps) {
           </div>
           {rules.barRangeFilter === 'dominance' && (
             <div>
-              <p className="text-[10px] text-gray-400 mb-0.5 uppercase tracking-wide font-medium">Dominance ×</p>
+              <p
+                className="text-[10px] text-gray-400 mb-0.5 uppercase tracking-wide font-medium cursor-help"
+                title="How many times bigger the trade-direction average bar range must be vs. the opposite side. 1 = just bigger, 1.5 = 50% bigger. Default 1.0."
+              >
+                Dominance ×
+              </p>
               <input
                 type="number" step={0.1} min={1} max={5}
                 value={rules.barRangeDominanceThreshold ?? 1.0}
@@ -307,7 +385,12 @@ function RegimeEditor({ regime, rules, onChange }: RegimeEditorProps) {
           )}
           {(rules.barRangeFilter === 'min' || rules.barRangeFilter === 'max') && (
             <div>
-              <p className="text-[10px] text-gray-400 mb-0.5 uppercase tracking-wide font-medium">Range Threshold (pts)</p>
+              <p
+                className="text-[10px] text-gray-400 mb-0.5 uppercase tracking-wide font-medium cursor-help"
+                title="Average bar size cutoff in price points (instrument-specific — set relative to this instrument's typical candle range)."
+              >
+                Range Threshold (pts)
+              </p>
               <input
                 type="number" step={1} min={0}
                 value={rules.barRangeThreshold ?? 0}
@@ -318,7 +401,12 @@ function RegimeEditor({ regime, rules, onChange }: RegimeEditorProps) {
           )}
 
           <div>
-            <p className="text-[10px] text-gray-400 mb-0.5 uppercase tracking-wide font-medium">Break Count</p>
+            <p
+              className="text-[10px] text-gray-400 mb-0.5 uppercase tracking-wide font-medium cursor-help"
+              title="Counts, over the 'Breaks' lookback, how many bars made a new high (for longs) or new low (for shorts) vs. the bar before it — a momentum/persistence check. 'Persistent' requires at least X breaks (momentum still active). 'Exhausted' requires at most X (momentum fading — useful for reversal/fade entries)."
+            >
+              Break Count
+            </p>
             <select
               value={rules.barBreakFilter ?? 'none'}
               onChange={e => up({ barBreakFilter: e.target.value as RegimeRules['barBreakFilter'] })}
@@ -331,7 +419,12 @@ function RegimeEditor({ regime, rules, onChange }: RegimeEditorProps) {
           </div>
           {(rules.barBreakFilter ?? 'none') !== 'none' && (
             <div>
-              <p className="text-[10px] text-gray-400 mb-0.5 uppercase tracking-wide font-medium">Break Threshold</p>
+              <p
+                className="text-[10px] text-gray-400 mb-0.5 uppercase tracking-wide font-medium cursor-help"
+                title="Number of new-high/new-low breaks required within the lookback window. Default 5."
+              >
+                Break Threshold
+              </p>
               <input
                 type="number" step={1} min={0}
                 value={rules.barBreakThreshold ?? 5}
@@ -342,7 +435,12 @@ function RegimeEditor({ regime, rules, onChange }: RegimeEditorProps) {
           )}
 
           <div>
-            <p className="text-[10px] text-gray-400 mb-0.5 uppercase tracking-wide font-medium">EMA21 Slope</p>
+            <p
+              className="text-[10px] text-gray-400 mb-0.5 uppercase tracking-wide font-medium cursor-help"
+              title="Rate of change (steepness) of the EMA21 over its own lookback, automatically flipped for shorts so this always means 'is the EMA sloping in my trade's favor.' 'Favor Trade' requires the slope to clear the threshold (0 = just needs to point the right way, no steepness required). 'Not Overextended' instead caps how steep it can be — avoids chasing a move that's already run too far."
+            >
+              EMA21 Slope
+            </p>
             <select
               value={rules.ema21SlopeFilter ?? 'none'}
               onChange={e => up({ ema21SlopeFilter: e.target.value as RegimeRules['ema21SlopeFilter'] })}
@@ -355,7 +453,12 @@ function RegimeEditor({ regime, rules, onChange }: RegimeEditorProps) {
           </div>
           {(rules.ema21SlopeFilter ?? 'none') !== 'none' && (
             <div>
-              <p className="text-[10px] text-gray-400 mb-0.5 uppercase tracking-wide font-medium">EMA21 Threshold</p>
+              <p
+                className="text-[10px] text-gray-400 mb-0.5 uppercase tracking-wide font-medium cursor-help"
+                title="Slope cutoff in price points per bar, already direction-aligned. 0 (default) = direction-only, no steepness required. Raw price-points, so this is instrument/timeframe-scale-dependent — a value tuned for Nifty 5-min won't transfer directly to Bank Nifty or a different timeframe."
+              >
+                EMA21 Threshold
+              </p>
               <input
                 type="number" step={0.05} value={rules.ema21SlopeThreshold ?? 0}
                 onChange={e => up({ ema21SlopeThreshold: Number(e.target.value) })}
@@ -365,7 +468,12 @@ function RegimeEditor({ regime, rules, onChange }: RegimeEditorProps) {
           )}
 
           <div>
-            <p className="text-[10px] text-gray-400 mb-0.5 uppercase tracking-wide font-medium">EMA50 Slope</p>
+            <p
+              className="text-[10px] text-gray-400 mb-0.5 uppercase tracking-wide font-medium cursor-help"
+              title="Same as EMA21 Slope above, but on the slower EMA50 — a longer-term trend-direction confirmation rather than short-term steepness."
+            >
+              EMA50 Slope
+            </p>
             <select
               value={rules.ema50SlopeFilter ?? 'none'}
               onChange={e => up({ ema50SlopeFilter: e.target.value as RegimeRules['ema50SlopeFilter'] })}
@@ -378,7 +486,12 @@ function RegimeEditor({ regime, rules, onChange }: RegimeEditorProps) {
           </div>
           {(rules.ema50SlopeFilter ?? 'none') !== 'none' && (
             <div>
-              <p className="text-[10px] text-gray-400 mb-0.5 uppercase tracking-wide font-medium">EMA50 Threshold</p>
+              <p
+                className="text-[10px] text-gray-400 mb-0.5 uppercase tracking-wide font-medium cursor-help"
+                title="Slope cutoff in price points per bar, already direction-aligned. 0 (default) = direction-only, no steepness required."
+              >
+                EMA50 Threshold
+              </p>
               <input
                 type="number" step={0.05} value={rules.ema50SlopeThreshold ?? 0}
                 onChange={e => up({ ema50SlopeThreshold: Number(e.target.value) })}
@@ -388,7 +501,12 @@ function RegimeEditor({ regime, rules, onChange }: RegimeEditorProps) {
           )}
 
           <div>
-            <p className="text-[10px] text-gray-400 mb-0.5 uppercase tracking-wide font-medium">EMA20 Gap-Bar</p>
+            <p
+              className="text-[10px] text-gray-400 mb-0.5 uppercase tracking-wide font-medium cursor-help"
+              title="Fraction of bars over the 'EMA20 Interaction' lookback whose entire range never touches the EMA20 ('gap bars' — a Brooks strong-trend signal). 'Strong Trend' requires at least X of bars to be gap bars. 'Pullback/Touch' instead requires at most X, i.e. price is still interacting with the average — better suited to pullback/mean-reversion entries."
+            >
+              EMA20 Gap-Bar
+            </p>
             <select
               value={rules.ema20GapBarFilter ?? 'none'}
               onChange={e => up({ ema20GapBarFilter: e.target.value as RegimeRules['ema20GapBarFilter'] })}
@@ -401,7 +519,12 @@ function RegimeEditor({ regime, rules, onChange }: RegimeEditorProps) {
           </div>
           {(rules.ema20GapBarFilter ?? 'none') !== 'none' && (
             <div>
-              <p className="text-[10px] text-gray-400 mb-0.5 uppercase tracking-wide font-medium">Gap-Bar Threshold</p>
+              <p
+                className="text-[10px] text-gray-400 mb-0.5 uppercase tracking-wide font-medium cursor-help"
+                title="Fraction of bars required to be gap bars, 0–1. Default 0.5."
+              >
+                Gap-Bar Threshold
+              </p>
               <input
                 type="number" step={0.05} min={0} max={1}
                 value={rules.ema20GapBarThreshold ?? 0.5}
@@ -412,7 +535,12 @@ function RegimeEditor({ regime, rules, onChange }: RegimeEditorProps) {
           )}
 
           <div>
-            <p className="text-[10px] text-gray-400 mb-0.5 uppercase tracking-wide font-medium">EMA20 Bias</p>
+            <p
+              className="text-[10px] text-gray-400 mb-0.5 uppercase tracking-wide font-medium cursor-help"
+              title="Fraction of closes above the EMA20 over the same 'EMA20 Interaction' lookback ('always-in' bias), automatically flipped for shorts so this always means 'is price staying on my trade's side of the average.' 'Sustained Bias' requires at least X (bias holding steady). 'Weak Bias' requires at most X (choppier back-and-forth around the average)."
+            >
+              EMA20 Bias
+            </p>
             <select
               value={rules.ema20BiasFilter ?? 'none'}
               onChange={e => up({ ema20BiasFilter: e.target.value as RegimeRules['ema20BiasFilter'] })}
@@ -425,11 +553,137 @@ function RegimeEditor({ regime, rules, onChange }: RegimeEditorProps) {
           </div>
           {(rules.ema20BiasFilter ?? 'none') !== 'none' && (
             <div>
-              <p className="text-[10px] text-gray-400 mb-0.5 uppercase tracking-wide font-medium">Bias Threshold</p>
+              <p
+                className="text-[10px] text-gray-400 mb-0.5 uppercase tracking-wide font-medium cursor-help"
+                title="Fraction of closes required on the trade's side of the EMA20, 0–1. Default 0.5."
+              >
+                Bias Threshold
+              </p>
               <input
                 type="number" step={0.05} min={0} max={1}
                 value={rules.ema20BiasThreshold ?? 0.5}
                 onChange={e => up({ ema20BiasThreshold: Number(e.target.value) })}
+                className="w-full px-1.5 py-1 text-[11px] border rounded text-center"
+              />
+            </div>
+          )}
+        </div>
+      </div>
+
+      {/* Pivot sequence history + inter-pivot distance */}
+      <div>
+        <p className="text-[10px] text-gray-400 mb-1 uppercase tracking-wide font-medium">
+          Pivot Sequence History (last 4)
+        </p>
+        <div className="grid grid-cols-2 gap-2">
+          <div>
+            <p
+              className="text-[10px] text-gray-400 mb-0.5 uppercase tracking-wide font-medium cursor-help"
+              title="Matches the last 4 bearish-pivot trend labels (swing highs: HH/LH), oldest to newest, against a whitelist of allowed 4-in-a-row patterns. With fewer than 4 pivots recorded yet, this filter passes through."
+            >
+              High Sequence
+            </p>
+            <select
+              value={rules.highSeqFilter ?? 'none'}
+              onChange={e => up({ highSeqFilter: e.target.value as RegimeRules['highSeqFilter'] })}
+              className="w-full px-1.5 py-1 text-[11px] border rounded"
+            >
+              <option value="none">None</option>
+              <option value="custom">Custom (pick patterns)</option>
+            </select>
+          </div>
+          <div>
+            <p
+              className="text-[10px] text-gray-400 mb-0.5 uppercase tracking-wide font-medium cursor-help"
+              title="Matches the last 4 bullish-pivot trend labels (swing lows: HL/LL), oldest to newest, against a whitelist of allowed 4-in-a-row patterns. With fewer than 4 pivots recorded yet, this filter passes through."
+            >
+              Low Sequence
+            </p>
+            <select
+              value={rules.lowSeqFilter ?? 'none'}
+              onChange={e => up({ lowSeqFilter: e.target.value as RegimeRules['lowSeqFilter'] })}
+              className="w-full px-1.5 py-1 text-[11px] border rounded"
+            >
+              <option value="none">None</option>
+              <option value="custom">Custom (pick patterns)</option>
+            </select>
+          </div>
+          {(rules.highSeqFilter ?? 'none') === 'custom' && (
+            <div className="col-span-2">
+              <p className="text-[9px] text-gray-400 mb-1">Select allowed high-sequence patterns:</p>
+              <div className="grid grid-cols-4 gap-1">
+                {HIGH_SEQ_PATTERNS.map(p => {
+                  const active = (rules.highSeqPatterns ?? []).includes(p);
+                  return (
+                    <button
+                      key={p}
+                      onClick={() => up({
+                        highSeqPatterns: active
+                          ? (rules.highSeqPatterns ?? []).filter(x => x !== p)
+                          : [...(rules.highSeqPatterns ?? []), p],
+                      })}
+                      className={`px-1 py-0.5 text-[10px] rounded border font-medium ${active ? 'bg-indigo-600 text-white border-indigo-600' : 'bg-gray-50 text-gray-500 border-gray-300 hover:bg-gray-100'}`}
+                    >
+                      {p}
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+          )}
+          {(rules.lowSeqFilter ?? 'none') === 'custom' && (
+            <div className="col-span-2">
+              <p className="text-[9px] text-gray-400 mb-1">Select allowed low-sequence patterns:</p>
+              <div className="grid grid-cols-4 gap-1">
+                {LOW_SEQ_PATTERNS.map(p => {
+                  const active = (rules.lowSeqPatterns ?? []).includes(p);
+                  return (
+                    <button
+                      key={p}
+                      onClick={() => up({
+                        lowSeqPatterns: active
+                          ? (rules.lowSeqPatterns ?? []).filter(x => x !== p)
+                          : [...(rules.lowSeqPatterns ?? []), p],
+                      })}
+                      className={`px-1 py-0.5 text-[10px] rounded border font-medium ${active ? 'bg-indigo-600 text-white border-indigo-600' : 'bg-gray-50 text-gray-500 border-gray-300 hover:bg-gray-100'}`}
+                    >
+                      {p}
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+          )}
+
+          <div>
+            <p
+              className="text-[10px] text-gray-400 mb-0.5 uppercase tracking-wide font-medium cursor-help"
+              title="Average bar-count gap between consecutive pivots across both the high and low sequences — a trend-pace check. 'Fast' requires the average gap to stay at or below the threshold (pivots forming quickly — accelerating/choppy). 'Slow' requires it to be at or above (pivots spaced out — a slower, more mature trend)."
+            >
+              Pivot Gap (bars)
+            </p>
+            <select
+              value={rules.pivotGapFilter ?? 'none'}
+              onChange={e => up({ pivotGapFilter: e.target.value as RegimeRules['pivotGapFilter'] })}
+              className="w-full px-1.5 py-1 text-[11px] border rounded"
+            >
+              <option value="none">None</option>
+              <option value="max">≤ X bars (Fast)</option>
+              <option value="min">≥ X bars (Slow)</option>
+            </select>
+          </div>
+          {(rules.pivotGapFilter ?? 'none') !== 'none' && (
+            <div>
+              <p
+                className="text-[10px] text-gray-400 mb-0.5 uppercase tracking-wide font-medium cursor-help"
+                title="Bar-count gap cutoff between consecutive pivots. Default 5."
+              >
+                Gap Threshold (bars)
+              </p>
+              <input
+                type="number" step={1} min={0}
+                value={rules.pivotGapThreshold ?? 5}
+                onChange={e => up({ pivotGapThreshold: Number(e.target.value) })}
                 className="w-full px-1.5 py-1 text-[11px] border rounded text-center"
               />
             </div>

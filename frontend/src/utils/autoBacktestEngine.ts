@@ -18,7 +18,20 @@ import {
   calculateBarBreaks,
   calculateEMASlope,
   calculateEMAInteraction,
+  getPivotSequenceStats,
+  averagePivotGapBars,
 } from './pivotAnalysis';
+
+// Enumerates every length-`length` combination of the two labels, dash-joined
+// (e.g. generateBinaryPatterns('HH','LH') -> 16 strings like 'HH-HH-HH-HH').
+// Used by the UI to render a fixed checklist of all possible pivot sequences.
+export function generateBinaryPatterns(labelA: string, labelB: string, length = 4): string[] {
+  let patterns = [''];
+  for (let i = 0; i < length; i++) {
+    patterns = patterns.flatMap(p => [labelA, labelB].map(l => p ? `${p}-${l}` : l));
+  }
+  return patterns;
+}
 
 // ─── Per-regime rules ─────────────────────────────────────────────────────────
 
@@ -36,6 +49,20 @@ export interface RegimeRules {
 
   // Pivot sequence filter
   ltPivotSequence: 'any' | 'HH-HL' | 'LH-HL' | 'HH-LL' | 'LH-LL';
+
+  // High/low pivot-sequence filter — matches the last 4 same-type pivot trend labels
+  // (bearish pivots for highs: HH/LH; bullish pivots for lows: HL/LL) against a whitelist
+  // of allowed 4-length patterns. Requires 4 pivots of that type to be present; with fewer,
+  // passes through (same undefined-passthrough convention as the other quality filters).
+  highSeqFilter?: 'none' | 'custom';
+  highSeqPatterns?: string[]; // e.g. ['HH-HH-HH-HH', 'LH-HH-HH-HH']
+  lowSeqFilter?: 'none' | 'custom';
+  lowSeqPatterns?: string[];
+
+  // Inter-pivot spacing filter — average bar-count gap between consecutive pivots across
+  // both the high and low sequences (pace of trend/pivot formation).
+  pivotGapFilter?: 'none' | 'min' | 'max';
+  pivotGapThreshold?: number; // bars, default 5
 
   // MA filter
   maFilter: 'none' | 'above_ema21' | 'on_or_above_ema21' | 'above_ema60';
@@ -235,11 +262,11 @@ export const defaultAutoBacktestConfig: AutoBacktestConfig = {
   enabled: false,
   skipIfPositionOpen: true,
   tradeStartTime: '09:15',
-  tradeEndTime: '14:30',
+  tradeEndTime: '14:45',
   useAutoQty: true,
   riskPerTrade: 10000,
   minQuantity: 1,
-  autoSquareOff: false,
+  autoSquareOff: true,
   squareOffTime: '15:10',
   slTpFillMode: 'exact',
   barOverlapLookback: 8,
@@ -387,6 +414,9 @@ export interface EntryMetricsSnapshot {
   ema20GapBarRatio?: number;
   ema20CloseAboveRatio?: number;
   ema20InteractionWindow?: number;
+  pivotHighSeq?: string[];
+  pivotLowSeq?: string[];
+  pivotGapAvgBars?: number;
 }
 
 export interface AutoSignal {
@@ -437,6 +467,7 @@ export function evaluateAutoSignals(
   const currentPivot = pivots.find(p => p.time === currentTs) ?? null;
   const currentAbMarker = alBrooks.find(m => m.time === currentTs) ?? null;
   const pivotSeq = getPivotSeq(pivots);
+  const pivotSeqStats = getPivotSequenceStats(pivots, 4);
 
   // Instrumentation snapshot — computed once per bar, used both for filter gating below
   // and (via the returned AutoSignal.entryMetrics) for stamping the resulting Trade
@@ -462,6 +493,9 @@ export function evaluateAutoSignals(
     ema20GapBarRatio: gapBarRatio,
     ema20CloseAboveRatio: closeAboveRatio,
     ema20InteractionWindow,
+    pivotHighSeq: pivotSeqStats.highSeq,
+    pivotLowSeq: pivotSeqStats.lowSeq,
+    pivotGapAvgBars: averagePivotGapBars(pivotSeqStats),
   };
 
   if (regimeRules.direction !== 'SHORT_ONLY') {
@@ -534,6 +568,9 @@ function evalLong(
   if (!passesEmaSlope(rules.ema50SlopeFilter, rules.ema50SlopeThreshold, entryMetrics.ema50Slope, true)) return null;
   if (!passesEma20GapBar(rules, entryMetrics.ema20GapBarRatio)) return null;
   if (!passesEma20Bias(rules, entryMetrics.ema20CloseAboveRatio, true)) return null;
+  if (!passesSeqFilter(rules.highSeqFilter, rules.highSeqPatterns, entryMetrics.pivotHighSeq ?? [])) return null;
+  if (!passesSeqFilter(rules.lowSeqFilter, rules.lowSeqPatterns, entryMetrics.pivotLowSeq ?? [])) return null;
+  if (!passesPivotGap(rules, entryMetrics.pivotGapAvgBars)) return null;
 
   const sl = slLong(rules, entry, pivotForSl, atr);
   if (sl <= 0 || sl >= entry) return null;
@@ -607,6 +644,9 @@ function evalShort(
   if (!passesEmaSlope(rules.ema50SlopeFilter, rules.ema50SlopeThreshold, entryMetrics.ema50Slope, false)) return null;
   if (!passesEma20GapBar(rules, entryMetrics.ema20GapBarRatio)) return null;
   if (!passesEma20Bias(rules, entryMetrics.ema20CloseAboveRatio, false)) return null;
+  if (!passesSeqFilter(rules.highSeqFilter, rules.highSeqPatterns, entryMetrics.pivotHighSeq ?? [])) return null;
+  if (!passesSeqFilter(rules.lowSeqFilter, rules.lowSeqPatterns, entryMetrics.pivotLowSeq ?? [])) return null;
+  if (!passesPivotGap(rules, entryMetrics.pivotGapAvgBars)) return null;
 
   const sl = slShort(rules, entry, pivotForSl, atr);
   if (sl <= 0 || sl <= entry) return null;
@@ -682,6 +722,23 @@ function passesBarBreak(
   const threshold = rules.barBreakThreshold ?? 5;
   if (filter === 'min') return alignedCount >= threshold;
   if (filter === 'max') return alignedCount <= threshold;
+  return true;
+}
+
+function passesSeqFilter(filter: 'none' | 'custom' | undefined, patterns: string[] | undefined, seq: string[]): boolean {
+  const mode = filter ?? 'none';
+  if (mode === 'none') return true;
+  if (seq.length < 4) return true; // not enough pivot history yet — pass through
+  if (!patterns || patterns.length === 0) return true; // nothing selected — no-op
+  return patterns.includes(seq.join('-'));
+}
+
+function passesPivotGap(rules: RegimeRules, gapAvg: number | undefined): boolean {
+  const filter = rules.pivotGapFilter ?? 'none';
+  if (filter === 'none' || gapAvg === undefined) return true;
+  const threshold = rules.pivotGapThreshold ?? 5;
+  if (filter === 'min') return gapAvg >= threshold;
+  if (filter === 'max') return gapAvg <= threshold;
   return true;
 }
 

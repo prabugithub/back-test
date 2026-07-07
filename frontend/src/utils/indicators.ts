@@ -140,6 +140,7 @@ export interface PivotPoint {
   price: number;
   slDistance: number;
   trendLabel?: 'HH' | 'HL' | 'LH' | 'LL';
+  barIndex: number; // index into the candles array this pivot fired on — enables O(1) bar-distance math
 }
 
 /**
@@ -222,6 +223,7 @@ export function calculatePivotPoints(candles: Candle[]): PivotPoint[] {
         price: current.low,
         slDistance: slDistance,
         trendLabel: label,
+        barIndex: i,
       });
     }
 
@@ -276,6 +278,7 @@ export function calculatePivotPoints(candles: Candle[]): PivotPoint[] {
         price: current.high,
         slDistance: slDistance,
         trendLabel: label,
+        barIndex: i,
       });
     }
   }
