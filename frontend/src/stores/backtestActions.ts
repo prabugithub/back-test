@@ -119,7 +119,7 @@ export function createBacktestActions(set: StoreSet, get: StoreGet) {
           Math.abs(position.quantity),
           undefined,
           undefined,
-          undefined,
+          pendingExitRequest.price,
           pendingExitRequest.type,
           journal
         );

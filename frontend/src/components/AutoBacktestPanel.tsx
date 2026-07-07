@@ -1,5 +1,6 @@
 import { useMemo, useState } from 'react';
-import { X, Zap, TrendingUp, TrendingDown, Minus, RefreshCw, BarChart2 } from 'lucide-react';
+import { createPortal } from 'react-dom';
+import { ArrowLeft, Zap, TrendingUp, TrendingDown, Minus, RefreshCw, BarChart2 } from 'lucide-react';
 import { useSessionStore } from '../stores/sessionStore';
 import { EntryMetricsDashboard } from './EntryMetricsDashboard';
 import {
@@ -227,6 +228,29 @@ function RegimeEditor({ regime, rules, onChange }: RegimeEditorProps) {
             </div>
           </div>
         )}
+        <div>
+          <p className="text-[10px] text-gray-400 mb-0.5 uppercase tracking-wide font-medium">Efficiency Ratio</p>
+          <select
+            value={rules.efficiencyRatioFilter ?? 'none'}
+            onChange={e => up({ efficiencyRatioFilter: e.target.value as RegimeRules['efficiencyRatioFilter'] })}
+            className="w-full px-1.5 py-1 text-[11px] border rounded"
+          >
+            <option value="none">None</option>
+            <option value="min">≥ X (Trending)</option>
+            <option value="max">≤ X (Choppy)</option>
+          </select>
+        </div>
+        {(rules.efficiencyRatioFilter ?? 'none') !== 'none' && (
+          <div>
+            <p className="text-[10px] text-gray-400 mb-0.5 uppercase tracking-wide font-medium">ER Threshold</p>
+            <input
+              type="number" step={0.05} min={0} max={1}
+              value={rules.efficiencyRatioThreshold ?? 0.3}
+              onChange={e => up({ efficiencyRatioThreshold: Number(e.target.value) })}
+              className="w-full px-1.5 py-1 text-[11px] border rounded text-center"
+            />
+          </div>
+        )}
       </div>
 
       {/* Risk */}
@@ -322,20 +346,36 @@ export function AutoBacktestPanel({ onClose }: AutoBacktestPanelProps) {
 
   const regimes: RegimeKey[] = ['uptrend', 'downtrend', 'range', 'reversal'];
 
-  return (
-    <div className="absolute bottom-full right-0 mb-2 bg-white border-2 border-indigo-300 rounded-lg shadow-2xl z-50 w-[420px] max-h-[88vh] overflow-y-auto">
+  return createPortal(
+    <div className="fixed inset-0 z-[110] bg-slate-50 flex flex-col overflow-hidden font-sans">
       {/* Header */}
-      <div className="sticky top-0 bg-white border-b border-indigo-100 px-4 pt-3 pb-2 z-10">
-        <div className="flex items-center justify-between mb-2">
-          <div className="flex items-center gap-2">
-            <Zap size={15} className="text-indigo-600" />
-            <h3 className="font-bold text-sm text-gray-800">Auto Backtesting Engine</h3>
+      <div className="flex items-center justify-between px-6 py-4 bg-white border-b border-slate-200 shrink-0">
+        <div className="flex items-center gap-4">
+          <button
+            onClick={onClose}
+            className="flex items-center gap-2 text-sm font-semibold text-slate-500 hover:text-slate-800 transition-colors"
+          >
+            <ArrowLeft size={18} />
+            Back to Chart
+          </button>
+          <div className="w-px h-6 bg-slate-200" />
+          <div className="bg-indigo-600 p-2 rounded-xl text-white shadow-lg shadow-indigo-200">
+            <Zap size={20} />
           </div>
-          <button onClick={onClose} className="text-gray-400 hover:text-gray-600"><X size={15} /></button>
+          <div>
+            <h2 className="text-xl font-bold text-slate-800 tracking-tight">Auto Backtesting Engine</h2>
+            <p className="text-slate-500 text-xs font-medium">Configure regime rules and run instant batch backtests</p>
+          </div>
         </div>
 
-        {/* Enable + global controls */}
-        <div className="flex items-center gap-3 flex-wrap">
+        {/* Enable + quick controls */}
+        <div className="flex items-center gap-4">
+          <label className="flex items-center gap-1.5 cursor-pointer select-none">
+            <input type="checkbox" checked={config.skipIfPositionOpen}
+              onChange={e => updateGlobal({ skipIfPositionOpen: e.target.checked })}
+              className="w-3.5 h-3.5" />
+            <span className="text-xs text-slate-600 font-medium">Skip if open</span>
+          </label>
           <label className="flex items-center gap-2 cursor-pointer select-none">
             <div
               onClick={() => updateGlobal({ enabled: !config.enabled })}
@@ -347,177 +387,174 @@ export function AutoBacktestPanel({ onClose }: AutoBacktestPanelProps) {
               {config.enabled ? 'Running' : 'Off'}
             </span>
           </label>
-
-          <label className="flex items-center gap-1 cursor-pointer select-none ml-auto">
-            <input type="checkbox" checked={config.skipIfPositionOpen}
-              onChange={e => updateGlobal({ skipIfPositionOpen: e.target.checked })}
-              className="w-3 h-3" />
-            <span className="text-[10px] text-gray-600">Skip if open</span>
-          </label>
-        </div>
-
-        {/* Trading time window */}
-        <div className="flex items-center gap-2 mt-2">
-          <span className="text-[10px] text-gray-500 w-14 shrink-0">Window</span>
-          <input
-            type="time"
-            value={config.tradeStartTime}
-            onChange={e => updateGlobal({ tradeStartTime: e.target.value })}
-            className="px-1.5 py-0.5 text-[11px] border rounded w-24"
-          />
-          <span className="text-[10px] text-gray-400">→</span>
-          <input
-            type="time"
-            value={config.tradeEndTime}
-            onChange={e => updateGlobal({ tradeEndTime: e.target.value })}
-            className="px-1.5 py-0.5 text-[11px] border rounded w-24"
-          />
-          <span className="text-[10px] text-gray-400 ml-1">IST</span>
-        </div>
-
-        {/* Auto quantity */}
-        <div className="flex items-center gap-2 mt-1.5 flex-wrap">
-          <span className="text-[10px] text-gray-500 w-14 shrink-0">Qty</span>
-          <label className="flex items-center gap-1 cursor-pointer select-none">
-            <input
-              type="checkbox"
-              checked={config.useAutoQty}
-              onChange={e => updateGlobal({ useAutoQty: e.target.checked })}
-              className="w-3 h-3"
-            />
-            <span className="text-[10px] text-gray-600">Auto</span>
-          </label>
-          {config.useAutoQty ? (
-            <>
-              <div className="flex items-center gap-1">
-                <span className="text-[10px] text-gray-500">₹</span>
-                <input
-                  type="number" step={1000} min={100} value={config.riskPerTrade}
-                  onChange={e => updateGlobal({ riskPerTrade: Number(e.target.value) })}
-                  className="w-20 px-1.5 py-0.5 text-[11px] border rounded text-right"
-                  title="Risk per trade (₹)"
-                />
-              </div>
-              <div className="flex items-center gap-1">
-                <span className="text-[10px] text-gray-500">Min:</span>
-                <input
-                  type="number" min={1} value={config.minQuantity}
-                  onChange={e => updateGlobal({ minQuantity: Number(e.target.value) })}
-                  className="w-12 px-1.5 py-0.5 text-[11px] border rounded text-center"
-                  title="Minimum quantity — skip trade if auto-qty is below this"
-                />
-              </div>
-            </>
-          ) : (
-            <span className="text-[10px] text-gray-400">Using manual qty from trade panel</span>
-          )}
-        </div>
-
-        {/* Auto square-off */}
-        <div className="flex items-center gap-2 mt-1.5">
-          <span className="text-[10px] text-gray-500 w-14 shrink-0">Square-off</span>
-          <label className="flex items-center gap-1 cursor-pointer select-none">
-            <input
-              type="checkbox"
-              checked={config.autoSquareOff}
-              onChange={e => updateGlobal({ autoSquareOff: e.target.checked })}
-              className="w-3 h-3"
-            />
-            <span className="text-[10px] text-gray-600">Auto</span>
-          </label>
-          {config.autoSquareOff && (
-            <input
-              type="time"
-              value={config.squareOffTime}
-              onChange={e => updateGlobal({ squareOffTime: e.target.value })}
-              className="px-1.5 py-0.5 text-[11px] border rounded w-24"
-              title="Close any open position at this IST time"
-            />
-          )}
-          {config.autoSquareOff && (
-            <span className="text-[10px] text-orange-600 font-medium">IST</span>
-          )}
-        </div>
-
-        {/* Bar overlap instrumentation lookback */}
-        <div className="flex items-center gap-2 mt-1.5">
-          <span className="text-[10px] text-gray-500 w-14 shrink-0">Overlap</span>
-          <input
-            type="number" min={2} max={20} value={config.barOverlapLookback}
-            onChange={e => updateGlobal({ barOverlapLookback: Number(e.target.value) })}
-            className="w-12 px-1.5 py-0.5 text-[11px] border rounded text-center"
-            title="Bars looked back for bar-overlap instrumentation on trade records"
-          />
-        </div>
-
-        {/* Bull/bear bar range (trend strength) instrumentation lookback */}
-        <div className="flex items-center gap-2 mt-1.5">
-          <span className="text-[10px] text-gray-500 w-14 shrink-0">Bar Range</span>
-          <input
-            type="number" min={5} max={50} value={config.barRangeLookback}
-            onChange={e => updateGlobal({ barRangeLookback: Number(e.target.value) })}
-            className="w-12 px-1.5 py-0.5 text-[11px] border rounded text-center"
-            title="Bars looked back for bull/bear bar-range (trend strength) instrumentation on trade records"
-          />
-        </div>
-
-        {/* Kaufman Efficiency Ratio instrumentation lookback */}
-        <div className="flex items-center gap-2 mt-1.5">
-          <span className="text-[10px] text-gray-500 w-14 shrink-0">Efficiency</span>
-          <input
-            type="number" min={3} max={30} value={config.efficiencyRatioLookback}
-            onChange={e => updateGlobal({ efficiencyRatioLookback: Number(e.target.value) })}
-            className="w-12 px-1.5 py-0.5 text-[11px] border rounded text-center"
-            title="Bars looked back for Kaufman Efficiency Ratio instrumentation on trade records"
-          />
-        </div>
-
-        {/* High/low break count instrumentation lookback */}
-        <div className="flex items-center gap-2 mt-1.5">
-          <span className="text-[10px] text-gray-500 w-14 shrink-0">Breaks</span>
-          <input
-            type="number" min={5} max={50} value={config.barBreakLookback}
-            onChange={e => updateGlobal({ barBreakLookback: Number(e.target.value) })}
-            className="w-12 px-1.5 py-0.5 text-[11px] border rounded text-center"
-            title="Bars looked back for high/low break-count instrumentation on trade records"
-          />
-        </div>
-
-        {/* EMA slope instrumentation lookbacks */}
-        <div className="flex items-center gap-2 mt-1.5">
-          <span className="text-[10px] text-gray-500 w-14 shrink-0">EMA21</span>
-          <input
-            type="number" min={3} max={30} value={config.ema21SlopeLookback}
-            onChange={e => updateGlobal({ ema21SlopeLookback: Number(e.target.value) })}
-            className="w-12 px-1.5 py-0.5 text-[11px] border rounded text-center"
-            title="Bars looked back for EMA21 slope instrumentation on trade records"
-          />
-        </div>
-        <div className="flex items-center gap-2 mt-1.5">
-          <span className="text-[10px] text-gray-500 w-14 shrink-0">EMA50</span>
-          <input
-            type="number" min={3} max={40} value={config.ema50SlopeLookback}
-            onChange={e => updateGlobal({ ema50SlopeLookback: Number(e.target.value) })}
-            className="w-12 px-1.5 py-0.5 text-[11px] border rounded text-center"
-            title="Bars looked back for EMA50 slope instrumentation on trade records"
-          />
-        </div>
-
-        {/* EMA20 interaction (gap-bar / always-in) instrumentation lookback */}
-        <div className="flex items-center gap-2 mt-1.5">
-          <span className="text-[10px] text-gray-500 w-14 shrink-0">EMA20 Int</span>
-          <input
-            type="number" min={5} max={50} value={config.emaInteractionLookback}
-            onChange={e => updateGlobal({ emaInteractionLookback: Number(e.target.value) })}
-            className="w-12 px-1.5 py-0.5 text-[11px] border rounded text-center"
-            title="Bars looked back for EMA20 gap-bar / always-in interaction instrumentation on trade records"
-          />
         </div>
       </div>
 
-      <div className="px-4 pb-4">
+      {/* Main Content */}
+      <div className="flex-1 flex overflow-hidden">
+        {/* Settings Sidebar */}
+        <div className="w-80 bg-white border-r border-slate-200 p-6 flex flex-col gap-5 overflow-y-auto shrink-0">
+          <div>
+            <p className="text-xs font-bold text-slate-400 uppercase mb-2 tracking-tighter">Trading Window (IST)</p>
+            <div className="flex items-center gap-2">
+              <input
+                type="time"
+                value={config.tradeStartTime}
+                onChange={e => updateGlobal({ tradeStartTime: e.target.value })}
+                className="flex-1 px-2 py-1.5 text-xs border rounded-lg"
+              />
+              <span className="text-xs text-gray-400">→</span>
+              <input
+                type="time"
+                value={config.tradeEndTime}
+                onChange={e => updateGlobal({ tradeEndTime: e.target.value })}
+                className="flex-1 px-2 py-1.5 text-xs border rounded-lg"
+              />
+            </div>
+          </div>
+
+          <div>
+            <p className="text-xs font-bold text-slate-400 uppercase mb-2 tracking-tighter">Quantity</p>
+            <label className="flex items-center gap-1.5 cursor-pointer select-none mb-1.5">
+              <input
+                type="checkbox"
+                checked={config.useAutoQty}
+                onChange={e => updateGlobal({ useAutoQty: e.target.checked })}
+                className="w-3.5 h-3.5"
+              />
+              <span className="text-xs text-gray-600 font-medium">Auto (risk-based)</span>
+            </label>
+            {config.useAutoQty ? (
+              <div className="flex items-center gap-2">
+                <div className="flex items-center gap-1 flex-1">
+                  <span className="text-[10px] text-gray-500">₹ Risk</span>
+                  <input
+                    type="number" step={1000} min={100} value={config.riskPerTrade}
+                    onChange={e => updateGlobal({ riskPerTrade: Number(e.target.value) })}
+                    className="w-full px-1.5 py-1 text-xs border rounded text-right"
+                    title="Risk per trade (₹)"
+                  />
+                </div>
+                <div className="flex items-center gap-1">
+                  <span className="text-[10px] text-gray-500">Min</span>
+                  <input
+                    type="number" min={1} value={config.minQuantity}
+                    onChange={e => updateGlobal({ minQuantity: Number(e.target.value) })}
+                    className="w-14 px-1.5 py-1 text-xs border rounded text-center"
+                    title="Minimum quantity — skip trade if auto-qty is below this"
+                  />
+                </div>
+              </div>
+            ) : (
+              <span className="text-[10px] text-gray-400">Using manual qty from trade panel</span>
+            )}
+          </div>
+
+          <div>
+            <p className="text-xs font-bold text-slate-400 uppercase mb-2 tracking-tighter">Square-off</p>
+            <label className="flex items-center gap-1.5 cursor-pointer select-none mb-1.5">
+              <input
+                type="checkbox"
+                checked={config.autoSquareOff}
+                onChange={e => updateGlobal({ autoSquareOff: e.target.checked })}
+                className="w-3.5 h-3.5"
+              />
+              <span className="text-xs text-gray-600 font-medium">Auto square-off</span>
+            </label>
+            {config.autoSquareOff && (
+              <div className="flex items-center gap-2">
+                <input
+                  type="time"
+                  value={config.squareOffTime}
+                  onChange={e => updateGlobal({ squareOffTime: e.target.value })}
+                  className="flex-1 px-2 py-1.5 text-xs border rounded-lg"
+                  title="Close any open position at this IST time"
+                />
+                <span className="text-[10px] text-orange-600 font-medium">IST</span>
+              </div>
+            )}
+          </div>
+
+          <div>
+            <p className="text-xs font-bold text-slate-400 uppercase mb-2 tracking-tighter">SL/TP Fill Price</p>
+            <select
+              value={config.slTpFillMode ?? 'exact'}
+              onChange={e => updateGlobal({ slTpFillMode: e.target.value as AutoBacktestConfig['slTpFillMode'] })}
+              className="w-full px-2 py-1.5 text-xs border rounded-lg"
+              title="Exact: fill at the sl/tp price the instant intrabar high/low touches it. Close: legacy — only fire once candle close crosses the level."
+            >
+              <option value="exact">Exact touch (no slippage)</option>
+              <option value="close">Close cross (legacy)</option>
+            </select>
+          </div>
+
+          <div>
+            <p className="text-xs font-bold text-slate-400 uppercase mb-2 tracking-tighter">Instrumentation Lookbacks</p>
+            <div className="grid grid-cols-2 gap-x-3 gap-y-2">
+              <div className="flex items-center justify-between gap-1">
+                <span className="text-[10px] text-gray-500" title="Bars looked back for bar-overlap instrumentation on trade records">Overlap</span>
+                <input
+                  type="number" min={2} max={20} value={config.barOverlapLookback}
+                  onChange={e => updateGlobal({ barOverlapLookback: Number(e.target.value) })}
+                  className="w-12 px-1.5 py-1 text-xs border rounded text-center"
+                />
+              </div>
+              <div className="flex items-center justify-between gap-1">
+                <span className="text-[10px] text-gray-500" title="Bars looked back for bull/bear bar-range (trend strength) instrumentation on trade records">Bar Range</span>
+                <input
+                  type="number" min={5} max={50} value={config.barRangeLookback}
+                  onChange={e => updateGlobal({ barRangeLookback: Number(e.target.value) })}
+                  className="w-12 px-1.5 py-1 text-xs border rounded text-center"
+                />
+              </div>
+              <div className="flex items-center justify-between gap-1">
+                <span className="text-[10px] text-gray-500" title="Bars looked back for Kaufman Efficiency Ratio instrumentation on trade records">Efficiency</span>
+                <input
+                  type="number" min={3} max={30} value={config.efficiencyRatioLookback}
+                  onChange={e => updateGlobal({ efficiencyRatioLookback: Number(e.target.value) })}
+                  className="w-12 px-1.5 py-1 text-xs border rounded text-center"
+                />
+              </div>
+              <div className="flex items-center justify-between gap-1">
+                <span className="text-[10px] text-gray-500" title="Bars looked back for high/low break-count instrumentation on trade records">Breaks</span>
+                <input
+                  type="number" min={5} max={50} value={config.barBreakLookback}
+                  onChange={e => updateGlobal({ barBreakLookback: Number(e.target.value) })}
+                  className="w-12 px-1.5 py-1 text-xs border rounded text-center"
+                />
+              </div>
+              <div className="flex items-center justify-between gap-1">
+                <span className="text-[10px] text-gray-500" title="Bars looked back for EMA21 slope instrumentation on trade records">EMA21</span>
+                <input
+                  type="number" min={3} max={30} value={config.ema21SlopeLookback}
+                  onChange={e => updateGlobal({ ema21SlopeLookback: Number(e.target.value) })}
+                  className="w-12 px-1.5 py-1 text-xs border rounded text-center"
+                />
+              </div>
+              <div className="flex items-center justify-between gap-1">
+                <span className="text-[10px] text-gray-500" title="Bars looked back for EMA50 slope instrumentation on trade records">EMA50</span>
+                <input
+                  type="number" min={3} max={40} value={config.ema50SlopeLookback}
+                  onChange={e => updateGlobal({ ema50SlopeLookback: Number(e.target.value) })}
+                  className="w-12 px-1.5 py-1 text-xs border rounded text-center"
+                />
+              </div>
+              <div className="flex items-center justify-between gap-1 col-span-2">
+                <span className="text-[10px] text-gray-500" title="Bars looked back for EMA20 gap-bar / always-in interaction instrumentation on trade records">EMA20 Interaction</span>
+                <input
+                  type="number" min={5} max={50} value={config.emaInteractionLookback}
+                  onChange={e => updateGlobal({ emaInteractionLookback: Number(e.target.value) })}
+                  className="w-12 px-1.5 py-1 text-xs border rounded text-center"
+                />
+              </div>
+            </div>
+          </div>
+        </div>
+
+        {/* Regimes / Results main pane */}
+        <div className="flex-1 overflow-y-auto p-6 max-w-4xl">
         {/* Current market state */}
-        <div className="mt-3 mb-3 p-2 rounded-lg bg-gray-50 border border-gray-200">
+        <div className="mb-3 p-2 rounded-lg bg-gray-50 border border-gray-200">
           <div className="flex items-center justify-between">
             <span className="text-[10px] text-gray-500 font-medium uppercase tracking-wide">Current Market State</span>
             <span className="text-[10px] text-gray-400">live</span>
@@ -689,7 +726,9 @@ export function AutoBacktestPanel({ onClose }: AutoBacktestPanelProps) {
             )}
           </div>
         )}
+        </div>
       </div>
-    </div>
+    </div>,
+    document.body
   );
 }

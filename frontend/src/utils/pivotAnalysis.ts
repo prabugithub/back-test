@@ -159,7 +159,11 @@ export function analyzeMarketStructure(candles: Candle[], pivots: PivotPoint[]):
         ltMarket = 'Bear-Reversal'; // Potential MTR
     }
 
-    // HT Structure Identification (Proxy using 60 EMA and longer lookback)
+    // HT Structure Identification — NOT a true higher-timeframe read. This is a longer-lookback
+    // EMA(60) slope proxy computed on the SAME base-timeframe `candles` array as ltMarket above (no
+    // resampling to a real higher timeframe exists). It also has no Range/Reversal branches (only
+    // Bull-Trend/Bear-Trend/Range), so in sustained trends it structurally tends to agree with
+    // ltMarket — don't assume LT/HT agreement or divergence here reflects independent confirmation.
     let htMarket = 'Range';
     if (htSlope > 0.02 && lastPrice > currentEma60) {
         htMarket = 'Bull-Trend';

@@ -55,7 +55,7 @@ export function runBatchSimulation(
     const barOverlapAvgAtEntry = averageBarOverlap(barOverlapAtEntry);
     const barRangeSamples = calculateBarRanges(candles, candleIndex, config.barRangeLookback ?? 20);
     const { barRangeAvg, bullBarRangeAvg, bearBarRangeAvg } = averageBarRanges(barRangeSamples);
-    const efficiencyRatioAtEntry = calculateEfficiencyRatio(candles, candleIndex, config.efficiencyRatioLookback ?? 10);
+    const efficiencyRatioAtEntry = signal.efficiencyRatioAtEntry ?? calculateEfficiencyRatio(candles, candleIndex, config.efficiencyRatioLookback ?? 10);
     const { highBreakCount, lowBreakCount, barsCompared } = calculateBarBreaks(candles, candleIndex, config.barBreakLookback ?? 20);
     const ema21SlopeAtEntry = calculateEMASlope(candles, candleIndex, 21, config.ema21SlopeLookback ?? 10);
     const ema50SlopeAtEntry = calculateEMASlope(candles, candleIndex, 50, config.ema50SlopeLookback ?? 20);
@@ -112,9 +112,9 @@ export function runBatchSimulation(
     };
   }
 
-  function exitPosition(candle: Candle, reason: 'SL' | 'TP' | 'TIME_OVER') {
+  function exitPosition(candle: Candle, reason: 'SL' | 'TP' | 'TIME_OVER', fillPrice?: number) {
     if (!position) return;
-    const exitPrice = candle.close;
+    const exitPrice = fillPrice ?? candle.close;
     const isLong = position.quantity > 0;
     const qty = Math.abs(position.quantity);
     const pnlPerShare = isLong
@@ -144,25 +144,45 @@ export function runBatchSimulation(
     }
     const candle = candles[i];
 
-    // ── 1. SL/TP check — exits when candle.close crosses the level ──────────
-    // Mirrors checkSLTPHits() backtest path (sharedActions.ts lines 168-188)
+    // ── 1. SL/TP check ───────────────────────────────────────────────────────
+    // 'exact' (default): fill at the sl/tp price itself the instant intrabar high/low touches it.
+    // 'close': legacy — mirrors checkSLTPHits() backtest path (sharedActions.ts), only fires when
+    //          candle.close crosses the level, filled at that close.
     if (position) {
       const isLong = position.quantity > 0;
       const sl = position.stopLoss ?? 0;
       const tp = position.target ?? 0;
-      const close = candle.close;
+      const fillMode = config.slTpFillMode ?? 'exact';
 
-      if (isLong) {
-        if (sl > 0 && close <= sl) {
-          exitPosition(candle, 'SL');
-        } else if (tp > 0 && close >= tp) {
-          exitPosition(candle, 'TP');
+      if (fillMode === 'exact') {
+        const { high, low } = candle;
+        if (isLong) {
+          if (sl > 0 && low <= sl) {
+            exitPosition(candle, 'SL', sl);
+          } else if (tp > 0 && high >= tp) {
+            exitPosition(candle, 'TP', tp);
+          }
+        } else {
+          if (sl > 0 && high >= sl) {
+            exitPosition(candle, 'SL', sl);
+          } else if (tp > 0 && low <= tp) {
+            exitPosition(candle, 'TP', tp);
+          }
         }
       } else {
-        if (sl > 0 && close >= sl) {
-          exitPosition(candle, 'SL');
-        } else if (tp > 0 && close <= tp) {
-          exitPosition(candle, 'TP');
+        const close = candle.close;
+        if (isLong) {
+          if (sl > 0 && close <= sl) {
+            exitPosition(candle, 'SL');
+          } else if (tp > 0 && close >= tp) {
+            exitPosition(candle, 'TP');
+          }
+        } else {
+          if (sl > 0 && close >= sl) {
+            exitPosition(candle, 'SL');
+          } else if (tp > 0 && close <= tp) {
+            exitPosition(candle, 'TP');
+          }
         }
       }
     }

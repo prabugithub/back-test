@@ -163,26 +163,26 @@ export function createSharedActions(set: StoreSet, get: StoreGet) {
       let dialogToTrigger: 'SL' | 'TP' | null = null;
       let autoExitTP = false;
       let autoExitSL = false;
-      const { autoExitSL: autoExitSLEnabled } = get();
+      let fillPriceForTrigger = 0;
+      const { autoExitSL: autoExitSLEnabled, autoBacktestConfig } = get();
+      const fillMode = autoBacktestConfig.slTpFillMode ?? 'exact';
 
-      if (isLong) {
-        if (sl > 0 && effectiveClose <= sl && !nextSlDialogShown) {
-          if (autoExitSLEnabled) autoExitSL = true;
-          else dialogToTrigger = 'SL';
-          nextSlDialogShown = true;
-        } else if (tp > 0 && effectiveClose >= tp && !nextTpDialogShown) {
-          dialogToTrigger = 'TP';
-          nextTpDialogShown = true;
-        }
-      } else {
-        if (sl > 0 && effectiveClose >= sl && !nextSlDialogShown) {
-          if (autoExitSLEnabled) autoExitSL = true;
-          else dialogToTrigger = 'SL';
-          nextSlDialogShown = true;
-        } else if (tp > 0 && effectiveClose <= tp && !nextTpDialogShown) {
-          dialogToTrigger = 'TP';
-          nextTpDialogShown = true;
-        }
+      const slFires = fillMode === 'exact'
+        ? (isLong ? (sl > 0 && effectiveLow <= sl) : (sl > 0 && effectiveHigh >= sl))
+        : (isLong ? (sl > 0 && effectiveClose <= sl) : (sl > 0 && effectiveClose >= sl));
+      const tpFires = fillMode === 'exact'
+        ? (isLong ? (tp > 0 && effectiveHigh >= tp) : (tp > 0 && effectiveLow <= tp))
+        : (isLong ? (tp > 0 && effectiveClose >= tp) : (tp > 0 && effectiveClose <= tp));
+
+      if (slFires && !nextSlDialogShown) {
+        if (autoExitSLEnabled) autoExitSL = true;
+        else dialogToTrigger = 'SL';
+        nextSlDialogShown = true;
+        fillPriceForTrigger = fillMode === 'exact' ? sl : effectiveClose;
+      } else if (tpFires && !nextTpDialogShown) {
+        dialogToTrigger = 'TP';
+        nextTpDialogShown = true;
+        fillPriceForTrigger = fillMode === 'exact' ? tp : effectiveClose;
       }
 
       const hasChanged =
@@ -207,19 +207,19 @@ export function createSharedActions(set: StoreSet, get: StoreGet) {
           useNotificationStore
             .getState()
             .notify(`Stop Loss Hit at ${sl.toFixed(2)}. Auto Exiting.`, 'warning');
-          get().executeTrade(isLong ? 'SELL' : 'BUY', Math.abs(position.quantity), undefined, undefined, undefined, 'SL');
+          get().executeTrade(isLong ? 'SELL' : 'BUY', Math.abs(position.quantity), undefined, undefined, fillPriceForTrigger, 'SL');
         } else if (autoExitTP) {
           set({ position: updatedPosition });
           useNotificationStore
             .getState()
             .notify(`Target Hit at ${tp.toFixed(2)}. Auto Exiting based on Risk settings.`, 'success');
-          get().executeTrade(isLong ? 'SELL' : 'BUY', Math.abs(position.quantity), undefined, undefined, undefined, 'TP');
+          get().executeTrade(isLong ? 'SELL' : 'BUY', Math.abs(position.quantity), undefined, undefined, fillPriceForTrigger, 'TP');
         } else if (dialogToTrigger) {
           set({
             isPlaying: false,
             pendingExitRequest: {
               type: dialogToTrigger,
-              price: dialogToTrigger === 'SL' ? sl : tp,
+              price: fillPriceForTrigger,
               spotPrice: close,
             },
             position: updatedPosition,
@@ -237,7 +237,8 @@ export function createSharedActions(set: StoreSet, get: StoreGet) {
       target?: number,
       priceOverride?: number,
       exitReason: 'SL' | 'TP' | 'MANUAL' | 'TIME_OVER' = 'MANUAL',
-      journal?: TradeJournal
+      journal?: TradeJournal,
+      entryMetricsOverride?: { efficiencyRatioAtEntry?: number }
     ) => {
       const { candles, currentIndex, trades, position, instrument, sessionConfig, isLiveMode, livePrice, autoBacktestConfig } = get();
       const currentCandle = candles[currentIndex];
@@ -305,7 +306,7 @@ export function createSharedActions(set: StoreSet, get: StoreGet) {
       const barOverlapAvgAtEntry = averageBarOverlap(barOverlapAtEntry);
       const barRangeSamples = calculateBarRanges(candles, currentIndex, autoBacktestConfig.barRangeLookback ?? 20);
       const { barRangeAvg, bullBarRangeAvg, bearBarRangeAvg } = averageBarRanges(barRangeSamples);
-      const efficiencyRatioAtEntry = calculateEfficiencyRatio(candles, currentIndex, autoBacktestConfig.efficiencyRatioLookback ?? 10);
+      const efficiencyRatioAtEntry = entryMetricsOverride?.efficiencyRatioAtEntry ?? calculateEfficiencyRatio(candles, currentIndex, autoBacktestConfig.efficiencyRatioLookback ?? 10);
       const { highBreakCount, lowBreakCount, barsCompared } = calculateBarBreaks(candles, currentIndex, autoBacktestConfig.barBreakLookback ?? 20);
       const ema21SlopeAtEntry = calculateEMASlope(candles, currentIndex, 21, autoBacktestConfig.ema21SlopeLookback ?? 10);
       const ema50SlopeAtEntry = calculateEMASlope(candles, currentIndex, 50, autoBacktestConfig.ema50SlopeLookback ?? 20);

@@ -8,7 +8,7 @@ import {
   calculateATR,
   type PivotPoint,
 } from './indicators';
-import { analyzeMarketStructure } from './pivotAnalysis';
+import { analyzeMarketStructure, calculateEfficiencyRatio } from './pivotAnalysis';
 
 // ─── Per-regime rules ─────────────────────────────────────────────────────────
 
@@ -35,6 +35,12 @@ export interface RegimeRules {
   // 'min': entry must be at least threshold ATRs from EMA21 (range/gap-opposite)
   atrDepthFilter?: 'none' | 'max' | 'min';
   atrDepthThreshold?: number;
+
+  // Kaufman Efficiency Ratio filter — [0,1] over efficiencyRatioLookback bars, near 1 = clean trend, near 0 = chop
+  // 'min': entry requires ER >= threshold (trend-following — avoid entering into chop)
+  // 'max': entry requires ER <= threshold (range/mean-reversion — avoid entering into a runaway trend)
+  efficiencyRatioFilter?: 'none' | 'min' | 'max';
+  efficiencyRatioThreshold?: number;
 
   // Higher timeframe structure required for this regime
   htStructureFilter: 'any' | 'bull_trend' | 'bear_trend';
@@ -64,6 +70,12 @@ export interface AutoBacktestConfig {
   // Intraday auto square-off
   autoSquareOff: boolean;  // close any open position at squareOffTime
   squareOffTime: string;   // "HH:MM" IST — default "15:10"
+
+  // SL/TP fill price mode — governs every backtest exit (manual + auto), not just auto-engine trades
+  // 'exact': fill at the sl/tp price itself the instant intrabar high/low touches it (default — no slippage)
+  // 'close': legacy — only fire once candle CLOSE crosses the level, filled at that close (can overshoot the
+  //          planned risk when a bar gaps through the level intrabar)
+  slTpFillMode?: 'exact' | 'close';
 
   // Bar overlap instrumentation — raw regime metric recorded on trade entries
   barOverlapLookback: number; // bars looked back for barOverlapAtEntry (default 8)
@@ -159,11 +171,12 @@ export const defaultAutoBacktestConfig: AutoBacktestConfig = {
   skipIfPositionOpen: true,
   tradeStartTime: '09:15',
   tradeEndTime: '14:30',
-  useAutoQty: false,
+  useAutoQty: true,
   riskPerTrade: 10000,
   minQuantity: 1,
   autoSquareOff: false,
   squareOffTime: '15:10',
+  slTpFillMode: 'exact',
   barOverlapLookback: 8,
   barRangeLookback: 20,
   efficiencyRatioLookback: 10,
@@ -285,6 +298,7 @@ export interface AutoSignal {
   ltMarket: string;
   htMarket: string;
   llhhPivot: string;
+  efficiencyRatioAtEntry?: number;
 }
 
 // ─── Main export ──────────────────────────────────────────────────────────────
@@ -322,14 +336,15 @@ export function evaluateAutoSignals(
   const currentPivot = pivots.find(p => p.time === currentTs) ?? null;
   const currentAbMarker = alBrooks.find(m => m.time === currentTs) ?? null;
   const pivotSeq = getPivotSeq(pivots);
+  const efficiencyRatioAtEntry = calculateEfficiencyRatio(candles, currentIndex, config.efficiencyRatioLookback ?? 10);
 
   if (regimeRules.direction !== 'SHORT_ONLY') {
-    const signal = evalLong(regimeRules, currentCandle, currentPivot, currentAbMarker, pivots, ema21, ema60, atr, currentIndex, candles, pivotSeq, ltMarket, htMarket, regime);
+    const signal = evalLong(regimeRules, currentCandle, currentPivot, currentAbMarker, pivots, ema21, ema60, atr, currentIndex, candles, pivotSeq, ltMarket, htMarket, regime, efficiencyRatioAtEntry);
     if (signal) return signal;
   }
 
   if (regimeRules.direction !== 'LONG_ONLY') {
-    const signal = evalShort(regimeRules, currentCandle, currentPivot, currentAbMarker, pivots, ema21, ema60, atr, currentIndex, candles, pivotSeq, ltMarket, htMarket, regime);
+    const signal = evalShort(regimeRules, currentCandle, currentPivot, currentAbMarker, pivots, ema21, ema60, atr, currentIndex, candles, pivotSeq, ltMarket, htMarket, regime, efficiencyRatioAtEntry);
     if (signal) return signal;
   }
 
@@ -352,7 +367,8 @@ function evalLong(
   pivotSeq: string,
   ltMarket: string,
   htMarket: string,
-  regime: RegimeKey
+  regime: RegimeKey,
+  efficiencyRatioAtEntry: number | undefined
 ): AutoSignal | null {
   const allowed = new Set<string>();
   if (rules.allowH1) allowed.add('H1');
@@ -384,6 +400,7 @@ function evalLong(
 
   const entry = candle.close;
   if (!passesAtrDepth(rules, entry, ema21, atr)) return null;
+  if (!passesEfficiencyRatio(rules, efficiencyRatioAtEntry)) return null;
 
   const sl = slLong(rules, entry, pivotForSl, atr);
   if (sl <= 0 || sl >= entry) return null;
@@ -392,7 +409,7 @@ function evalLong(
   const tp = entry + risk * rules.targetRR;
 
   const reason = `Long [${REGIME_LABELS[regime]}] ${triggerLabel} | ${pivotSeq || '—'} | LT:${ltMarket} | HT:${htMarket}`;
-  return { type: 'BUY', entryPrice: entry, sl, tp, reason, regime, ltMarket, htMarket, llhhPivot: pivotSeq };
+  return { type: 'BUY', entryPrice: entry, sl, tp, reason, regime, ltMarket, htMarket, llhhPivot: pivotSeq, efficiencyRatioAtEntry };
 }
 
 // ─── Short evaluation ─────────────────────────────────────────────────────────
@@ -411,7 +428,8 @@ function evalShort(
   pivotSeq: string,
   ltMarket: string,
   htMarket: string,
-  regime: RegimeKey
+  regime: RegimeKey,
+  efficiencyRatioAtEntry: number | undefined
 ): AutoSignal | null {
   const allowed = new Set<string>();
   if (rules.allowL1) allowed.add('L1');
@@ -448,6 +466,7 @@ function evalShort(
 
   const entry = candle.close;
   if (!passesAtrDepth(rules, entry, ema21, atr)) return null;
+  if (!passesEfficiencyRatio(rules, efficiencyRatioAtEntry)) return null;
 
   const sl = slShort(rules, entry, pivotForSl, atr);
   if (sl <= 0 || sl <= entry) return null;
@@ -457,10 +476,19 @@ function evalShort(
   if (tp <= 0) return null;
 
   const reason = `Short [${REGIME_LABELS[regime]}] ${triggerLabel} | ${pivotSeq || '—'} | LT:${ltMarket} | HT:${htMarket}`;
-  return { type: 'SELL', entryPrice: entry, sl, tp, reason, regime, ltMarket, htMarket, llhhPivot: pivotSeq };
+  return { type: 'SELL', entryPrice: entry, sl, tp, reason, regime, ltMarket, htMarket, llhhPivot: pivotSeq, efficiencyRatioAtEntry };
 }
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
+
+function passesEfficiencyRatio(rules: RegimeRules, effRatio: number | undefined): boolean {
+  const filter = rules.efficiencyRatioFilter ?? 'none';
+  if (filter === 'none' || effRatio === undefined) return true;
+  const threshold = rules.efficiencyRatioThreshold ?? 0.3;
+  if (filter === 'min') return effRatio >= threshold;
+  if (filter === 'max') return effRatio <= threshold;
+  return true;
+}
 
 function passesAtrDepth(rules: RegimeRules, entry: number, ema21: number | null, atr: number): boolean {
   const filter = rules.atrDepthFilter ?? 'none';

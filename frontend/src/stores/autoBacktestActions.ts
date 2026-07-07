@@ -92,7 +92,8 @@ export function createAutoBacktestActions(set: StoreSet, get: StoreGet) {
         signal.tp,
         undefined,        // priceOverride — use candle close
         'MANUAL',
-        journal
+        journal,
+        { efficiencyRatioAtEntry: signal.efficiencyRatioAtEntry }
       );
     },
 
