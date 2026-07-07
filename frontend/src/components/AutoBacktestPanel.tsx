@@ -253,6 +253,190 @@ function RegimeEditor({ regime, rules, onChange }: RegimeEditorProps) {
         )}
       </div>
 
+      {/* Quality-setup filters (instrumentation-based) */}
+      <div>
+        <p className="text-[10px] text-gray-400 mb-1 uppercase tracking-wide font-medium">Quality Setup Filters</p>
+        <div className="grid grid-cols-2 gap-2">
+          <div>
+            <p className="text-[10px] text-gray-400 mb-0.5 uppercase tracking-wide font-medium">Bar Overlap</p>
+            <select
+              value={rules.barOverlapFilter ?? 'none'}
+              onChange={e => up({ barOverlapFilter: e.target.value as RegimeRules['barOverlapFilter'] })}
+              className="w-full px-1.5 py-1 text-[11px] border rounded"
+            >
+              <option value="none">None</option>
+              <option value="max">≤ X (Clean/Trend)</option>
+              <option value="min">≥ X (Choppy)</option>
+            </select>
+          </div>
+          {(rules.barOverlapFilter ?? 'none') !== 'none' && (
+            <div>
+              <p className="text-[10px] text-gray-400 mb-0.5 uppercase tracking-wide font-medium">Overlap Threshold</p>
+              <input
+                type="number" step={0.05} min={0} max={1}
+                value={rules.barOverlapThreshold ?? 0.4}
+                onChange={e => up({ barOverlapThreshold: Number(e.target.value) })}
+                className="w-full px-1.5 py-1 text-[11px] border rounded text-center"
+              />
+            </div>
+          )}
+
+          <div>
+            <p className="text-[10px] text-gray-400 mb-0.5 uppercase tracking-wide font-medium">Bar Range</p>
+            <select
+              value={rules.barRangeFilter ?? 'none'}
+              onChange={e => up({ barRangeFilter: e.target.value as RegimeRules['barRangeFilter'] })}
+              className="w-full px-1.5 py-1 text-[11px] border rounded"
+            >
+              <option value="none">None</option>
+              <option value="dominance">Bull &gt; Bear × X (Direction)</option>
+              <option value="min">≥ X pts (Avg Range)</option>
+              <option value="max">≤ X pts (Avg Range)</option>
+            </select>
+          </div>
+          {rules.barRangeFilter === 'dominance' && (
+            <div>
+              <p className="text-[10px] text-gray-400 mb-0.5 uppercase tracking-wide font-medium">Dominance ×</p>
+              <input
+                type="number" step={0.1} min={1} max={5}
+                value={rules.barRangeDominanceThreshold ?? 1.0}
+                onChange={e => up({ barRangeDominanceThreshold: Number(e.target.value) })}
+                className="w-full px-1.5 py-1 text-[11px] border rounded text-center"
+              />
+            </div>
+          )}
+          {(rules.barRangeFilter === 'min' || rules.barRangeFilter === 'max') && (
+            <div>
+              <p className="text-[10px] text-gray-400 mb-0.5 uppercase tracking-wide font-medium">Range Threshold (pts)</p>
+              <input
+                type="number" step={1} min={0}
+                value={rules.barRangeThreshold ?? 0}
+                onChange={e => up({ barRangeThreshold: Number(e.target.value) })}
+                className="w-full px-1.5 py-1 text-[11px] border rounded text-center"
+              />
+            </div>
+          )}
+
+          <div>
+            <p className="text-[10px] text-gray-400 mb-0.5 uppercase tracking-wide font-medium">Break Count</p>
+            <select
+              value={rules.barBreakFilter ?? 'none'}
+              onChange={e => up({ barBreakFilter: e.target.value as RegimeRules['barBreakFilter'] })}
+              className="w-full px-1.5 py-1 text-[11px] border rounded"
+            >
+              <option value="none">None</option>
+              <option value="min">≥ X (Persistent)</option>
+              <option value="max">≤ X (Exhausted)</option>
+            </select>
+          </div>
+          {(rules.barBreakFilter ?? 'none') !== 'none' && (
+            <div>
+              <p className="text-[10px] text-gray-400 mb-0.5 uppercase tracking-wide font-medium">Break Threshold</p>
+              <input
+                type="number" step={1} min={0}
+                value={rules.barBreakThreshold ?? 5}
+                onChange={e => up({ barBreakThreshold: Number(e.target.value) })}
+                className="w-full px-1.5 py-1 text-[11px] border rounded text-center"
+              />
+            </div>
+          )}
+
+          <div>
+            <p className="text-[10px] text-gray-400 mb-0.5 uppercase tracking-wide font-medium">EMA21 Slope</p>
+            <select
+              value={rules.ema21SlopeFilter ?? 'none'}
+              onChange={e => up({ ema21SlopeFilter: e.target.value as RegimeRules['ema21SlopeFilter'] })}
+              className="w-full px-1.5 py-1 text-[11px] border rounded"
+            >
+              <option value="none">None</option>
+              <option value="min">≥ X (Favor Trade)</option>
+              <option value="max">≤ X (Not Overextended)</option>
+            </select>
+          </div>
+          {(rules.ema21SlopeFilter ?? 'none') !== 'none' && (
+            <div>
+              <p className="text-[10px] text-gray-400 mb-0.5 uppercase tracking-wide font-medium">EMA21 Threshold</p>
+              <input
+                type="number" step={0.05} value={rules.ema21SlopeThreshold ?? 0}
+                onChange={e => up({ ema21SlopeThreshold: Number(e.target.value) })}
+                className="w-full px-1.5 py-1 text-[11px] border rounded text-center"
+              />
+            </div>
+          )}
+
+          <div>
+            <p className="text-[10px] text-gray-400 mb-0.5 uppercase tracking-wide font-medium">EMA50 Slope</p>
+            <select
+              value={rules.ema50SlopeFilter ?? 'none'}
+              onChange={e => up({ ema50SlopeFilter: e.target.value as RegimeRules['ema50SlopeFilter'] })}
+              className="w-full px-1.5 py-1 text-[11px] border rounded"
+            >
+              <option value="none">None</option>
+              <option value="min">≥ X (Favor Trade)</option>
+              <option value="max">≤ X (Not Overextended)</option>
+            </select>
+          </div>
+          {(rules.ema50SlopeFilter ?? 'none') !== 'none' && (
+            <div>
+              <p className="text-[10px] text-gray-400 mb-0.5 uppercase tracking-wide font-medium">EMA50 Threshold</p>
+              <input
+                type="number" step={0.05} value={rules.ema50SlopeThreshold ?? 0}
+                onChange={e => up({ ema50SlopeThreshold: Number(e.target.value) })}
+                className="w-full px-1.5 py-1 text-[11px] border rounded text-center"
+              />
+            </div>
+          )}
+
+          <div>
+            <p className="text-[10px] text-gray-400 mb-0.5 uppercase tracking-wide font-medium">EMA20 Gap-Bar</p>
+            <select
+              value={rules.ema20GapBarFilter ?? 'none'}
+              onChange={e => up({ ema20GapBarFilter: e.target.value as RegimeRules['ema20GapBarFilter'] })}
+              className="w-full px-1.5 py-1 text-[11px] border rounded"
+            >
+              <option value="none">None</option>
+              <option value="min">≥ X (Strong Trend)</option>
+              <option value="max">≤ X (Pullback/Touch)</option>
+            </select>
+          </div>
+          {(rules.ema20GapBarFilter ?? 'none') !== 'none' && (
+            <div>
+              <p className="text-[10px] text-gray-400 mb-0.5 uppercase tracking-wide font-medium">Gap-Bar Threshold</p>
+              <input
+                type="number" step={0.05} min={0} max={1}
+                value={rules.ema20GapBarThreshold ?? 0.5}
+                onChange={e => up({ ema20GapBarThreshold: Number(e.target.value) })}
+                className="w-full px-1.5 py-1 text-[11px] border rounded text-center"
+              />
+            </div>
+          )}
+
+          <div>
+            <p className="text-[10px] text-gray-400 mb-0.5 uppercase tracking-wide font-medium">EMA20 Bias</p>
+            <select
+              value={rules.ema20BiasFilter ?? 'none'}
+              onChange={e => up({ ema20BiasFilter: e.target.value as RegimeRules['ema20BiasFilter'] })}
+              className="w-full px-1.5 py-1 text-[11px] border rounded"
+            >
+              <option value="none">None</option>
+              <option value="min">≥ X (Sustained Bias)</option>
+              <option value="max">≤ X (Weak Bias)</option>
+            </select>
+          </div>
+          {(rules.ema20BiasFilter ?? 'none') !== 'none' && (
+            <div>
+              <p className="text-[10px] text-gray-400 mb-0.5 uppercase tracking-wide font-medium">Bias Threshold</p>
+              <input
+                type="number" step={0.05} min={0} max={1}
+                value={rules.ema20BiasThreshold ?? 0.5}
+                onChange={e => up({ ema20BiasThreshold: Number(e.target.value) })}
+                className="w-full px-1.5 py-1 text-[11px] border rounded text-center"
+              />
+            </div>
+          )}
+        </div>
+      </div>
+
       {/* Risk */}
       <div>
         <p className="text-[10px] text-gray-400 mb-1 uppercase tracking-wide font-medium">Risk</p>

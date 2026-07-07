@@ -8,7 +8,17 @@ import {
   calculateATR,
   type PivotPoint,
 } from './indicators';
-import { analyzeMarketStructure, calculateEfficiencyRatio } from './pivotAnalysis';
+import {
+  analyzeMarketStructure,
+  calculateEfficiencyRatio,
+  calculateBarOverlap,
+  averageBarOverlap,
+  calculateBarRanges,
+  averageBarRanges,
+  calculateBarBreaks,
+  calculateEMASlope,
+  calculateEMAInteraction,
+} from './pivotAnalysis';
 
 // ─── Per-regime rules ─────────────────────────────────────────────────────────
 
@@ -41,6 +51,45 @@ export interface RegimeRules {
   // 'max': entry requires ER <= threshold (range/mean-reversion — avoid entering into a runaway trend)
   efficiencyRatioFilter?: 'none' | 'min' | 'max';
   efficiencyRatioThreshold?: number;
+
+  // Bar overlap filter — [0,1] avg overlap ratio over barOverlapLookback bars
+  // 'max': entry requires overlap <= threshold (clean/trending bars — avoid chop)
+  // 'min': entry requires overlap >= threshold (choppy/range bars)
+  barOverlapFilter?: 'none' | 'min' | 'max';
+  barOverlapThreshold?: number;
+
+  // Bar range filter — trend-strength/expansion over barRangeLookback bars
+  // 'min'/'max': overall avg bar range (points) must be >=/<= threshold
+  // 'dominance': the trade-direction-aligned avg bar range must exceed the opposite side's avg
+  //              by barRangeDominanceThreshold× (e.g. bull range > bear range for longs)
+  barRangeFilter?: 'none' | 'min' | 'max' | 'dominance';
+  barRangeThreshold?: number;
+  barRangeDominanceThreshold?: number;
+
+  // High/low break count filter — direction-aligned (highBreakCount for longs, lowBreakCount for shorts)
+  // over barBreakLookback bars. 'min': require >= threshold breaks (momentum/persistence). 'max': require <= threshold.
+  barBreakFilter?: 'none' | 'min' | 'max';
+  barBreakThreshold?: number;
+
+  // EMA21/EMA50 slope filters — direction-aligned (slope sign flipped for shorts) points-per-bar
+  // over ema21SlopeLookback/ema50SlopeLookback bars. 'min': require aligned slope >= threshold
+  // (trending in trade's favor). 'max': require aligned slope <= threshold.
+  ema21SlopeFilter?: 'none' | 'min' | 'max';
+  ema21SlopeThreshold?: number;
+  ema50SlopeFilter?: 'none' | 'min' | 'max';
+  ema50SlopeThreshold?: number;
+
+  // EMA20 gap-bar ratio filter — [0,1] fraction of bars whose range doesn't touch EMA20
+  // over emaInteractionLookback bars, not direction-aligned. 'min': require strong/persistent trend.
+  // 'max': require pullback/touch conditions.
+  ema20GapBarFilter?: 'none' | 'min' | 'max';
+  ema20GapBarThreshold?: number;
+
+  // EMA20 close-above-ratio ("always-in" bias) filter — direction-aligned (closeAboveRatio for longs,
+  // 1 - closeAboveRatio for shorts) over emaInteractionLookback bars. 'min': require sustained bias
+  // in trade's favor.
+  ema20BiasFilter?: 'none' | 'min' | 'max';
+  ema20BiasThreshold?: number;
 
   // Higher timeframe structure required for this regime
   htStructureFilter: 'any' | 'bull_trend' | 'bear_trend';
@@ -135,6 +184,16 @@ const defaultLongRules: RegimeRules = {
   ltPivotSequence: 'any',
   maFilter: 'above_ema21',
   htStructureFilter: 'bull_trend',
+  // Pre-enabled quality-setup filters — thresholds are scale-invariant (ratios, or
+  // sign-only slope) so they're safe defaults across instruments/timeframes.
+  barOverlapFilter: 'max',
+  barOverlapThreshold: 0.4,
+  barRangeFilter: 'dominance',
+  barRangeDominanceThreshold: 1.0,
+  ema21SlopeFilter: 'min',
+  ema21SlopeThreshold: 0,
+  ema50SlopeFilter: 'min',
+  ema50SlopeThreshold: 0,
   slMethod: 'pivot',
   slAtrMultiplier: 1.5,
   slFixedPoints: 50,
@@ -164,6 +223,12 @@ const defaultRangeRules: RegimeRules = {
   allowH2: true,
   allowL1: true,
   allowL2: true,
+  // Range/reversal regimes are chop-tolerant — don't inherit uptrend/downtrend's
+  // trend-quality gates by default.
+  barOverlapFilter: 'none',
+  barRangeFilter: 'none',
+  ema21SlopeFilter: 'none',
+  ema50SlopeFilter: 'none',
 };
 
 export const defaultAutoBacktestConfig: AutoBacktestConfig = {
@@ -204,6 +269,14 @@ export const AUTO_BT_PRESETS: Record<string, Partial<AutoBacktestConfig>> = {
       ltPivotSequence: 'HH-HL',
       maFilter: 'above_ema21',
       htStructureFilter: 'bull_trend',
+      barOverlapFilter: 'max',
+      barOverlapThreshold: 0.4,
+      barRangeFilter: 'dominance',
+      barRangeDominanceThreshold: 1.0,
+      ema21SlopeFilter: 'min',
+      ema21SlopeThreshold: 0,
+      ema50SlopeFilter: 'min',
+      ema50SlopeThreshold: 0,
 
       slMethod: 'pivot',
       slAtrMultiplier: 1.5,
@@ -219,6 +292,14 @@ export const AUTO_BT_PRESETS: Record<string, Partial<AutoBacktestConfig>> = {
       ltPivotSequence: 'LH-LL',
       maFilter: 'above_ema21',
       htStructureFilter: 'bear_trend',
+      barOverlapFilter: 'max',
+      barOverlapThreshold: 0.4,
+      barRangeFilter: 'dominance',
+      barRangeDominanceThreshold: 1.0,
+      ema21SlopeFilter: 'min',
+      ema21SlopeThreshold: 0,
+      ema50SlopeFilter: 'min',
+      ema50SlopeThreshold: 0,
 
       slMethod: 'pivot',
       slAtrMultiplier: 1.5,
@@ -288,6 +369,26 @@ export const AUTO_BT_PRESETS: Record<string, Partial<AutoBacktestConfig>> = {
 
 // ─── Signal result ────────────────────────────────────────────────────────────
 
+// Bundle of instrumentation metrics computed once per bar in evaluateAutoSignals —
+// reused both for filter gating (evalLong/evalShort) and, via AutoSignal.entryMetrics,
+// for stamping the resulting Trade record without recomputing (calculateEMASlope/
+// calculateEMAInteraction rerun EMA over full history, so recomputation is real cost).
+export interface EntryMetricsSnapshot {
+  barOverlapAvg?: number;
+  barRangeAvg?: number;
+  bullBarRangeAvg?: number;
+  bearBarRangeAvg?: number;
+  efficiencyRatio?: number;
+  highBreakCount?: number;
+  lowBreakCount?: number;
+  barBreakWindow?: number;
+  ema21Slope?: number;
+  ema50Slope?: number;
+  ema20GapBarRatio?: number;
+  ema20CloseAboveRatio?: number;
+  ema20InteractionWindow?: number;
+}
+
 export interface AutoSignal {
   type: 'BUY' | 'SELL';
   entryPrice: number;
@@ -298,7 +399,7 @@ export interface AutoSignal {
   ltMarket: string;
   htMarket: string;
   llhhPivot: string;
-  efficiencyRatioAtEntry?: number;
+  entryMetrics?: EntryMetricsSnapshot;
 }
 
 // ─── Main export ──────────────────────────────────────────────────────────────
@@ -336,15 +437,40 @@ export function evaluateAutoSignals(
   const currentPivot = pivots.find(p => p.time === currentTs) ?? null;
   const currentAbMarker = alBrooks.find(m => m.time === currentTs) ?? null;
   const pivotSeq = getPivotSeq(pivots);
-  const efficiencyRatioAtEntry = calculateEfficiencyRatio(candles, currentIndex, config.efficiencyRatioLookback ?? 10);
+
+  // Instrumentation snapshot — computed once per bar, used both for filter gating below
+  // and (via the returned AutoSignal.entryMetrics) for stamping the resulting Trade
+  // without recomputing.
+  const barOverlapRatios = calculateBarOverlap(candles, currentIndex, config.barOverlapLookback ?? 8);
+  const barRangeSamples = calculateBarRanges(candles, currentIndex, config.barRangeLookback ?? 20);
+  const { barRangeAvg, bullBarRangeAvg, bearBarRangeAvg } = averageBarRanges(barRangeSamples);
+  const { highBreakCount, lowBreakCount, barsCompared: barBreakWindow } =
+    calculateBarBreaks(candles, currentIndex, config.barBreakLookback ?? 20);
+  const { gapBarRatio, closeAboveRatio, barsCompared: ema20InteractionWindow } =
+    calculateEMAInteraction(candles, currentIndex, 20, config.emaInteractionLookback ?? 20);
+  const entryMetrics: EntryMetricsSnapshot = {
+    barOverlapAvg: averageBarOverlap(barOverlapRatios),
+    barRangeAvg,
+    bullBarRangeAvg,
+    bearBarRangeAvg,
+    efficiencyRatio: calculateEfficiencyRatio(candles, currentIndex, config.efficiencyRatioLookback ?? 10),
+    highBreakCount,
+    lowBreakCount,
+    barBreakWindow,
+    ema21Slope: calculateEMASlope(candles, currentIndex, 21, config.ema21SlopeLookback ?? 10),
+    ema50Slope: calculateEMASlope(candles, currentIndex, 50, config.ema50SlopeLookback ?? 20),
+    ema20GapBarRatio: gapBarRatio,
+    ema20CloseAboveRatio: closeAboveRatio,
+    ema20InteractionWindow,
+  };
 
   if (regimeRules.direction !== 'SHORT_ONLY') {
-    const signal = evalLong(regimeRules, currentCandle, currentPivot, currentAbMarker, pivots, ema21, ema60, atr, currentIndex, candles, pivotSeq, ltMarket, htMarket, regime, efficiencyRatioAtEntry);
+    const signal = evalLong(regimeRules, currentCandle, currentPivot, currentAbMarker, pivots, ema21, ema60, atr, currentIndex, candles, pivotSeq, ltMarket, htMarket, regime, entryMetrics);
     if (signal) return signal;
   }
 
   if (regimeRules.direction !== 'LONG_ONLY') {
-    const signal = evalShort(regimeRules, currentCandle, currentPivot, currentAbMarker, pivots, ema21, ema60, atr, currentIndex, candles, pivotSeq, ltMarket, htMarket, regime, efficiencyRatioAtEntry);
+    const signal = evalShort(regimeRules, currentCandle, currentPivot, currentAbMarker, pivots, ema21, ema60, atr, currentIndex, candles, pivotSeq, ltMarket, htMarket, regime, entryMetrics);
     if (signal) return signal;
   }
 
@@ -368,7 +494,7 @@ function evalLong(
   ltMarket: string,
   htMarket: string,
   regime: RegimeKey,
-  efficiencyRatioAtEntry: number | undefined
+  entryMetrics: EntryMetricsSnapshot
 ): AutoSignal | null {
   const allowed = new Set<string>();
   if (rules.allowH1) allowed.add('H1');
@@ -400,7 +526,14 @@ function evalLong(
 
   const entry = candle.close;
   if (!passesAtrDepth(rules, entry, ema21, atr)) return null;
-  if (!passesEfficiencyRatio(rules, efficiencyRatioAtEntry)) return null;
+  if (!passesEfficiencyRatio(rules, entryMetrics.efficiencyRatio)) return null;
+  if (!passesBarOverlap(rules, entryMetrics.barOverlapAvg)) return null;
+  if (!passesBarRange(rules, entryMetrics.bullBarRangeAvg, entryMetrics.bearBarRangeAvg, entryMetrics.barRangeAvg, true)) return null;
+  if (!passesBarBreak(rules, entryMetrics.highBreakCount, entryMetrics.lowBreakCount, true)) return null;
+  if (!passesEmaSlope(rules.ema21SlopeFilter, rules.ema21SlopeThreshold, entryMetrics.ema21Slope, true)) return null;
+  if (!passesEmaSlope(rules.ema50SlopeFilter, rules.ema50SlopeThreshold, entryMetrics.ema50Slope, true)) return null;
+  if (!passesEma20GapBar(rules, entryMetrics.ema20GapBarRatio)) return null;
+  if (!passesEma20Bias(rules, entryMetrics.ema20CloseAboveRatio, true)) return null;
 
   const sl = slLong(rules, entry, pivotForSl, atr);
   if (sl <= 0 || sl >= entry) return null;
@@ -409,7 +542,7 @@ function evalLong(
   const tp = entry + risk * rules.targetRR;
 
   const reason = `Long [${REGIME_LABELS[regime]}] ${triggerLabel} | ${pivotSeq || '—'} | LT:${ltMarket} | HT:${htMarket}`;
-  return { type: 'BUY', entryPrice: entry, sl, tp, reason, regime, ltMarket, htMarket, llhhPivot: pivotSeq, efficiencyRatioAtEntry };
+  return { type: 'BUY', entryPrice: entry, sl, tp, reason, regime, ltMarket, htMarket, llhhPivot: pivotSeq, entryMetrics };
 }
 
 // ─── Short evaluation ─────────────────────────────────────────────────────────
@@ -429,7 +562,7 @@ function evalShort(
   ltMarket: string,
   htMarket: string,
   regime: RegimeKey,
-  efficiencyRatioAtEntry: number | undefined
+  entryMetrics: EntryMetricsSnapshot
 ): AutoSignal | null {
   const allowed = new Set<string>();
   if (rules.allowL1) allowed.add('L1');
@@ -466,7 +599,14 @@ function evalShort(
 
   const entry = candle.close;
   if (!passesAtrDepth(rules, entry, ema21, atr)) return null;
-  if (!passesEfficiencyRatio(rules, efficiencyRatioAtEntry)) return null;
+  if (!passesEfficiencyRatio(rules, entryMetrics.efficiencyRatio)) return null;
+  if (!passesBarOverlap(rules, entryMetrics.barOverlapAvg)) return null;
+  if (!passesBarRange(rules, entryMetrics.bullBarRangeAvg, entryMetrics.bearBarRangeAvg, entryMetrics.barRangeAvg, false)) return null;
+  if (!passesBarBreak(rules, entryMetrics.highBreakCount, entryMetrics.lowBreakCount, false)) return null;
+  if (!passesEmaSlope(rules.ema21SlopeFilter, rules.ema21SlopeThreshold, entryMetrics.ema21Slope, false)) return null;
+  if (!passesEmaSlope(rules.ema50SlopeFilter, rules.ema50SlopeThreshold, entryMetrics.ema50Slope, false)) return null;
+  if (!passesEma20GapBar(rules, entryMetrics.ema20GapBarRatio)) return null;
+  if (!passesEma20Bias(rules, entryMetrics.ema20CloseAboveRatio, false)) return null;
 
   const sl = slShort(rules, entry, pivotForSl, atr);
   if (sl <= 0 || sl <= entry) return null;
@@ -476,7 +616,7 @@ function evalShort(
   if (tp <= 0) return null;
 
   const reason = `Short [${REGIME_LABELS[regime]}] ${triggerLabel} | ${pivotSeq || '—'} | LT:${ltMarket} | HT:${htMarket}`;
-  return { type: 'SELL', entryPrice: entry, sl, tp, reason, regime, ltMarket, htMarket, llhhPivot: pivotSeq, efficiencyRatioAtEntry };
+  return { type: 'SELL', entryPrice: entry, sl, tp, reason, regime, ltMarket, htMarket, llhhPivot: pivotSeq, entryMetrics };
 }
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
@@ -487,6 +627,95 @@ function passesEfficiencyRatio(rules: RegimeRules, effRatio: number | undefined)
   const threshold = rules.efficiencyRatioThreshold ?? 0.3;
   if (filter === 'min') return effRatio >= threshold;
   if (filter === 'max') return effRatio <= threshold;
+  return true;
+}
+
+// Flips the sign of a signed metric (slope, break-count differential) so 'min'/'max'
+// filters can be expressed as "in the trade's favor" regardless of long/short.
+function aligned(value: number | undefined, isLong: boolean): number | undefined {
+  if (value === undefined) return undefined;
+  return isLong ? value : -value;
+}
+
+function passesBarOverlap(rules: RegimeRules, overlapAvg: number | undefined): boolean {
+  const filter = rules.barOverlapFilter ?? 'none';
+  if (filter === 'none' || overlapAvg === undefined) return true;
+  const threshold = rules.barOverlapThreshold ?? 0.4;
+  if (filter === 'min') return overlapAvg >= threshold;
+  if (filter === 'max') return overlapAvg <= threshold;
+  return true;
+}
+
+function passesBarRange(
+  rules: RegimeRules,
+  bullAvg: number | undefined,
+  bearAvg: number | undefined,
+  overallAvg: number | undefined,
+  isLong: boolean
+): boolean {
+  const filter = rules.barRangeFilter ?? 'none';
+  if (filter === 'none') return true;
+  if (filter === 'dominance') {
+    if (bullAvg === undefined || bearAvg === undefined) return true;
+    const alignedAvg = isLong ? bullAvg : bearAvg;
+    const oppositeAvg = isLong ? bearAvg : bullAvg;
+    if (oppositeAvg <= 0) return true;
+    const threshold = rules.barRangeDominanceThreshold ?? 1.0;
+    return alignedAvg / oppositeAvg >= threshold;
+  }
+  if (overallAvg === undefined) return true;
+  const threshold = rules.barRangeThreshold ?? 0;
+  if (filter === 'min') return overallAvg >= threshold;
+  if (filter === 'max') return overallAvg <= threshold;
+  return true;
+}
+
+function passesBarBreak(
+  rules: RegimeRules,
+  highBreakCount: number | undefined,
+  lowBreakCount: number | undefined,
+  isLong: boolean
+): boolean {
+  const filter = rules.barBreakFilter ?? 'none';
+  const alignedCount = isLong ? highBreakCount : lowBreakCount;
+  if (filter === 'none' || alignedCount === undefined) return true;
+  const threshold = rules.barBreakThreshold ?? 5;
+  if (filter === 'min') return alignedCount >= threshold;
+  if (filter === 'max') return alignedCount <= threshold;
+  return true;
+}
+
+function passesEmaSlope(
+  filter: 'none' | 'min' | 'max' | undefined,
+  threshold: number | undefined,
+  slope: number | undefined,
+  isLong: boolean
+): boolean {
+  const mode = filter ?? 'none';
+  const alignedSlope = aligned(slope, isLong);
+  if (mode === 'none' || alignedSlope === undefined) return true;
+  const t = threshold ?? 0;
+  if (mode === 'min') return alignedSlope >= t;
+  if (mode === 'max') return alignedSlope <= t;
+  return true;
+}
+
+function passesEma20GapBar(rules: RegimeRules, gapBarRatio: number | undefined): boolean {
+  const filter = rules.ema20GapBarFilter ?? 'none';
+  if (filter === 'none' || gapBarRatio === undefined) return true;
+  const threshold = rules.ema20GapBarThreshold ?? 0.5;
+  if (filter === 'min') return gapBarRatio >= threshold;
+  if (filter === 'max') return gapBarRatio <= threshold;
+  return true;
+}
+
+function passesEma20Bias(rules: RegimeRules, closeAboveRatio: number | undefined, isLong: boolean): boolean {
+  const filter = rules.ema20BiasFilter ?? 'none';
+  if (filter === 'none' || closeAboveRatio === undefined) return true;
+  const alignedRatio = isLong ? closeAboveRatio : 1 - closeAboveRatio;
+  const threshold = rules.ema20BiasThreshold ?? 0.5;
+  if (filter === 'min') return alignedRatio >= threshold;
+  if (filter === 'max') return alignedRatio <= threshold;
   return true;
 }
 

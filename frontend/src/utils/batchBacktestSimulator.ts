@@ -51,16 +51,25 @@ export function runBatchSimulation(
   function enterPosition(candle: Candle, signal: AutoSignal, qty: number, candleIndex: number) {
     const entryPrice = candle.close;
     const maAnalysis = analyzeManualEntry(candles, candleIndex, signal.type);
+    const entryMetrics = signal.entryMetrics;
     const barOverlapAtEntry = calculateBarOverlap(candles, candleIndex, config.barOverlapLookback ?? 8);
-    const barOverlapAvgAtEntry = averageBarOverlap(barOverlapAtEntry);
+    const barOverlapAvgAtEntry = entryMetrics?.barOverlapAvg ?? averageBarOverlap(barOverlapAtEntry);
     const barRangeSamples = calculateBarRanges(candles, candleIndex, config.barRangeLookback ?? 20);
-    const { barRangeAvg, bullBarRangeAvg, bearBarRangeAvg } = averageBarRanges(barRangeSamples);
-    const efficiencyRatioAtEntry = signal.efficiencyRatioAtEntry ?? calculateEfficiencyRatio(candles, candleIndex, config.efficiencyRatioLookback ?? 10);
-    const { highBreakCount, lowBreakCount, barsCompared } = calculateBarBreaks(candles, candleIndex, config.barBreakLookback ?? 20);
-    const ema21SlopeAtEntry = calculateEMASlope(candles, candleIndex, 21, config.ema21SlopeLookback ?? 10);
-    const ema50SlopeAtEntry = calculateEMASlope(candles, candleIndex, 50, config.ema50SlopeLookback ?? 20);
-    const { gapBarRatio, closeAboveRatio, barsCompared: emaInteractionWindow } =
-      calculateEMAInteraction(candles, candleIndex, 20, config.emaInteractionLookback ?? 20);
+    const barRangeFallback = averageBarRanges(barRangeSamples);
+    const barRangeAvg = entryMetrics?.barRangeAvg ?? barRangeFallback.barRangeAvg;
+    const bullBarRangeAvg = entryMetrics?.bullBarRangeAvg ?? barRangeFallback.bullBarRangeAvg;
+    const bearBarRangeAvg = entryMetrics?.bearBarRangeAvg ?? barRangeFallback.bearBarRangeAvg;
+    const efficiencyRatioAtEntry = entryMetrics?.efficiencyRatio ?? calculateEfficiencyRatio(candles, candleIndex, config.efficiencyRatioLookback ?? 10);
+    const barBreakFallback = calculateBarBreaks(candles, candleIndex, config.barBreakLookback ?? 20);
+    const highBreakCount = entryMetrics?.highBreakCount ?? barBreakFallback.highBreakCount;
+    const lowBreakCount = entryMetrics?.lowBreakCount ?? barBreakFallback.lowBreakCount;
+    const barsCompared = entryMetrics?.barBreakWindow ?? barBreakFallback.barsCompared;
+    const ema21SlopeAtEntry = entryMetrics?.ema21Slope ?? calculateEMASlope(candles, candleIndex, 21, config.ema21SlopeLookback ?? 10);
+    const ema50SlopeAtEntry = entryMetrics?.ema50Slope ?? calculateEMASlope(candles, candleIndex, 50, config.ema50SlopeLookback ?? 20);
+    const emaInteractionFallback = calculateEMAInteraction(candles, candleIndex, 20, config.emaInteractionLookback ?? 20);
+    const gapBarRatio = entryMetrics?.ema20GapBarRatio ?? emaInteractionFallback.gapBarRatio;
+    const closeAboveRatio = entryMetrics?.ema20CloseAboveRatio ?? emaInteractionFallback.closeAboveRatio;
+    const emaInteractionWindow = entryMetrics?.ema20InteractionWindow ?? emaInteractionFallback.barsCompared;
     const journal: TradeJournal = {
       ltMarket: signal.ltMarket,
       htMarket: signal.htMarket,

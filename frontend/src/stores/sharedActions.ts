@@ -21,6 +21,7 @@ import {
 } from '../services/liveExecutionService';
 import type { Trade, Position, TradeJournal } from '../types';
 import type { SessionStore, SessionConfig, StoreSet, StoreGet } from './sessionStore';
+import type { EntryMetricsSnapshot } from '../utils/autoBacktestEngine';
 
 const generateTradeId = () =>
   `${Date.now()}-${Math.random().toString(36).substring(2, 11)}`;
@@ -238,7 +239,7 @@ export function createSharedActions(set: StoreSet, get: StoreGet) {
       priceOverride?: number,
       exitReason: 'SL' | 'TP' | 'MANUAL' | 'TIME_OVER' = 'MANUAL',
       journal?: TradeJournal,
-      entryMetricsOverride?: { efficiencyRatioAtEntry?: number }
+      entryMetricsOverride?: EntryMetricsSnapshot
     ) => {
       const { candles, currentIndex, trades, position, instrument, sessionConfig, isLiveMode, livePrice, autoBacktestConfig } = get();
       const currentCandle = candles[currentIndex];
@@ -303,15 +304,23 @@ export function createSharedActions(set: StoreSet, get: StoreGet) {
       const emaVal = emaSeries[emaSeries.length - 1]?.value ?? 0;
       const atrDepthAtEntry = atrVal > 0 ? Math.abs(currentPrice - emaVal) / atrVal : 0;
       const barOverlapAtEntry = calculateBarOverlap(candles, currentIndex, autoBacktestConfig.barOverlapLookback ?? 8);
-      const barOverlapAvgAtEntry = averageBarOverlap(barOverlapAtEntry);
+      const barOverlapAvgAtEntry = entryMetricsOverride?.barOverlapAvg ?? averageBarOverlap(barOverlapAtEntry);
       const barRangeSamples = calculateBarRanges(candles, currentIndex, autoBacktestConfig.barRangeLookback ?? 20);
-      const { barRangeAvg, bullBarRangeAvg, bearBarRangeAvg } = averageBarRanges(barRangeSamples);
-      const efficiencyRatioAtEntry = entryMetricsOverride?.efficiencyRatioAtEntry ?? calculateEfficiencyRatio(candles, currentIndex, autoBacktestConfig.efficiencyRatioLookback ?? 10);
-      const { highBreakCount, lowBreakCount, barsCompared } = calculateBarBreaks(candles, currentIndex, autoBacktestConfig.barBreakLookback ?? 20);
-      const ema21SlopeAtEntry = calculateEMASlope(candles, currentIndex, 21, autoBacktestConfig.ema21SlopeLookback ?? 10);
-      const ema50SlopeAtEntry = calculateEMASlope(candles, currentIndex, 50, autoBacktestConfig.ema50SlopeLookback ?? 20);
-      const { gapBarRatio, closeAboveRatio, barsCompared: emaInteractionWindow } =
-        calculateEMAInteraction(candles, currentIndex, 20, autoBacktestConfig.emaInteractionLookback ?? 20);
+      const barRangeFallback = averageBarRanges(barRangeSamples);
+      const barRangeAvg = entryMetricsOverride?.barRangeAvg ?? barRangeFallback.barRangeAvg;
+      const bullBarRangeAvg = entryMetricsOverride?.bullBarRangeAvg ?? barRangeFallback.bullBarRangeAvg;
+      const bearBarRangeAvg = entryMetricsOverride?.bearBarRangeAvg ?? barRangeFallback.bearBarRangeAvg;
+      const efficiencyRatioAtEntry = entryMetricsOverride?.efficiencyRatio ?? calculateEfficiencyRatio(candles, currentIndex, autoBacktestConfig.efficiencyRatioLookback ?? 10);
+      const barBreakFallback = calculateBarBreaks(candles, currentIndex, autoBacktestConfig.barBreakLookback ?? 20);
+      const highBreakCount = entryMetricsOverride?.highBreakCount ?? barBreakFallback.highBreakCount;
+      const lowBreakCount = entryMetricsOverride?.lowBreakCount ?? barBreakFallback.lowBreakCount;
+      const barsCompared = entryMetricsOverride?.barBreakWindow ?? barBreakFallback.barsCompared;
+      const ema21SlopeAtEntry = entryMetricsOverride?.ema21Slope ?? calculateEMASlope(candles, currentIndex, 21, autoBacktestConfig.ema21SlopeLookback ?? 10);
+      const ema50SlopeAtEntry = entryMetricsOverride?.ema50Slope ?? calculateEMASlope(candles, currentIndex, 50, autoBacktestConfig.ema50SlopeLookback ?? 20);
+      const emaInteractionFallback = calculateEMAInteraction(candles, currentIndex, 20, autoBacktestConfig.emaInteractionLookback ?? 20);
+      const gapBarRatio = entryMetricsOverride?.ema20GapBarRatio ?? emaInteractionFallback.gapBarRatio;
+      const closeAboveRatio = entryMetricsOverride?.ema20CloseAboveRatio ?? emaInteractionFallback.closeAboveRatio;
+      const emaInteractionWindow = entryMetricsOverride?.ema20InteractionWindow ?? emaInteractionFallback.barsCompared;
       const isInitialWith =
         (type === 'BUY' && ltMarket.startsWith('Bull')) ||
         (type === 'SELL' && ltMarket.startsWith('Bear'));

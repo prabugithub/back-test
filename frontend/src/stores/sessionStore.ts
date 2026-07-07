@@ -5,7 +5,7 @@ import { createBacktestActions } from './backtestActions';
 import { createLiveActions } from './liveActions';
 import { createSharedActions } from './sharedActions';
 import { createAutoBacktestActions } from './autoBacktestActions';
-import { type AutoBacktestConfig, defaultAutoBacktestConfig } from '../utils/autoBacktestEngine';
+import { type AutoBacktestConfig, type EntryMetricsSnapshot, defaultAutoBacktestConfig } from '../utils/autoBacktestEngine';
 
 export interface SessionConfig {
   securityId: string;
@@ -109,7 +109,7 @@ export interface SessionStore {
   setAutoExitTarget: (auto: boolean) => void;
   setCrosshairPosition: (pos: { time: number | null; price: number | null; sourceChartId: 'primary' | 'secondary' | null }) => void;
   checkSLTPHits: (index: number, currentPrice?: number) => void;
-  executeTrade: (type: 'BUY' | 'SELL', quantity: number, stopLoss?: number, target?: number, priceOverride?: number, exitReason?: 'SL' | 'TP' | 'MANUAL' | 'TIME_OVER', journal?: TradeJournal, entryMetricsOverride?: { efficiencyRatioAtEntry?: number }) => void;
+  executeTrade: (type: 'BUY' | 'SELL', quantity: number, stopLoss?: number, target?: number, priceOverride?: number, exitReason?: 'SL' | 'TP' | 'MANUAL' | 'TIME_OVER', journal?: TradeJournal, entryMetricsOverride?: EntryMetricsSnapshot) => void;
   checkTrendReversal: (index: number, currentPrice?: number) => void;
   deleteTrade: (tradeId: string) => void;
   deleteTrades: (tradeIds: string[]) => void;
