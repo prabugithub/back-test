@@ -3,6 +3,7 @@ import { createPortal } from 'react-dom';
 import { ArrowLeft, Zap, TrendingUp, TrendingDown, Minus, RefreshCw, BarChart2 } from 'lucide-react';
 import { useSessionStore } from '../stores/sessionStore';
 import { EntryMetricsDashboard } from './EntryMetricsDashboard';
+import type { Candle } from '../types';
 import {
   type AutoBacktestConfig,
   type RegimeRules,
@@ -13,6 +14,12 @@ import {
   getCurrentMarketState,
   generateBinaryPatterns,
 } from '../utils/autoBacktestEngine';
+import { useFilterPreviewData, type PreviewFilterKey } from '../hooks/useFilterPreviewData';
+import { FilterPreviewStrip } from './autobacktest-visuals/FilterPreviewStrip';
+import { ThresholdFilterControl } from './autobacktest-visuals/ThresholdFilterControl';
+import { BarOverlapDiagram } from './autobacktest-visuals/BarOverlapDiagram';
+import { EmaSlopeDiagram } from './autobacktest-visuals/EmaSlopeDiagram';
+import { EfficiencyRatioDiagram } from './autobacktest-visuals/EfficiencyRatioDiagram';
 
 const HIGH_SEQ_PATTERNS = generateBinaryPatterns('HH', 'LH');
 const LOW_SEQ_PATTERNS = generateBinaryPatterns('HL', 'LL');
@@ -60,6 +67,9 @@ interface RegimeEditorProps {
   regime: RegimeKey;
   rules: RegimeRules;
   onChange: (rules: RegimeRules) => void;
+  candles: Candle[];
+  currentIndex: number;
+  config: AutoBacktestConfig;
 }
 
 // Starting-point recommendations, not fixed rules — tune per instrument/timeframe against
@@ -75,13 +85,18 @@ const QUALITY_FILTER_GUIDE: { filter: string; trend: string; range: string; reve
   { filter: 'EMA20 Bias', trend: '≥0.6 (Sustained)', range: 'None', reversal: '≥0.5 (early confirm)' },
 ];
 
-function RegimeEditor({ regime, rules, onChange }: RegimeEditorProps) {
+function RegimeEditor({ regime, rules, onChange, candles, currentIndex, config }: RegimeEditorProps) {
   const meta = REGIME_META[regime];
   const up = (patch: Partial<RegimeRules>) => onChange({ ...rules, ...patch });
   const [showGuide, setShowGuide] = useState(false);
+  const [hoveredFilterKey, setHoveredFilterKey] = useState<PreviewFilterKey | null>(null);
+  const previewBars = useFilterPreviewData(candles, currentIndex, rules, config);
+  const latestBar = previewBars[previewBars.length - 1];
 
   return (
     <div className="space-y-3 pt-1">
+      <FilterPreviewStrip bars={previewBars} highlightFilterKey={hoveredFilterKey} />
+
       {/* Enable + Direction */}
       <div className="flex items-center justify-between">
         <label className="flex items-center gap-2 cursor-pointer select-none">
@@ -246,29 +261,28 @@ function RegimeEditor({ regime, rules, onChange }: RegimeEditorProps) {
             </div>
           </div>
         )}
-        <div>
-          <p className="text-[10px] text-gray-400 mb-0.5 uppercase tracking-wide font-medium">Efficiency Ratio</p>
-          <select
-            value={rules.efficiencyRatioFilter ?? 'none'}
-            onChange={e => up({ efficiencyRatioFilter: e.target.value as RegimeRules['efficiencyRatioFilter'] })}
-            className="w-full px-1.5 py-1 text-[11px] border rounded"
-          >
-            <option value="none">None</option>
-            <option value="min">≥ X (Trending)</option>
-            <option value="max">≤ X (Choppy)</option>
-          </select>
+        <div className="col-span-2">
+          <ThresholdFilterControl
+            label="Efficiency Ratio"
+            tooltip="How directly price traveled from A to B over the lookback window (Kaufman Efficiency Ratio). Near 1 = a straight, efficient trend; near 0 = price zigzagged and cancelled itself out (chop)."
+            mode={rules.efficiencyRatioFilter ?? 'none'}
+            offValue="none"
+            modeOptions={[
+              { value: 'none', label: 'Off' },
+              { value: 'min', label: 'Trending' },
+              { value: 'max', label: 'Choppy' },
+            ]}
+            onModeChange={v => up({ efficiencyRatioFilter: v as RegimeRules['efficiencyRatioFilter'] })}
+            threshold={rules.efficiencyRatioThreshold ?? 0.3}
+            onThresholdChange={v => up({ efficiencyRatioThreshold: v })}
+            min={0}
+            max={1}
+            step={0.05}
+            liveValue={latestBar?.metrics.efficiencyRatio}
+            onHoverChange={hovering => setHoveredFilterKey(hovering ? 'efficiencyRatio' : null)}
+            diagram={<EfficiencyRatioDiagram ratio={rules.efficiencyRatioThreshold ?? 0.3} />}
+          />
         </div>
-        {(rules.efficiencyRatioFilter ?? 'none') !== 'none' && (
-          <div>
-            <p className="text-[10px] text-gray-400 mb-0.5 uppercase tracking-wide font-medium">ER Threshold</p>
-            <input
-              type="number" step={0.05} min={0} max={1}
-              value={rules.efficiencyRatioThreshold ?? 0.3}
-              onChange={e => up({ efficiencyRatioThreshold: Number(e.target.value) })}
-              className="w-full px-1.5 py-1 text-[11px] border rounded text-center"
-            />
-          </div>
-        )}
       </div>
 
       {/* Quality-setup filters (instrumentation-based) */}
@@ -315,39 +329,28 @@ function RegimeEditor({ regime, rules, onChange }: RegimeEditorProps) {
           </div>
         )}
         <div className="grid grid-cols-2 gap-2">
-          <div>
-            <p
-              className="text-[10px] text-gray-400 mb-0.5 uppercase tracking-wide font-medium cursor-help"
-              title="How much each bar's range overlaps the previous bar's range, averaged over the 'Overlap' lookback (Instrumentation Lookbacks section above). Low overlap = clean directional bars; high overlap = choppy/ranging. 'Clean/Trend' requires overlap below the threshold (only enter clean trends); 'Choppy' requires it above (only enter range conditions)."
-            >
-              Bar Overlap
-            </p>
-            <select
-              value={rules.barOverlapFilter ?? 'none'}
-              onChange={e => up({ barOverlapFilter: e.target.value as RegimeRules['barOverlapFilter'] })}
-              className="w-full px-1.5 py-1 text-[11px] border rounded"
-            >
-              <option value="none">None</option>
-              <option value="max">≤ X (Clean/Trend)</option>
-              <option value="min">≥ X (Choppy)</option>
-            </select>
+          <div className="col-span-2">
+            <ThresholdFilterControl
+              label="Bar Overlap"
+              tooltip="How much each bar's range overlaps the previous bar's range, averaged over the 'Overlap' lookback (Instrumentation Lookbacks section above). Low overlap = clean directional bars; high overlap = choppy/ranging."
+              mode={rules.barOverlapFilter ?? 'none'}
+              offValue="none"
+              modeOptions={[
+                { value: 'none', label: 'Off' },
+                { value: 'max', label: 'Clean/Trend' },
+                { value: 'min', label: 'Choppy' },
+              ]}
+              onModeChange={v => up({ barOverlapFilter: v as RegimeRules['barOverlapFilter'] })}
+              threshold={rules.barOverlapThreshold ?? 0.4}
+              onThresholdChange={v => up({ barOverlapThreshold: v })}
+              min={0}
+              max={1}
+              step={0.05}
+              liveValue={latestBar?.metrics.barOverlapAvg}
+              onHoverChange={hovering => setHoveredFilterKey(hovering ? 'barOverlap' : null)}
+              diagram={<BarOverlapDiagram ratio={rules.barOverlapThreshold ?? 0.4} />}
+            />
           </div>
-          {(rules.barOverlapFilter ?? 'none') !== 'none' && (
-            <div>
-              <p
-                className="text-[10px] text-gray-400 mb-0.5 uppercase tracking-wide font-medium cursor-help"
-                title="Overlap ratio cutoff, 0–1. Lower = stricter (only very clean, non-overlapping bars pass). Default 0.4."
-              >
-                Overlap Threshold
-              </p>
-              <input
-                type="number" step={0.05} min={0} max={1}
-                value={rules.barOverlapThreshold ?? 0.4}
-                onChange={e => up({ barOverlapThreshold: Number(e.target.value) })}
-                className="w-full px-1.5 py-1 text-[11px] border rounded text-center"
-              />
-            </div>
-          )}
 
           <div>
             <p
@@ -434,38 +437,28 @@ function RegimeEditor({ regime, rules, onChange }: RegimeEditorProps) {
             </div>
           )}
 
-          <div>
-            <p
-              className="text-[10px] text-gray-400 mb-0.5 uppercase tracking-wide font-medium cursor-help"
-              title="Rate of change (steepness) of the EMA21 over its own lookback, automatically flipped for shorts so this always means 'is the EMA sloping in my trade's favor.' 'Favor Trade' requires the slope to clear the threshold (0 = just needs to point the right way, no steepness required). 'Not Overextended' instead caps how steep it can be — avoids chasing a move that's already run too far."
-            >
-              EMA21 Slope
-            </p>
-            <select
-              value={rules.ema21SlopeFilter ?? 'none'}
-              onChange={e => up({ ema21SlopeFilter: e.target.value as RegimeRules['ema21SlopeFilter'] })}
-              className="w-full px-1.5 py-1 text-[11px] border rounded"
-            >
-              <option value="none">None</option>
-              <option value="min">≥ X (Favor Trade)</option>
-              <option value="max">≤ X (Not Overextended)</option>
-            </select>
+          <div className="col-span-2">
+            <ThresholdFilterControl
+              label="EMA21 Slope"
+              tooltip="Rate of change (steepness) of the EMA21, automatically flipped for shorts so this always means 'is the EMA sloping in my trade's favor.' Favor Trade requires the slope to clear the threshold (0 = just needs to point the right way). Not Overextended instead caps how steep it can be. Raw price-points/bar — instrument/timeframe-scale-dependent, use 'your data' as a starting reference."
+              mode={rules.ema21SlopeFilter ?? 'none'}
+              offValue="none"
+              modeOptions={[
+                { value: 'none', label: 'Off' },
+                { value: 'min', label: 'Favor Trade' },
+                { value: 'max', label: 'Not Overextended' },
+              ]}
+              onModeChange={v => up({ ema21SlopeFilter: v as RegimeRules['ema21SlopeFilter'] })}
+              threshold={rules.ema21SlopeThreshold ?? 0}
+              onThresholdChange={v => up({ ema21SlopeThreshold: v })}
+              min={-2}
+              max={2}
+              step={0.05}
+              liveValue={latestBar?.metrics.ema21Slope}
+              onHoverChange={hovering => setHoveredFilterKey(hovering ? 'ema21Slope' : null)}
+              diagram={<EmaSlopeDiagram slope={rules.ema21SlopeThreshold ?? 0} min={-2} max={2} />}
+            />
           </div>
-          {(rules.ema21SlopeFilter ?? 'none') !== 'none' && (
-            <div>
-              <p
-                className="text-[10px] text-gray-400 mb-0.5 uppercase tracking-wide font-medium cursor-help"
-                title="Slope cutoff in price points per bar, already direction-aligned. 0 (default) = direction-only, no steepness required. Raw price-points, so this is instrument/timeframe-scale-dependent — a value tuned for Nifty 5-min won't transfer directly to Bank Nifty or a different timeframe."
-              >
-                EMA21 Threshold
-              </p>
-              <input
-                type="number" step={0.05} value={rules.ema21SlopeThreshold ?? 0}
-                onChange={e => up({ ema21SlopeThreshold: Number(e.target.value) })}
-                className="w-full px-1.5 py-1 text-[11px] border rounded text-center"
-              />
-            </div>
-          )}
 
           <div>
             <p
@@ -1086,6 +1079,9 @@ export function AutoBacktestPanel({ onClose }: AutoBacktestPanelProps) {
             regime={activeRegime}
             rules={config[activeRegime]}
             onChange={updateRegime(activeRegime)}
+            candles={candles}
+            currentIndex={currentIndex}
+            config={config}
           />
         </div>
 

@@ -434,6 +434,39 @@ export interface AutoSignal {
 
 // ─── Main export ──────────────────────────────────────────────────────────────
 
+// Instrumentation snapshot for a single bar — shared by evaluateAutoSignals' filter
+// gating (below) and the config UI's live filter-preview (autobacktest-visuals/).
+// Kept as one function so both call sites derive every metric identically.
+export function computeEntryMetrics(candles: Candle[], currentIndex: number, config: AutoBacktestConfig): EntryMetricsSnapshot {
+  const pivots = calculatePivotPoints(candles.slice(0, currentIndex + 1));
+  const pivotSeqStats = getPivotSequenceStats(pivots, 4);
+  const barOverlapRatios = calculateBarOverlap(candles, currentIndex, config.barOverlapLookback ?? 8);
+  const barRangeSamples = calculateBarRanges(candles, currentIndex, config.barRangeLookback ?? 20);
+  const { barRangeAvg, bullBarRangeAvg, bearBarRangeAvg } = averageBarRanges(barRangeSamples);
+  const { highBreakCount, lowBreakCount, barsCompared: barBreakWindow } =
+    calculateBarBreaks(candles, currentIndex, config.barBreakLookback ?? 20);
+  const { gapBarRatio, closeAboveRatio, barsCompared: ema20InteractionWindow } =
+    calculateEMAInteraction(candles, currentIndex, 20, config.emaInteractionLookback ?? 20);
+  return {
+    barOverlapAvg: averageBarOverlap(barOverlapRatios),
+    barRangeAvg,
+    bullBarRangeAvg,
+    bearBarRangeAvg,
+    efficiencyRatio: calculateEfficiencyRatio(candles, currentIndex, config.efficiencyRatioLookback ?? 10),
+    highBreakCount,
+    lowBreakCount,
+    barBreakWindow,
+    ema21Slope: calculateEMASlope(candles, currentIndex, 21, config.ema21SlopeLookback ?? 10),
+    ema50Slope: calculateEMASlope(candles, currentIndex, 50, config.ema50SlopeLookback ?? 20),
+    ema20GapBarRatio: gapBarRatio,
+    ema20CloseAboveRatio: closeAboveRatio,
+    ema20InteractionWindow,
+    pivotHighSeq: pivotSeqStats.highSeq,
+    pivotLowSeq: pivotSeqStats.lowSeq,
+    pivotGapAvgBars: averagePivotGapBars(pivotSeqStats),
+  };
+}
+
 export function evaluateAutoSignals(
   candles: Candle[],
   currentIndex: number,
@@ -467,36 +500,11 @@ export function evaluateAutoSignals(
   const currentPivot = pivots.find(p => p.time === currentTs) ?? null;
   const currentAbMarker = alBrooks.find(m => m.time === currentTs) ?? null;
   const pivotSeq = getPivotSeq(pivots);
-  const pivotSeqStats = getPivotSequenceStats(pivots, 4);
 
   // Instrumentation snapshot — computed once per bar, used both for filter gating below
   // and (via the returned AutoSignal.entryMetrics) for stamping the resulting Trade
   // without recomputing.
-  const barOverlapRatios = calculateBarOverlap(candles, currentIndex, config.barOverlapLookback ?? 8);
-  const barRangeSamples = calculateBarRanges(candles, currentIndex, config.barRangeLookback ?? 20);
-  const { barRangeAvg, bullBarRangeAvg, bearBarRangeAvg } = averageBarRanges(barRangeSamples);
-  const { highBreakCount, lowBreakCount, barsCompared: barBreakWindow } =
-    calculateBarBreaks(candles, currentIndex, config.barBreakLookback ?? 20);
-  const { gapBarRatio, closeAboveRatio, barsCompared: ema20InteractionWindow } =
-    calculateEMAInteraction(candles, currentIndex, 20, config.emaInteractionLookback ?? 20);
-  const entryMetrics: EntryMetricsSnapshot = {
-    barOverlapAvg: averageBarOverlap(barOverlapRatios),
-    barRangeAvg,
-    bullBarRangeAvg,
-    bearBarRangeAvg,
-    efficiencyRatio: calculateEfficiencyRatio(candles, currentIndex, config.efficiencyRatioLookback ?? 10),
-    highBreakCount,
-    lowBreakCount,
-    barBreakWindow,
-    ema21Slope: calculateEMASlope(candles, currentIndex, 21, config.ema21SlopeLookback ?? 10),
-    ema50Slope: calculateEMASlope(candles, currentIndex, 50, config.ema50SlopeLookback ?? 20),
-    ema20GapBarRatio: gapBarRatio,
-    ema20CloseAboveRatio: closeAboveRatio,
-    ema20InteractionWindow,
-    pivotHighSeq: pivotSeqStats.highSeq,
-    pivotLowSeq: pivotSeqStats.lowSeq,
-    pivotGapAvgBars: averagePivotGapBars(pivotSeqStats),
-  };
+  const entryMetrics = computeEntryMetrics(candles, currentIndex, config);
 
   if (regimeRules.direction !== 'SHORT_ONLY') {
     const signal = evalLong(regimeRules, currentCandle, currentPivot, currentAbMarker, pivots, ema21, ema60, atr, currentIndex, candles, pivotSeq, ltMarket, htMarket, regime, entryMetrics);
@@ -661,7 +669,7 @@ function evalShort(
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
-function passesEfficiencyRatio(rules: RegimeRules, effRatio: number | undefined): boolean {
+export function passesEfficiencyRatio(rules: RegimeRules, effRatio: number | undefined): boolean {
   const filter = rules.efficiencyRatioFilter ?? 'none';
   if (filter === 'none' || effRatio === undefined) return true;
   const threshold = rules.efficiencyRatioThreshold ?? 0.3;
@@ -677,7 +685,7 @@ function aligned(value: number | undefined, isLong: boolean): number | undefined
   return isLong ? value : -value;
 }
 
-function passesBarOverlap(rules: RegimeRules, overlapAvg: number | undefined): boolean {
+export function passesBarOverlap(rules: RegimeRules, overlapAvg: number | undefined): boolean {
   const filter = rules.barOverlapFilter ?? 'none';
   if (filter === 'none' || overlapAvg === undefined) return true;
   const threshold = rules.barOverlapThreshold ?? 0.4;
@@ -686,7 +694,7 @@ function passesBarOverlap(rules: RegimeRules, overlapAvg: number | undefined): b
   return true;
 }
 
-function passesBarRange(
+export function passesBarRange(
   rules: RegimeRules,
   bullAvg: number | undefined,
   bearAvg: number | undefined,
@@ -710,7 +718,7 @@ function passesBarRange(
   return true;
 }
 
-function passesBarBreak(
+export function passesBarBreak(
   rules: RegimeRules,
   highBreakCount: number | undefined,
   lowBreakCount: number | undefined,
@@ -725,7 +733,7 @@ function passesBarBreak(
   return true;
 }
 
-function passesSeqFilter(filter: 'none' | 'custom' | undefined, patterns: string[] | undefined, seq: string[]): boolean {
+export function passesSeqFilter(filter: 'none' | 'custom' | undefined, patterns: string[] | undefined, seq: string[]): boolean {
   const mode = filter ?? 'none';
   if (mode === 'none') return true;
   if (seq.length < 4) return true; // not enough pivot history yet — pass through
@@ -733,7 +741,7 @@ function passesSeqFilter(filter: 'none' | 'custom' | undefined, patterns: string
   return patterns.includes(seq.join('-'));
 }
 
-function passesPivotGap(rules: RegimeRules, gapAvg: number | undefined): boolean {
+export function passesPivotGap(rules: RegimeRules, gapAvg: number | undefined): boolean {
   const filter = rules.pivotGapFilter ?? 'none';
   if (filter === 'none' || gapAvg === undefined) return true;
   const threshold = rules.pivotGapThreshold ?? 5;
@@ -742,7 +750,7 @@ function passesPivotGap(rules: RegimeRules, gapAvg: number | undefined): boolean
   return true;
 }
 
-function passesEmaSlope(
+export function passesEmaSlope(
   filter: 'none' | 'min' | 'max' | undefined,
   threshold: number | undefined,
   slope: number | undefined,
@@ -757,7 +765,7 @@ function passesEmaSlope(
   return true;
 }
 
-function passesEma20GapBar(rules: RegimeRules, gapBarRatio: number | undefined): boolean {
+export function passesEma20GapBar(rules: RegimeRules, gapBarRatio: number | undefined): boolean {
   const filter = rules.ema20GapBarFilter ?? 'none';
   if (filter === 'none' || gapBarRatio === undefined) return true;
   const threshold = rules.ema20GapBarThreshold ?? 0.5;
@@ -766,7 +774,7 @@ function passesEma20GapBar(rules: RegimeRules, gapBarRatio: number | undefined):
   return true;
 }
 
-function passesEma20Bias(rules: RegimeRules, closeAboveRatio: number | undefined, isLong: boolean): boolean {
+export function passesEma20Bias(rules: RegimeRules, closeAboveRatio: number | undefined, isLong: boolean): boolean {
   const filter = rules.ema20BiasFilter ?? 'none';
   if (filter === 'none' || closeAboveRatio === undefined) return true;
   const alignedRatio = isLong ? closeAboveRatio : 1 - closeAboveRatio;
@@ -776,7 +784,7 @@ function passesEma20Bias(rules: RegimeRules, closeAboveRatio: number | undefined
   return true;
 }
 
-function passesAtrDepth(rules: RegimeRules, entry: number, ema21: number | null, atr: number): boolean {
+export function passesAtrDepth(rules: RegimeRules, entry: number, ema21: number | null, atr: number): boolean {
   const filter = rules.atrDepthFilter ?? 'none';
   const threshold = rules.atrDepthThreshold ?? 1.5;
   if (filter === 'none' || !ema21 || atr <= 0) return true;
@@ -786,14 +794,14 @@ function passesAtrDepth(rules: RegimeRules, entry: number, ema21: number | null,
   return true;
 }
 
-function passesHtFilter(filter: string, htMarket: string): boolean {
+export function passesHtFilter(filter: string, htMarket: string): boolean {
   if (filter === 'any') return true;
   if (filter === 'bull_trend') return htMarket === 'Bull-Trend';
   if (filter === 'bear_trend') return htMarket === 'Bear-Trend';
   return true;
 }
 
-function passesMa(filter: string, candle: Candle, ema21: number | null, ema60: number | null, forLong: boolean): boolean {
+export function passesMa(filter: string, candle: Candle, ema21: number | null, ema60: number | null, forLong: boolean): boolean {
   const buf = 0.0001;
   if (filter === 'none') return true;
   if (filter === 'above_ema21') {
