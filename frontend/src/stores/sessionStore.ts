@@ -1,6 +1,7 @@
 import { create } from 'zustand';
 import type { Candle, Trade, Position, TradeJournal, Drawing } from '../types';
 import type { SessionState } from '../services/firebaseSessionService';
+import type { SavedAutoBacktestConfig } from '../services/autoBacktestConfigService';
 import { createBacktestActions } from './backtestActions';
 import { createLiveActions } from './liveActions';
 import { createSharedActions } from './sharedActions';
@@ -72,6 +73,11 @@ export interface SessionStore {
   lastAutoSignalReason: string;
   isBatchBacktestRunning: boolean;
   batchBacktestProgress: number; // 0–100
+
+  // ── Saved auto-backtest configurations (named, persisted setups) ────────────
+  savedAutoBacktestConfigs: SavedAutoBacktestConfig[];
+  activeAutoBacktestConfigId: string | null;
+  activeAutoBacktestConfigName: string | null;
 
   // ── Chart tool / indicator state ─────────────────────────────────────────────
   activeChartId: 'primary' | 'secondary';
@@ -145,6 +151,13 @@ export interface SessionStore {
   runAutoBacktestCheck: (index: number) => void;
   runAutoSquareOff: (index: number) => void;
   runBatchAutoBacktest: () => void;
+
+  // ── Actions (saved auto-backtest configurations) ─────────────────────────────
+  loadSavedAutoBacktestConfigsList: () => Promise<void>;
+  saveAutoBacktestConfigAs: (name: string) => Promise<void>;
+  updateActiveAutoBacktestConfig: () => Promise<void>;
+  applySavedAutoBacktestConfig: (id: string) => void;
+  deleteSavedAutoBacktestConfig: (id: string) => Promise<void>;
 }
 
 export const useSessionStore = create<SessionStore>((set, get) => ({
@@ -189,6 +202,11 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
   lastAutoSignalReason: '',
   isBatchBacktestRunning: false,
   batchBacktestProgress: 0,
+
+  // ── Saved auto-backtest configurations initial state ─────────────────────────
+  savedAutoBacktestConfigs: [],
+  activeAutoBacktestConfigId: null,
+  activeAutoBacktestConfigName: null,
 
   // ── Actions composed from isolated modules ───────────────────────────────────
   ...createBacktestActions(set, get),

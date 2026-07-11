@@ -25,6 +25,7 @@ A complete reference of every feature available in the application.
 17. [Live Trading](#17-live-trading)
 18. [Smart Exit (Order Chaser)](#18-smart-exit-order-chaser)
 19. [Keyboard Shortcuts](#19-keyboard-shortcuts)
+20. [Auto-Backtest Saved Configurations](#20-auto-backtest-saved-configurations)
 
 ---
 
@@ -714,6 +715,31 @@ Step 3 — Market Order
 
 ---
 
+## 20. Auto-Backtest Saved Configurations
+
+**Component:** `AutoBacktestPanel`
+**Service:** `autoBacktestConfigService.ts`
+**Store:** `savedAutoBacktestConfigs`, `activeAutoBacktestConfigId`/`Name`, and the `*AutoBacktestConfig` actions in `autoBacktestActions.ts`
+
+Lets you save the entire current Auto-Backtest filter setup (global settings + all 4 regimes' rules) as a named, persisted configuration — independent of any trading session — so you can build up a library of setups and switch between them.
+
+### Distinct from Quick Presets
+
+The existing **Quick Presets** row (Trend Follow / Range Trader / All Regimes) is a separate, hardcoded, non-editable mechanism (`AUTO_BT_PRESETS` in `autoBacktestEngine.ts`) — clicking one instantly overwrites the current config in memory only. **Saved Configurations** are user-created, editable, and persisted to Firebase Firestore (`autoBacktestConfigs` collection) — they survive a page reload and are available on any device signed into the same Firestore project.
+
+### Actions
+
+| Action | Behaviour |
+|--------|-----------|
+| **Save As...** | Opens a name prompt, then saves the current full configuration as a new entry. Becomes the "active" configuration. |
+| **Save** | Overwrites the currently active configuration with the current filter values. Disabled until a configuration has been loaded or saved via Save As. |
+| **Load** | Select an entry from the dropdown, click Load — replaces the entire current configuration (all regimes + global settings) with the saved one. |
+| **Delete** | Select an entry, confirm, and it's removed from Firestore and the dropdown. |
+
+The dropdown lists every saved configuration by name, marking the currently active one. Loading or saving as always keeps the dropdown selection in sync with the active configuration.
+
+---
+
 ## Quick Reference — UI Layout
 
 ```
@@ -746,5 +772,3 @@ Dialogs (open on demand):
 ---
 
 **Last Updated:** 2026-07-11
-
-*Last updated: 2026-04-08*

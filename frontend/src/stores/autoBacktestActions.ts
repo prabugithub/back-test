@@ -5,6 +5,12 @@ import { type AutoBacktestConfig, evaluateAutoSignals } from '../utils/autoBackt
 import { useNotificationStore } from './notificationStore';
 import type { TradeJournal } from '../types';
 import { analyzeManualEntry } from '../utils/pivotAnalysis';
+import {
+  saveAutoBacktestConfigAs as saveAutoBacktestConfigAsRemote,
+  updateAutoBacktestConfig as updateAutoBacktestConfigRemote,
+  listAutoBacktestConfigs,
+  deleteAutoBacktestConfig as deleteAutoBacktestConfigRemote,
+} from '../services/autoBacktestConfigService';
 
 function candleTimeMinutes(timestampSec: number): number {
   const d = new Date(timestampSec * 1000);
@@ -170,6 +176,68 @@ export function createAutoBacktestActions(set: StoreSet, get: StoreGet) {
         undefined,
         'TIME_OVER'
       );
+    },
+
+    loadSavedAutoBacktestConfigsList: async () => {
+      const configs = await listAutoBacktestConfigs();
+      set({ savedAutoBacktestConfigs: configs });
+    },
+
+    saveAutoBacktestConfigAs: async (name: string) => {
+      try {
+        const saved = await saveAutoBacktestConfigAsRemote(name, get().autoBacktestConfig);
+        set(state => ({
+          savedAutoBacktestConfigs: [saved, ...state.savedAutoBacktestConfigs],
+          activeAutoBacktestConfigId: saved.id,
+          activeAutoBacktestConfigName: saved.name,
+        }));
+        useNotificationStore.getState().notify(`Configuration "${name}" saved!`, 'success');
+      } catch (e: any) {
+        useNotificationStore.getState().notify(`Failed to save configuration: ${e.message}`, 'error');
+      }
+    },
+
+    updateActiveAutoBacktestConfig: async () => {
+      const { activeAutoBacktestConfigId, activeAutoBacktestConfigName, autoBacktestConfig } = get();
+      if (!activeAutoBacktestConfigId) {
+        useNotificationStore.getState().notify('No saved configuration loaded — use "Save As" to create one', 'info');
+        return;
+      }
+      try {
+        await updateAutoBacktestConfigRemote(activeAutoBacktestConfigId, autoBacktestConfig);
+        set(state => ({
+          savedAutoBacktestConfigs: state.savedAutoBacktestConfigs.map(c =>
+            c.id === activeAutoBacktestConfigId
+              ? { ...c, config: autoBacktestConfig, updatedAt: Date.now() }
+              : c
+          ),
+        }));
+        useNotificationStore.getState().notify(`Configuration "${activeAutoBacktestConfigName}" updated!`, 'success');
+      } catch (e: any) {
+        useNotificationStore.getState().notify(`Failed to update configuration: ${e.message}`, 'error');
+      }
+    },
+
+    applySavedAutoBacktestConfig: (id: string) => {
+      const found = get().savedAutoBacktestConfigs.find(c => c.id === id);
+      if (!found) return;
+      get().setAutoBacktestConfig(found.config);
+      set({ activeAutoBacktestConfigId: found.id, activeAutoBacktestConfigName: found.name });
+      useNotificationStore.getState().notify(`Configuration "${found.name}" loaded`, 'success');
+    },
+
+    deleteSavedAutoBacktestConfig: async (id: string) => {
+      try {
+        await deleteAutoBacktestConfigRemote(id);
+        set(state => ({
+          savedAutoBacktestConfigs: state.savedAutoBacktestConfigs.filter(c => c.id !== id),
+          activeAutoBacktestConfigId: state.activeAutoBacktestConfigId === id ? null : state.activeAutoBacktestConfigId,
+          activeAutoBacktestConfigName: state.activeAutoBacktestConfigId === id ? null : state.activeAutoBacktestConfigName,
+        }));
+        useNotificationStore.getState().notify('Configuration deleted', 'success');
+      } catch (e: any) {
+        useNotificationStore.getState().notify(`Failed to delete configuration: ${e.message}`, 'error');
+      }
     },
   };
 }

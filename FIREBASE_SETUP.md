@@ -19,9 +19,13 @@ To enable saving and resuming sessions (trades, playback pos, etc.), you need to
        match /sessions/{sessionId} {
          allow read, write: if true; // Open access for your personal tool
        }
+       match /autoBacktestConfigs/{configId} {
+         allow read, write: if true; // Saved auto-backtest configurations
+       }
      }
    }
    ```
+   Firestore rules deny any collection not explicitly matched — if you add a new collection later (any new `services/*.ts` file calling `collection(db, '<name>')`), add a matching `match /<name>/{docId} { allow read, write: if true; }` block here too, or reads/writes will fail with "Missing or insufficient permissions."
 
 ## 3. Register Web App
 1. Go to **Project Settings** (gear icon).

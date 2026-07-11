@@ -36,7 +36,7 @@ const HISTORY_PREFIX = "history_session_";
 const SNAPSHOT_PREFIX = "snapshot_session_";
 
 // Helper to remove undefined values which Firestore doesn't support
-const sanitizeData = (data: any): any => {
+export const sanitizeData = (data: any): any => {
     if (data === null || data === undefined) return null;
     if (typeof data !== 'object') return data;
 

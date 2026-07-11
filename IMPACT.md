@@ -312,6 +312,17 @@ Global config (`AutoBacktestConfig`): `enabled`, `skipIfPositionOpen`, `tradeSta
 
 ---
 
+## Saved Auto-Backtest Configurations (`autoBacktestConfigService.ts`, `AutoBacktestPanel.tsx`)
+
+- **New Firestore collection:** `autoBacktestConfigs` — one doc per named, user-saved `AutoBacktestConfig` (`{ name, config, createdAt, updatedAt }`, doc id `autobt_config_<timestamp>`). Fully independent of the `sessions` collection — saving/loading a configuration does **not** touch trades/candles/drawings/session data. `sanitizeData` (now exported from `firebaseSessionService.ts`, was previously private) strips `undefined` fields before every write, same requirement as session/snapshot saves since `RegimeRules` has many optional filter fields.
+- **Store fields:** `savedAutoBacktestConfigs: SavedAutoBacktestConfig[]`, `activeAutoBacktestConfigId`/`activeAutoBacktestConfigName` (which saved entry, if any, is currently loaded — determines whether the panel's "Save" button overwrites in place or is disabled).
+- **Store actions** (`autoBacktestActions.ts`): `loadSavedAutoBacktestConfigsList`, `saveAutoBacktestConfigAs`, `updateActiveAutoBacktestConfig`, `applySavedAutoBacktestConfig`, `deleteSavedAutoBacktestConfig`. `applySavedAutoBacktestConfig` calls the existing `setAutoBacktestConfig` setter (so the `autoExitSL` sync side-effect still runs) rather than setting `autoBacktestConfig` directly.
+- **Do not confuse with `AUTO_BT_PRESETS`/`applyPreset`** (`autoBacktestEngine.ts`/`AutoBacktestPanel.tsx`) — that remains a separate, hardcoded, non-persisted, in-memory-only mechanism (3 fixed presets). The two features are independent UI sections in the panel and neither reads/writes the other's state.
+
+**Check when changing:** if `AutoBacktestConfig`'s shape changes, old saved Firestore docs still have the old shape — `applySavedAutoBacktestConfig` passes the stored `config` straight to `setAutoBacktestConfig` with no migration/default-backfill, so a saved config from before a new field existed will be missing that field (same class of gap as `AUTO_BT_PRESETS` partial objects already have via `?? default` fallbacks at read sites — saved configs have no such fallback layer).
+
+---
+
 ## API Routes (backend)
 
 | Route | Effect |

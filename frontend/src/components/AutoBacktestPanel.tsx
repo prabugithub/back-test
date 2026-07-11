@@ -1,8 +1,10 @@
-import { useMemo, useState } from 'react';
+import { useMemo, useState, useEffect } from 'react';
 import { createPortal } from 'react-dom';
-import { ArrowLeft, Zap, TrendingUp, TrendingDown, Minus, RefreshCw, BarChart2 } from 'lucide-react';
+import { ArrowLeft, Zap, TrendingUp, TrendingDown, Minus, RefreshCw, BarChart2, Save, Trash2, FolderOpen } from 'lucide-react';
 import { useSessionStore } from '../stores/sessionStore';
 import { EntryMetricsDashboard } from './EntryMetricsDashboard';
+import { PromptDialog } from './PromptDialog';
+import { ConfirmDialog } from './ConfirmDialog';
 import type { Candle } from '../types';
 import {
   type AutoBacktestConfig,
@@ -192,8 +194,8 @@ function RegimeEditor({ regime, rules, onChange, candles, currentIndex, config }
       </div>
 
       {/* Filters row */}
-      <div className="grid grid-cols-2 gap-2">
-        <div className="col-span-2">
+      <div className="grid grid-cols-1 @3xl:grid-cols-2 gap-2">
+        <div>
           <ModePickerControl
             label="MA Filter"
             tooltip="Where price must sit relative to a moving average at entry. On/Touch allows the candle to still be interacting with the line; the plain Above/Below variants require clear separation."
@@ -210,7 +212,7 @@ function RegimeEditor({ regime, rules, onChange, candles, currentIndex, config }
           />
         </div>
 
-        <div className="col-span-2">
+        <div>
           <ModePickerControl
             label="Pivot Seq"
             tooltip="Matches the single most recent swing-high and swing-low trend labels (Brooks HH/LH, HL/LL) against a specific pattern. 'Any' applies no filter."
@@ -229,7 +231,7 @@ function RegimeEditor({ regime, rules, onChange, candles, currentIndex, config }
           />
         </div>
 
-        <div className="col-span-2">
+        <div>
           <ModePickerControl
             label="HT Structure"
             tooltip="Higher-timeframe structure gate. Note: this is actually an EMA60 slope computed on the same base-timeframe candles, not a true resampled higher-timeframe read — treat it as a longer-term trend confirmation, not independent multi-timeframe confluence."
@@ -251,7 +253,7 @@ function RegimeEditor({ regime, rules, onChange, candles, currentIndex, config }
           />
         </div>
 
-        <div className="col-span-2">
+        <div>
           <ThresholdFilterControl
             label="ATR Depth"
             tooltip="Distance of the entry price from the EMA21, measured in ATR units (volatility-normalized). Trend caps how far price can be from the average, to avoid chasing an overextended move. Gap/Range instead requires a minimum distance, for gap or range-reversal entries."
@@ -275,7 +277,7 @@ function RegimeEditor({ regime, rules, onChange, candles, currentIndex, config }
           />
         </div>
 
-        <div className="col-span-2">
+        <div>
           <ThresholdFilterControl
             label="Efficiency Ratio"
             tooltip="How directly price traveled from A to B over the lookback window (Kaufman Efficiency Ratio). Near 1 = a straight, efficient trend; near 0 = price zigzagged and cancelled itself out (chop)."
@@ -342,8 +344,8 @@ function RegimeEditor({ regime, rules, onChange, candles, currentIndex, config }
             </p>
           </div>
         )}
-        <div className="grid grid-cols-2 gap-2">
-          <div className="col-span-2">
+        <div className="grid grid-cols-1 @3xl:grid-cols-2 @6xl:grid-cols-3 gap-2">
+          <div>
             <ThresholdFilterControl
               label="Bar Overlap"
               tooltip="How much each bar's range overlaps the previous bar's range, averaged over the 'Overlap' lookback (Instrumentation Lookbacks section above). Low overlap = clean directional bars; high overlap = choppy/ranging."
@@ -366,7 +368,7 @@ function RegimeEditor({ regime, rules, onChange, candles, currentIndex, config }
             />
           </div>
 
-          <div className="col-span-2">
+          <div>
             <BarRangeFilterControl
               mode={rules.barRangeFilter ?? 'none'}
               onModeChange={v => up({ barRangeFilter: v as RegimeRules['barRangeFilter'] })}
@@ -388,7 +390,7 @@ function RegimeEditor({ regime, rules, onChange, candles, currentIndex, config }
             />
           </div>
 
-          <div className="col-span-2">
+          <div>
             <ThresholdFilterControl
               label="Break Count"
               tooltip="Counts, over the 'Breaks' lookback, how many bars made a new high (for longs) or new low (for shorts) vs. the bar before it — a momentum/persistence check. Persistent requires at least X breaks (momentum still active). Exhausted requires at most X (momentum fading — useful for reversal/fade entries)."
@@ -412,7 +414,7 @@ function RegimeEditor({ regime, rules, onChange, candles, currentIndex, config }
             />
           </div>
 
-          <div className="col-span-2">
+          <div>
             <ThresholdFilterControl
               label="EMA21 Slope"
               tooltip="Rate of change (steepness) of the EMA21, automatically flipped for shorts so this always means 'is the EMA sloping in my trade's favor.' Favor Trade requires the slope to clear the threshold (0 = just needs to point the right way). Not Overextended instead caps how steep it can be. Raw price-points/bar — instrument/timeframe-scale-dependent, use 'your data' as a starting reference."
@@ -435,7 +437,7 @@ function RegimeEditor({ regime, rules, onChange, candles, currentIndex, config }
             />
           </div>
 
-          <div className="col-span-2">
+          <div>
             <ThresholdFilterControl
               label="EMA50 Slope"
               tooltip="Same as EMA21 Slope above, but on the slower EMA50 — a longer-term trend-direction confirmation rather than short-term steepness."
@@ -458,7 +460,7 @@ function RegimeEditor({ regime, rules, onChange, candles, currentIndex, config }
             />
           </div>
 
-          <div className="col-span-2">
+          <div>
             <ThresholdFilterControl
               label="EMA20 Gap-Bar"
               tooltip="Fraction of bars over the 'EMA20 Interaction' lookback whose entire range never touches the EMA20 ('gap bars' — a Brooks strong-trend signal). Strong Trend requires at least X of bars to be gap bars. Pullback/Touch requires at most X — price is still interacting with the average, better suited to pullback/mean-reversion entries."
@@ -481,7 +483,7 @@ function RegimeEditor({ regime, rules, onChange, candles, currentIndex, config }
             />
           </div>
 
-          <div className="col-span-2">
+          <div>
             <ThresholdFilterControl
               label="EMA20 Bias"
               tooltip="Fraction of closes above the EMA20 over the same 'EMA20 Interaction' lookback ('always-in' bias), automatically flipped for shorts so this always means 'is price staying on my trade's side of the average.' Sustained Bias requires at least X (bias holding steady). Weak Bias requires at most X (choppier back-and-forth around the average)."
@@ -517,7 +519,7 @@ function RegimeEditor({ regime, rules, onChange, candles, currentIndex, config }
         <p className="text-[10px] text-gray-400 mb-1 uppercase tracking-wide font-medium">
           Pivot Sequence History (last 4)
         </p>
-        <div className="grid grid-cols-2 gap-2">
+        <div className="grid grid-cols-1 @3xl:grid-cols-2 gap-2">
           <PivotSequencePatternPicker
             label="High Sequence"
             tooltip="Matches the last 4 bearish-pivot trend labels (swing highs: HH/LH), oldest to newest, against a whitelist of allowed 4-in-a-row patterns. With fewer than 4 pivots recorded yet, this filter passes through."
@@ -554,7 +556,7 @@ function RegimeEditor({ regime, rules, onChange, candles, currentIndex, config }
             onHoverChange={hovering => setHoveredFilterKey(hovering ? 'lowSeq' : null)}
           />
 
-          <div className="col-span-2">
+          <div className="@3xl:col-span-2">
             <ThresholdFilterControl
               label="Pivot Gap (bars)"
               tooltip="Average bar-count gap between consecutive pivots across both the high and low sequences — a trend-pace check. Fast requires the average gap to stay at or below the threshold (pivots forming quickly — accelerating/choppy). Slow requires it to be at or above (pivots spaced out — a slower, more mature trend)."
@@ -640,8 +642,29 @@ export function AutoBacktestPanel({ onClose }: AutoBacktestPanelProps) {
   const batchProgress = useSessionStore(s => s.batchBacktestProgress);
   const trades = useSessionStore(s => s.trades);
 
+  const savedConfigs = useSessionStore(s => s.savedAutoBacktestConfigs);
+  const activeConfigId = useSessionStore(s => s.activeAutoBacktestConfigId);
+  const loadSavedAutoBacktestConfigsList = useSessionStore(s => s.loadSavedAutoBacktestConfigsList);
+  const saveAutoBacktestConfigAs = useSessionStore(s => s.saveAutoBacktestConfigAs);
+  const updateActiveAutoBacktestConfig = useSessionStore(s => s.updateActiveAutoBacktestConfig);
+  const applySavedAutoBacktestConfig = useSessionStore(s => s.applySavedAutoBacktestConfig);
+  const deleteSavedAutoBacktestConfig = useSessionStore(s => s.deleteSavedAutoBacktestConfig);
+
   const [activeRegime, setActiveRegime] = useState<RegimeKey>('uptrend');
   const [showMetrics, setShowMetrics] = useState(false);
+  const [selectedConfigId, setSelectedConfigId] = useState('');
+  const [isSaveAsOpen, setIsSaveAsOpen] = useState(false);
+  const [isDeleteConfirmOpen, setIsDeleteConfirmOpen] = useState(false);
+
+  useEffect(() => {
+    loadSavedAutoBacktestConfigsList();
+  }, []);
+
+  // Keep the dropdown selection in sync with whichever saved config is active
+  // (e.g. right after Save As, or after Load)
+  useEffect(() => {
+    if (activeConfigId) setSelectedConfigId(activeConfigId);
+  }, [activeConfigId]);
 
   // Live market state
   const marketState = useMemo(
@@ -879,7 +902,7 @@ export function AutoBacktestPanel({ onClose }: AutoBacktestPanelProps) {
         </div>
 
         {/* Regimes / Results main pane */}
-        <div className="flex-1 overflow-y-auto p-6 max-w-4xl">
+        <div className="flex-1 overflow-y-auto p-6 @container">
         {/* Current market state */}
         <div className="mb-3 p-2 rounded-lg bg-gray-50 border border-gray-200">
           <div className="flex items-center justify-between">
@@ -930,6 +953,81 @@ export function AutoBacktestPanel({ onClose }: AutoBacktestPanelProps) {
             ))}
           </div>
         </div>
+
+        {/* Saved Configurations */}
+        <div className="mb-3">
+          <p className="text-[10px] text-gray-400 mb-1 uppercase tracking-wide font-medium">Saved Configurations</p>
+          <div className="flex gap-1.5">
+            <select
+              value={selectedConfigId}
+              onChange={e => setSelectedConfigId(e.target.value)}
+              className="flex-1 text-[11px] border border-gray-300 rounded px-2 py-1 bg-white"
+            >
+              <option value="">
+                {savedConfigs.length === 0 ? 'No saved configurations' : 'Select a saved configuration...'}
+              </option>
+              {savedConfigs.map(c => (
+                <option key={c.id} value={c.id}>
+                  {c.name}{c.id === activeConfigId ? ' (active)' : ''}
+                </option>
+              ))}
+            </select>
+            <button
+              onClick={() => selectedConfigId && applySavedAutoBacktestConfig(selectedConfigId)}
+              disabled={!selectedConfigId}
+              title="Load selected configuration"
+              className="px-2 py-1 text-[10px] bg-blue-50 text-blue-700 border border-blue-200 rounded hover:bg-blue-100 font-medium disabled:opacity-40 disabled:cursor-not-allowed flex items-center gap-1"
+            >
+              <FolderOpen size={12} /> Load
+            </button>
+            <button
+              onClick={() => selectedConfigId && setIsDeleteConfirmOpen(true)}
+              disabled={!selectedConfigId}
+              title="Delete selected configuration"
+              className="px-2 py-1 text-[10px] bg-red-50 text-red-700 border border-red-200 rounded hover:bg-red-100 font-medium disabled:opacity-40 disabled:cursor-not-allowed"
+            >
+              <Trash2 size={12} />
+            </button>
+          </div>
+          <div className="flex gap-1.5 mt-1.5">
+            <button
+              onClick={() => updateActiveAutoBacktestConfig()}
+              disabled={!activeConfigId}
+              title={activeConfigId ? 'Overwrite the active saved configuration' : 'Load or Save As a configuration first'}
+              className="flex-1 py-1 text-[10px] bg-emerald-50 text-emerald-700 border border-emerald-200 rounded hover:bg-emerald-100 font-medium disabled:opacity-40 disabled:cursor-not-allowed flex items-center justify-center gap-1"
+            >
+              <Save size={12} /> Save
+            </button>
+            <button
+              onClick={() => setIsSaveAsOpen(true)}
+              className="flex-1 py-1 text-[10px] bg-gray-50 text-gray-700 border border-gray-200 rounded hover:bg-gray-100 font-medium"
+            >
+              Save As...
+            </button>
+          </div>
+        </div>
+
+        <PromptDialog
+          isOpen={isSaveAsOpen}
+          onClose={() => setIsSaveAsOpen(false)}
+          onSubmit={(name) => saveAutoBacktestConfigAs(name)}
+          title="Save Auto-Backtest Configuration"
+          message="Enter a name for this configuration setup so you can load it again later."
+          placeholder="Configuration Name..."
+          confirmText="Save"
+        />
+        <ConfirmDialog
+          isOpen={isDeleteConfirmOpen}
+          onClose={() => setIsDeleteConfirmOpen(false)}
+          onConfirm={() => {
+            deleteSavedAutoBacktestConfig(selectedConfigId);
+            setSelectedConfigId('');
+          }}
+          title="Delete Configuration"
+          message={`Delete "${savedConfigs.find(c => c.id === selectedConfigId)?.name ?? ''}"? This cannot be undone.`}
+          confirmText="Delete"
+          isDestructive
+        />
 
         {/* Regime tabs */}
         <div className="flex gap-1 mb-3">
@@ -999,6 +1097,21 @@ export function AutoBacktestPanel({ onClose }: AutoBacktestPanelProps) {
 
         {/* Batch run — processes all candles instantly without visual playback */}
         <div className="mt-2">
+          {isBatchRunning && (
+            <div className="mb-2">
+              <div className="flex justify-between text-[10px] text-gray-500 mb-1">
+                <span>Processing candles…</span>
+                <span>{batchProgress}%</span>
+              </div>
+              <div className="w-full h-1.5 bg-gray-100 rounded-full overflow-hidden">
+                <div
+                  className="h-full bg-indigo-500 rounded-full transition-all duration-150"
+                  style={{ width: `${batchProgress}%` }}
+                />
+              </div>
+            </div>
+          )}
+
           <button
             onClick={runBatchAutoBacktest}
             disabled={isBatchRunning || candles.length === 0 || !config.enabled}
@@ -1019,21 +1132,6 @@ export function AutoBacktestPanel({ onClose }: AutoBacktestPanelProps) {
               </>
             )}
           </button>
-
-          {isBatchRunning && (
-            <div className="mt-2">
-              <div className="flex justify-between text-[10px] text-gray-500 mb-1">
-                <span>Processing candles…</span>
-                <span>{batchProgress}%</span>
-              </div>
-              <div className="w-full h-1.5 bg-gray-100 rounded-full overflow-hidden">
-                <div
-                  className="h-full bg-indigo-500 rounded-full transition-all duration-150"
-                  style={{ width: `${batchProgress}%` }}
-                />
-              </div>
-            </div>
-          )}
         </div>
 
         {/* Entry Metrics Dashboard — shown when batch trades with journal data exist */}
