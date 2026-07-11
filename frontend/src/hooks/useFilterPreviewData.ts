@@ -12,6 +12,11 @@ import {
   passesEma20GapBar,
   passesEma20Bias,
   passesEfficiencyRatio,
+  passesAtrDepth,
+  passesSeqFilter,
+  passesPivotGap,
+  getEmaAt,
+  getAtrAt,
 } from '../utils/autoBacktestEngine';
 
 // One entry per Quality Setup Filter that has a live-preview diagram. Extend this list
@@ -24,7 +29,11 @@ export type PreviewFilterKey =
   | 'ema50Slope'
   | 'ema20GapBar'
   | 'ema20Bias'
-  | 'efficiencyRatio';
+  | 'efficiencyRatio'
+  | 'atrDepth'
+  | 'highSeq'
+  | 'lowSeq'
+  | 'pivotGap';
 
 export interface FilterPreviewBar {
   candle: Candle;
@@ -32,6 +41,8 @@ export interface FilterPreviewBar {
   overallPass: boolean;
   /** Full instrumentation snapshot at this bar, for slider "your data currently sits here" ticks. */
   metrics: EntryMetricsSnapshot;
+  /** ATR-unit distance from EMA21 — not part of EntryMetricsSnapshot (that's the trade-record stamp shape). */
+  atrDepth?: number;
 }
 
 const PREVIEW_WINDOW = 30;
@@ -63,6 +74,9 @@ export function useFilterPreviewData(
     const bars: FilterPreviewBar[] = [];
     for (let i = start; i <= end; i++) {
       const metrics = computeEntryMetrics(candles, i, config);
+      const ema21 = getEmaAt(candles, i, 21);
+      const atr = getAtrAt(candles, i);
+      const atrDepth = ema21 && atr > 0 ? Math.abs(candles[i].close - ema21) / atr : undefined;
       const pass: Partial<Record<PreviewFilterKey, boolean>> = {
         barOverlap: passesBarOverlap(rules, metrics.barOverlapAvg),
         barRange: passesBarRange(rules, metrics.bullBarRangeAvg, metrics.bearBarRangeAvg, metrics.barRangeAvg, isLong),
@@ -72,12 +86,17 @@ export function useFilterPreviewData(
         ema20GapBar: passesEma20GapBar(rules, metrics.ema20GapBarRatio),
         ema20Bias: passesEma20Bias(rules, metrics.ema20CloseAboveRatio, isLong),
         efficiencyRatio: passesEfficiencyRatio(rules, metrics.efficiencyRatio),
+        atrDepth: passesAtrDepth(rules, candles[i].close, ema21, atr),
+        highSeq: passesSeqFilter(rules.highSeqFilter, rules.highSeqPatterns, metrics.pivotHighSeq ?? []),
+        lowSeq: passesSeqFilter(rules.lowSeqFilter, rules.lowSeqPatterns, metrics.pivotLowSeq ?? []),
+        pivotGap: passesPivotGap(rules, metrics.pivotGapAvgBars),
       };
       bars.push({
         candle: candles[i],
         pass,
         overallPass: Object.values(pass).every(Boolean),
         metrics,
+        atrDepth,
       });
     }
     return bars;

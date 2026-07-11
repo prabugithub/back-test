@@ -844,12 +844,12 @@ function getPivotSeq(pivots: PivotPoint[]): string {
   return `${bear.trendLabel}-${bull.trendLabel}`;
 }
 
-function getEmaAt(candles: Candle[], index: number, period: number): number | null {
+export function getEmaAt(candles: Candle[], index: number, period: number): number | null {
   const ema = calculateEMA(candles.slice(0, index + 1), period);
   return ema.length ? ema[ema.length - 1].value : null;
 }
 
-function getAtrAt(candles: Candle[], index: number): number {
+export function getAtrAt(candles: Candle[], index: number): number {
   const atr = calculateATR(candles.slice(0, index + 1), 14);
   return atr.length ? atr[atr.length - 1].value : 0;
 }

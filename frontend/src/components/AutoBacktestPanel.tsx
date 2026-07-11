@@ -23,6 +23,12 @@ import { BreakCountDiagram } from './autobacktest-visuals/BreakCountDiagram';
 import { EmaSlopeDiagram } from './autobacktest-visuals/EmaSlopeDiagram';
 import { EmaInteractionDiagram } from './autobacktest-visuals/EmaInteractionDiagram';
 import { EfficiencyRatioDiagram } from './autobacktest-visuals/EfficiencyRatioDiagram';
+import { ModePickerControl } from './autobacktest-visuals/ModePickerControl';
+import { MaPositionDiagram } from './autobacktest-visuals/MaPositionDiagram';
+import { PivotSeqDiagram } from './autobacktest-visuals/PivotSeqDiagram';
+import { AtrDepthDiagram } from './autobacktest-visuals/AtrDepthDiagram';
+import { PivotSequencePatternPicker } from './autobacktest-visuals/PivotSequencePatternPicker';
+import { PivotGapDiagram } from './autobacktest-visuals/PivotGapDiagram';
 
 const HIGH_SEQ_PATTERNS = generateBinaryPatterns('HH', 'LH');
 const LOW_SEQ_PATTERNS = generateBinaryPatterns('HL', 'LL');
@@ -95,6 +101,8 @@ function RegimeEditor({ regime, rules, onChange, candles, currentIndex, config }
   const [hoveredFilterKey, setHoveredFilterKey] = useState<PreviewFilterKey | null>(null);
   const previewBars = useFilterPreviewData(candles, currentIndex, rules, config);
   const latestBar = previewBars[previewBars.length - 1];
+  const isShort = rules.direction === 'SHORT_ONLY';
+  const isBoth = rules.direction === 'BOTH';
 
   return (
     <div className="space-y-3 pt-1">
@@ -185,85 +193,88 @@ function RegimeEditor({ regime, rules, onChange, candles, currentIndex, config }
 
       {/* Filters row */}
       <div className="grid grid-cols-2 gap-2">
-        <div>
-          <p className="text-[10px] text-gray-400 mb-0.5 uppercase tracking-wide font-medium">MA Filter</p>
-          <select
-            value={rules.maFilter}
-            onChange={e => up({ maFilter: e.target.value as RegimeRules['maFilter'] })}
-            className="w-full px-1.5 py-1 text-[11px] border rounded"
-          >
-            {(() => {
-              const isShort = rules.direction === 'SHORT_ONLY';
-              const isBoth  = rules.direction === 'BOTH';
-              return (
-                <>
-                  <option value="none">None</option>
-                  <option value="above_ema21">
-                    {isBoth ? 'EMA 21 side' : isShort ? 'Below EMA 21' : 'Above EMA 21'}
-                  </option>
-                  <option value="on_or_above_ema21">
-                    {isBoth ? 'EMA 21 touch' : isShort ? 'On / Below EMA 21' : 'On / Above EMA 21'}
-                  </option>
-                  <option value="above_ema60">
-                    {isBoth ? 'EMA 60 side' : isShort ? 'Below EMA 60' : 'Above EMA 60'}
-                  </option>
-                </>
-              );
-            })()}
-          </select>
-        </div>
-        <div>
-          <p className="text-[10px] text-gray-400 mb-0.5 uppercase tracking-wide font-medium">Pivot Seq</p>
-          <select
-            value={rules.ltPivotSequence}
-            onChange={e => up({ ltPivotSequence: e.target.value as RegimeRules['ltPivotSequence'] })}
-            className="w-full px-1.5 py-1 text-[11px] border rounded"
-          >
-            <option value="any">Any</option>
-            <option value="HH-HL">HH-HL (Bull)</option>
-            <option value="LH-HL">LH-HL (Reversal)</option>
-            <option value="HH-LL">HH-LL (Mixed)</option>
-            <option value="LH-LL">LH-LL (Bear)</option>
-          </select>
-        </div>
         <div className="col-span-2">
-          <p className="text-[10px] text-gray-400 mb-0.5 uppercase tracking-wide font-medium">HT Structure</p>
-          <select
-            value={rules.htStructureFilter}
-            onChange={e => up({ htStructureFilter: e.target.value as RegimeRules['htStructureFilter'] })}
-            className="w-full px-1.5 py-1 text-[11px] border rounded"
-          >
-            <option value="any">Any</option>
-            <option value="bull_trend">Bull Trend (HT)</option>
-            <option value="bear_trend">Bear Trend (HT)</option>
-          </select>
+          <ModePickerControl
+            label="MA Filter"
+            tooltip="Where price must sit relative to a moving average at entry. On/Touch allows the candle to still be interacting with the line; the plain Above/Below variants require clear separation."
+            mode={rules.maFilter}
+            offValue="none"
+            modeOptions={[
+              { value: 'none', label: 'Off' },
+              { value: 'above_ema21', label: isBoth ? 'EMA21 side' : isShort ? 'Below EMA21' : 'Above EMA21' },
+              { value: 'on_or_above_ema21', label: isBoth ? 'EMA21 touch' : isShort ? 'On/Below EMA21' : 'On/Above EMA21' },
+              { value: 'above_ema60', label: isBoth ? 'EMA60 side' : isShort ? 'Below EMA60' : 'Above EMA60' },
+            ]}
+            onModeChange={v => up({ maFilter: v as RegimeRules['maFilter'] })}
+            diagram={m => (m === 'none' ? null : <MaPositionDiagram variant={m as 'above_ema21' | 'on_or_above_ema21' | 'above_ema60'} isShort={isShort} />)}
+          />
         </div>
-        <div>
-          <p className="text-[10px] text-gray-400 mb-0.5 uppercase tracking-wide font-medium">ATR Depth</p>
-          <select
-            value={rules.atrDepthFilter ?? 'none'}
-            onChange={e => up({ atrDepthFilter: e.target.value as RegimeRules['atrDepthFilter'] })}
-            className="w-full px-1.5 py-1 text-[11px] border rounded"
-          >
-            <option value="none">None</option>
-            <option value="max">≤ X ATR (Trend)</option>
-            <option value="min">≥ X ATR (Gap/Range)</option>
-          </select>
+
+        <div className="col-span-2">
+          <ModePickerControl
+            label="Pivot Seq"
+            tooltip="Matches the single most recent swing-high and swing-low trend labels (Brooks HH/LH, HL/LL) against a specific pattern. 'Any' applies no filter."
+            mode={rules.ltPivotSequence}
+            offValue="any"
+            gridCols={5}
+            modeOptions={[
+              { value: 'any', label: 'Any' },
+              { value: 'HH-HL', label: 'HH-HL (Bull)' },
+              { value: 'LH-HL', label: 'LH-HL (Reversal)' },
+              { value: 'HH-LL', label: 'HH-LL (Mixed)' },
+              { value: 'LH-LL', label: 'LH-LL (Bear)' },
+            ]}
+            onModeChange={v => up({ ltPivotSequence: v as RegimeRules['ltPivotSequence'] })}
+            diagram={m => (m === 'any' ? null : <PivotSeqDiagram pattern={m as 'HH-HL' | 'LH-HL' | 'HH-LL' | 'LH-LL'} />)}
+          />
         </div>
-        {(rules.atrDepthFilter ?? 'none') !== 'none' && (
-          <div>
-            <p className="text-[10px] text-gray-400 mb-0.5 uppercase tracking-wide font-medium">Threshold</p>
-            <div className="flex items-center gap-1">
-              <input
-                type="number" step={0.25} min={0.25} max={10}
-                value={rules.atrDepthThreshold ?? 1.5}
-                onChange={e => up({ atrDepthThreshold: Number(e.target.value) })}
-                className="w-full px-1.5 py-1 text-[11px] border rounded text-center"
-              />
-              <span className="text-[10px] text-gray-400 whitespace-nowrap">ATR</span>
-            </div>
-          </div>
-        )}
+
+        <div className="col-span-2">
+          <ModePickerControl
+            label="HT Structure"
+            tooltip="Higher-timeframe structure gate. Note: this is actually an EMA60 slope computed on the same base-timeframe candles, not a true resampled higher-timeframe read — treat it as a longer-term trend confirmation, not independent multi-timeframe confluence."
+            mode={rules.htStructureFilter}
+            offValue="any"
+            modeOptions={[
+              { value: 'any', label: 'Any' },
+              { value: 'bull_trend', label: 'Bull Trend' },
+              { value: 'bear_trend', label: 'Bear Trend' },
+            ]}
+            onModeChange={v => up({ htStructureFilter: v as RegimeRules['htStructureFilter'] })}
+            diagram={m =>
+              m === 'any' ? null : m === 'bull_trend' ? (
+                <TrendingUp size={22} className="text-green-600" />
+              ) : (
+                <TrendingDown size={22} className="text-red-600" />
+              )
+            }
+          />
+        </div>
+
+        <div className="col-span-2">
+          <ThresholdFilterControl
+            label="ATR Depth"
+            tooltip="Distance of the entry price from the EMA21, measured in ATR units (volatility-normalized). Trend caps how far price can be from the average, to avoid chasing an overextended move. Gap/Range instead requires a minimum distance, for gap or range-reversal entries."
+            mode={rules.atrDepthFilter ?? 'none'}
+            offValue="none"
+            modeOptions={[
+              { value: 'none', label: 'Off' },
+              { value: 'max', label: 'Trend' },
+              { value: 'min', label: 'Gap/Range' },
+            ]}
+            onModeChange={v => up({ atrDepthFilter: v as RegimeRules['atrDepthFilter'] })}
+            threshold={rules.atrDepthThreshold ?? 1.5}
+            onThresholdChange={v => up({ atrDepthThreshold: v })}
+            min={0.25}
+            max={4}
+            step={0.25}
+            formatValue={v => v.toFixed(2)}
+            liveValue={latestBar?.atrDepth}
+            onHoverChange={hovering => setHoveredFilterKey(hovering ? 'atrDepth' : null)}
+            diagram={<AtrDepthDiagram atrMultiple={rules.atrDepthThreshold ?? 1.5} />}
+          />
+        </div>
+
         <div className="col-span-2">
           <ThresholdFilterControl
             label="Efficiency Ratio"
@@ -507,118 +518,65 @@ function RegimeEditor({ regime, rules, onChange, candles, currentIndex, config }
           Pivot Sequence History (last 4)
         </p>
         <div className="grid grid-cols-2 gap-2">
-          <div>
-            <p
-              className="text-[10px] text-gray-400 mb-0.5 uppercase tracking-wide font-medium cursor-help"
-              title="Matches the last 4 bearish-pivot trend labels (swing highs: HH/LH), oldest to newest, against a whitelist of allowed 4-in-a-row patterns. With fewer than 4 pivots recorded yet, this filter passes through."
-            >
-              High Sequence
-            </p>
-            <select
-              value={rules.highSeqFilter ?? 'none'}
-              onChange={e => up({ highSeqFilter: e.target.value as RegimeRules['highSeqFilter'] })}
-              className="w-full px-1.5 py-1 text-[11px] border rounded"
-            >
-              <option value="none">None</option>
-              <option value="custom">Custom (pick patterns)</option>
-            </select>
-          </div>
-          <div>
-            <p
-              className="text-[10px] text-gray-400 mb-0.5 uppercase tracking-wide font-medium cursor-help"
-              title="Matches the last 4 bullish-pivot trend labels (swing lows: HL/LL), oldest to newest, against a whitelist of allowed 4-in-a-row patterns. With fewer than 4 pivots recorded yet, this filter passes through."
-            >
-              Low Sequence
-            </p>
-            <select
-              value={rules.lowSeqFilter ?? 'none'}
-              onChange={e => up({ lowSeqFilter: e.target.value as RegimeRules['lowSeqFilter'] })}
-              className="w-full px-1.5 py-1 text-[11px] border rounded"
-            >
-              <option value="none">None</option>
-              <option value="custom">Custom (pick patterns)</option>
-            </select>
-          </div>
-          {(rules.highSeqFilter ?? 'none') === 'custom' && (
-            <div className="col-span-2">
-              <p className="text-[9px] text-gray-400 mb-1">Select allowed high-sequence patterns:</p>
-              <div className="grid grid-cols-4 gap-1">
-                {HIGH_SEQ_PATTERNS.map(p => {
-                  const active = (rules.highSeqPatterns ?? []).includes(p);
-                  return (
-                    <button
-                      key={p}
-                      onClick={() => up({
-                        highSeqPatterns: active
-                          ? (rules.highSeqPatterns ?? []).filter(x => x !== p)
-                          : [...(rules.highSeqPatterns ?? []), p],
-                      })}
-                      className={`px-1 py-0.5 text-[10px] rounded border font-medium ${active ? 'bg-indigo-600 text-white border-indigo-600' : 'bg-gray-50 text-gray-500 border-gray-300 hover:bg-gray-100'}`}
-                    >
-                      {p}
-                    </button>
-                  );
-                })}
-              </div>
-            </div>
-          )}
-          {(rules.lowSeqFilter ?? 'none') === 'custom' && (
-            <div className="col-span-2">
-              <p className="text-[9px] text-gray-400 mb-1">Select allowed low-sequence patterns:</p>
-              <div className="grid grid-cols-4 gap-1">
-                {LOW_SEQ_PATTERNS.map(p => {
-                  const active = (rules.lowSeqPatterns ?? []).includes(p);
-                  return (
-                    <button
-                      key={p}
-                      onClick={() => up({
-                        lowSeqPatterns: active
-                          ? (rules.lowSeqPatterns ?? []).filter(x => x !== p)
-                          : [...(rules.lowSeqPatterns ?? []), p],
-                      })}
-                      className={`px-1 py-0.5 text-[10px] rounded border font-medium ${active ? 'bg-indigo-600 text-white border-indigo-600' : 'bg-gray-50 text-gray-500 border-gray-300 hover:bg-gray-100'}`}
-                    >
-                      {p}
-                    </button>
-                  );
-                })}
-              </div>
-            </div>
-          )}
+          <PivotSequencePatternPicker
+            label="High Sequence"
+            tooltip="Matches the last 4 bearish-pivot trend labels (swing highs: HH/LH), oldest to newest, against a whitelist of allowed 4-in-a-row patterns. With fewer than 4 pivots recorded yet, this filter passes through."
+            filter={rules.highSeqFilter}
+            onFilterChange={v => up({ highSeqFilter: v })}
+            patterns={HIGH_SEQ_PATTERNS}
+            selectedPatterns={rules.highSeqPatterns ?? []}
+            onTogglePattern={p => {
+              const active = (rules.highSeqPatterns ?? []).includes(p);
+              up({
+                highSeqPatterns: active
+                  ? (rules.highSeqPatterns ?? []).filter(x => x !== p)
+                  : [...(rules.highSeqPatterns ?? []), p],
+              });
+            }}
+            onHoverChange={hovering => setHoveredFilterKey(hovering ? 'highSeq' : null)}
+          />
 
-          <div>
-            <p
-              className="text-[10px] text-gray-400 mb-0.5 uppercase tracking-wide font-medium cursor-help"
-              title="Average bar-count gap between consecutive pivots across both the high and low sequences — a trend-pace check. 'Fast' requires the average gap to stay at or below the threshold (pivots forming quickly — accelerating/choppy). 'Slow' requires it to be at or above (pivots spaced out — a slower, more mature trend)."
-            >
-              Pivot Gap (bars)
-            </p>
-            <select
-              value={rules.pivotGapFilter ?? 'none'}
-              onChange={e => up({ pivotGapFilter: e.target.value as RegimeRules['pivotGapFilter'] })}
-              className="w-full px-1.5 py-1 text-[11px] border rounded"
-            >
-              <option value="none">None</option>
-              <option value="max">≤ X bars (Fast)</option>
-              <option value="min">≥ X bars (Slow)</option>
-            </select>
+          <PivotSequencePatternPicker
+            label="Low Sequence"
+            tooltip="Matches the last 4 bullish-pivot trend labels (swing lows: HL/LL), oldest to newest, against a whitelist of allowed 4-in-a-row patterns. With fewer than 4 pivots recorded yet, this filter passes through."
+            filter={rules.lowSeqFilter}
+            onFilterChange={v => up({ lowSeqFilter: v })}
+            patterns={LOW_SEQ_PATTERNS}
+            selectedPatterns={rules.lowSeqPatterns ?? []}
+            onTogglePattern={p => {
+              const active = (rules.lowSeqPatterns ?? []).includes(p);
+              up({
+                lowSeqPatterns: active
+                  ? (rules.lowSeqPatterns ?? []).filter(x => x !== p)
+                  : [...(rules.lowSeqPatterns ?? []), p],
+              });
+            }}
+            onHoverChange={hovering => setHoveredFilterKey(hovering ? 'lowSeq' : null)}
+          />
+
+          <div className="col-span-2">
+            <ThresholdFilterControl
+              label="Pivot Gap (bars)"
+              tooltip="Average bar-count gap between consecutive pivots across both the high and low sequences — a trend-pace check. Fast requires the average gap to stay at or below the threshold (pivots forming quickly — accelerating/choppy). Slow requires it to be at or above (pivots spaced out — a slower, more mature trend)."
+              mode={rules.pivotGapFilter ?? 'none'}
+              offValue="none"
+              modeOptions={[
+                { value: 'none', label: 'Off' },
+                { value: 'max', label: 'Fast' },
+                { value: 'min', label: 'Slow' },
+              ]}
+              onModeChange={v => up({ pivotGapFilter: v as RegimeRules['pivotGapFilter'] })}
+              threshold={rules.pivotGapThreshold ?? 5}
+              onThresholdChange={v => up({ pivotGapThreshold: v })}
+              min={0}
+              max={20}
+              step={1}
+              formatValue={v => `${v.toFixed(0)} bars`}
+              liveValue={latestBar?.metrics.pivotGapAvgBars}
+              onHoverChange={hovering => setHoveredFilterKey(hovering ? 'pivotGap' : null)}
+              diagram={<PivotGapDiagram gapBars={rules.pivotGapThreshold ?? 5} />}
+            />
           </div>
-          {(rules.pivotGapFilter ?? 'none') !== 'none' && (
-            <div>
-              <p
-                className="text-[10px] text-gray-400 mb-0.5 uppercase tracking-wide font-medium cursor-help"
-                title="Bar-count gap cutoff between consecutive pivots. Default 5."
-              >
-                Gap Threshold (bars)
-              </p>
-              <input
-                type="number" step={1} min={0}
-                value={rules.pivotGapThreshold ?? 5}
-                onChange={e => up({ pivotGapThreshold: Number(e.target.value) })}
-                className="w-full px-1.5 py-1 text-[11px] border rounded text-center"
-              />
-            </div>
-          )}
         </div>
       </div>
 

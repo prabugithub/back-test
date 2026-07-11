@@ -276,6 +276,25 @@ Every entry trade (manual, auto-backtest live-replay, and batch backtest) is sta
 
 Range/Reversal regimes leave all 4 default-on filters at `none` (chop-tolerant by design). When a trade comes from the auto-engine, all stamped instrumentation values are the exact ones used for the entry decision (computed once in `evaluateAutoSignals`), not a fresh recompute — avoids double-running the EMA-slope/EMA-interaction calculations, which rerun EMA over the full visible candle history.
 
+### Visual Filter Configuration
+
+Every filter in the Auto-Backtest panel (Quality Setup Filters plus MA Filter, Pivot Seq, HT Structure, ATR Depth, Efficiency Ratio, and Pivot Sequence History) is configured visually rather than via a raw dropdown + number pair — aimed at reading a threshold as a chart shape instead of an abstract number:
+
+- **Segmented mode buttons** replace the `<select>` (e.g. "Clean/Trend" / "Choppy" instead of "≤ X" / "≥ X").
+- **Slider + live-redrawing diagram** replaces the raw number input — a small illustration (shaded candle overlap, an EMA-slope angle, a straight-vs-zigzag efficiency path, a candle-vs-EMA position, a swing-pattern staircase, etc.) redraws as the slider moves, so the threshold is never just a number.
+- **"Currently requires: ≥ X" / "≤ X"** appears the instant a mode button is clicked, even before touching the slider — clarifies that a filter's two directional modes (e.g. Trending/Choppy) share one threshold value and only flip which side of it counts as a pass.
+- **"Your data: X"** — a live value computed from the currently loaded candles' actual metric, shown next to the label and as a tick mark on the slider, so a threshold can be set relative to what the market is actually doing right now instead of guessing.
+- **Live Preview Strip** — one real-candlestick mini-chart per regime tab (top of each regime editor), showing the last 30 loaded bars with a pass/fail dot under each bar for the combined set of currently-active filters, plus an "N/30 pass" count. Hovering or focusing any filter's control isolates that filter's own pass/fail on the strip, so cause-and-effect between a slider and the actual candles is visible directly.
+- Categorical filters with no numeric threshold — MA Filter, Pivot Seq, HT Structure — get the same segmented-button treatment plus an illustrative diagram (candle position relative to an EMA line, a 2-point swing zigzag, a trend-direction icon), just without a slider.
+- Pivot Sequence History patterns are picked from a 4×4 grid where each button shows a mini staircase icon (rising for a run of "Higher" swings, falling for a run of "Lower" swings) instead of only the raw four-letter code.
+
+### Pivot Sequence History & Pivot Gap
+
+Two per-regime filters alongside the single most-recent Pivot Seq filter above, both configured in the **Pivot Sequence History (last 4)** section:
+
+- **High/Low Sequence** (`highSeqFilter`/`lowSeqFilter`: Off/Pick patterns, with `highSeqPatterns`/`lowSeqPatterns` holding the chosen whitelist) — matches the last 4 same-type pivots (4 consecutive swing highs for High Sequence, 4 consecutive swing lows for Low Sequence), oldest to newest, against a whitelist of allowed 4-in-a-row patterns (e.g. `HH-HH-HH-HH`, `LH-LH-HH-HH`) picked from all 16 possible combinations. With fewer than 4 pivots recorded yet in the session, the filter passes through — no rejection.
+- **Pivot Gap** (Off/Fast/Slow + a bars threshold, default `5`) — average bar-count gap between consecutive pivots across both the high and low sequences, a trend-pace check. **Fast** requires the average gap at or below the threshold (pivots forming quickly — accelerating/choppy). **Slow** requires it at or above (pivots spaced out — a slower, more mature trend).
+
 ---
 
 ## 7. Position Tracking & P&L
@@ -726,6 +745,6 @@ Dialogs (open on demand):
 
 ---
 
-**Last Updated:** 2026-07-07
+**Last Updated:** 2026-07-11
 
 *Last updated: 2026-04-08*
