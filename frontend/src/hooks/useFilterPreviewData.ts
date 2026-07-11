@@ -6,13 +6,25 @@ import {
   type EntryMetricsSnapshot,
   computeEntryMetrics,
   passesBarOverlap,
+  passesBarRange,
+  passesBarBreak,
   passesEmaSlope,
+  passesEma20GapBar,
+  passesEma20Bias,
   passesEfficiencyRatio,
 } from '../utils/autoBacktestEngine';
 
 // One entry per Quality Setup Filter that has a live-preview diagram. Extend this list
 // as more filters get their own ThresholdFilterControl (see plan phases 2-4).
-export type PreviewFilterKey = 'barOverlap' | 'ema21Slope' | 'efficiencyRatio';
+export type PreviewFilterKey =
+  | 'barOverlap'
+  | 'barRange'
+  | 'barBreak'
+  | 'ema21Slope'
+  | 'ema50Slope'
+  | 'ema20GapBar'
+  | 'ema20Bias'
+  | 'efficiencyRatio';
 
 export interface FilterPreviewBar {
   candle: Candle;
@@ -53,7 +65,12 @@ export function useFilterPreviewData(
       const metrics = computeEntryMetrics(candles, i, config);
       const pass: Partial<Record<PreviewFilterKey, boolean>> = {
         barOverlap: passesBarOverlap(rules, metrics.barOverlapAvg),
+        barRange: passesBarRange(rules, metrics.bullBarRangeAvg, metrics.bearBarRangeAvg, metrics.barRangeAvg, isLong),
+        barBreak: passesBarBreak(rules, metrics.highBreakCount, metrics.lowBreakCount, isLong),
         ema21Slope: passesEmaSlope(rules.ema21SlopeFilter, rules.ema21SlopeThreshold, metrics.ema21Slope, isLong),
+        ema50Slope: passesEmaSlope(rules.ema50SlopeFilter, rules.ema50SlopeThreshold, metrics.ema50Slope, isLong),
+        ema20GapBar: passesEma20GapBar(rules, metrics.ema20GapBarRatio),
+        ema20Bias: passesEma20Bias(rules, metrics.ema20CloseAboveRatio, isLong),
         efficiencyRatio: passesEfficiencyRatio(rules, metrics.efficiencyRatio),
       };
       bars.push({

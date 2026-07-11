@@ -18,7 +18,10 @@ import { useFilterPreviewData, type PreviewFilterKey } from '../hooks/useFilterP
 import { FilterPreviewStrip } from './autobacktest-visuals/FilterPreviewStrip';
 import { ThresholdFilterControl } from './autobacktest-visuals/ThresholdFilterControl';
 import { BarOverlapDiagram } from './autobacktest-visuals/BarOverlapDiagram';
+import { BarRangeFilterControl } from './autobacktest-visuals/BarRangeFilterControl';
+import { BreakCountDiagram } from './autobacktest-visuals/BreakCountDiagram';
 import { EmaSlopeDiagram } from './autobacktest-visuals/EmaSlopeDiagram';
+import { EmaInteractionDiagram } from './autobacktest-visuals/EmaInteractionDiagram';
 import { EfficiencyRatioDiagram } from './autobacktest-visuals/EfficiencyRatioDiagram';
 
 const HIGH_SEQ_PATTERNS = generateBinaryPatterns('HH', 'LH');
@@ -352,90 +355,51 @@ function RegimeEditor({ regime, rules, onChange, candles, currentIndex, config }
             />
           </div>
 
-          <div>
-            <p
-              className="text-[10px] text-gray-400 mb-0.5 uppercase tracking-wide font-medium cursor-help"
-              title="Average candle size (high-low) over the 'Bar Range' lookback. 'Bull > Bear × X' (dominance) requires bars in your trade's direction to be bigger than bars against it, by the multiplier below — confirms the trend is expanding in your favor. The 'Avg Range' min/max modes instead require the overall average bar size to clear (min) or stay under (max) a fixed points threshold — useful to avoid low-volatility chop or overextended expansion regardless of direction."
-            >
-              Bar Range
-            </p>
-            <select
-              value={rules.barRangeFilter ?? 'none'}
-              onChange={e => up({ barRangeFilter: e.target.value as RegimeRules['barRangeFilter'] })}
-              className="w-full px-1.5 py-1 text-[11px] border rounded"
-            >
-              <option value="none">None</option>
-              <option value="dominance">Bull &gt; Bear × X (Direction)</option>
-              <option value="min">≥ X pts (Avg Range)</option>
-              <option value="max">≤ X pts (Avg Range)</option>
-            </select>
+          <div className="col-span-2">
+            <BarRangeFilterControl
+              mode={rules.barRangeFilter ?? 'none'}
+              onModeChange={v => up({ barRangeFilter: v as RegimeRules['barRangeFilter'] })}
+              dominanceThreshold={rules.barRangeDominanceThreshold ?? 1.0}
+              onDominanceChange={v => up({ barRangeDominanceThreshold: v })}
+              rangeThreshold={rules.barRangeThreshold ?? 0}
+              onRangeChange={v => up({ barRangeThreshold: v })}
+              liveDominance={
+                latestBar && rules.direction !== 'SHORT_ONLY'
+                  ? latestBar.metrics.bullBarRangeAvg && latestBar.metrics.bearBarRangeAvg
+                    ? latestBar.metrics.bullBarRangeAvg / latestBar.metrics.bearBarRangeAvg
+                    : undefined
+                  : latestBar?.metrics.bearBarRangeAvg && latestBar?.metrics.bullBarRangeAvg
+                  ? latestBar.metrics.bearBarRangeAvg / latestBar.metrics.bullBarRangeAvg
+                  : undefined
+              }
+              liveRangeAvg={latestBar?.metrics.barRangeAvg}
+              onHoverChange={hovering => setHoveredFilterKey(hovering ? 'barRange' : null)}
+            />
           </div>
-          {rules.barRangeFilter === 'dominance' && (
-            <div>
-              <p
-                className="text-[10px] text-gray-400 mb-0.5 uppercase tracking-wide font-medium cursor-help"
-                title="How many times bigger the trade-direction average bar range must be vs. the opposite side. 1 = just bigger, 1.5 = 50% bigger. Default 1.0."
-              >
-                Dominance ×
-              </p>
-              <input
-                type="number" step={0.1} min={1} max={5}
-                value={rules.barRangeDominanceThreshold ?? 1.0}
-                onChange={e => up({ barRangeDominanceThreshold: Number(e.target.value) })}
-                className="w-full px-1.5 py-1 text-[11px] border rounded text-center"
-              />
-            </div>
-          )}
-          {(rules.barRangeFilter === 'min' || rules.barRangeFilter === 'max') && (
-            <div>
-              <p
-                className="text-[10px] text-gray-400 mb-0.5 uppercase tracking-wide font-medium cursor-help"
-                title="Average bar size cutoff in price points (instrument-specific — set relative to this instrument's typical candle range)."
-              >
-                Range Threshold (pts)
-              </p>
-              <input
-                type="number" step={1} min={0}
-                value={rules.barRangeThreshold ?? 0}
-                onChange={e => up({ barRangeThreshold: Number(e.target.value) })}
-                className="w-full px-1.5 py-1 text-[11px] border rounded text-center"
-              />
-            </div>
-          )}
 
-          <div>
-            <p
-              className="text-[10px] text-gray-400 mb-0.5 uppercase tracking-wide font-medium cursor-help"
-              title="Counts, over the 'Breaks' lookback, how many bars made a new high (for longs) or new low (for shorts) vs. the bar before it — a momentum/persistence check. 'Persistent' requires at least X breaks (momentum still active). 'Exhausted' requires at most X (momentum fading — useful for reversal/fade entries)."
-            >
-              Break Count
-            </p>
-            <select
-              value={rules.barBreakFilter ?? 'none'}
-              onChange={e => up({ barBreakFilter: e.target.value as RegimeRules['barBreakFilter'] })}
-              className="w-full px-1.5 py-1 text-[11px] border rounded"
-            >
-              <option value="none">None</option>
-              <option value="min">≥ X (Persistent)</option>
-              <option value="max">≤ X (Exhausted)</option>
-            </select>
+          <div className="col-span-2">
+            <ThresholdFilterControl
+              label="Break Count"
+              tooltip="Counts, over the 'Breaks' lookback, how many bars made a new high (for longs) or new low (for shorts) vs. the bar before it — a momentum/persistence check. Persistent requires at least X breaks (momentum still active). Exhausted requires at most X (momentum fading — useful for reversal/fade entries)."
+              mode={rules.barBreakFilter ?? 'none'}
+              offValue="none"
+              modeOptions={[
+                { value: 'none', label: 'Off' },
+                { value: 'min', label: 'Persistent' },
+                { value: 'max', label: 'Exhausted' },
+              ]}
+              onModeChange={v => up({ barBreakFilter: v as RegimeRules['barBreakFilter'] })}
+              threshold={rules.barBreakThreshold ?? 5}
+              onThresholdChange={v => up({ barBreakThreshold: v })}
+              min={0}
+              max={20}
+              step={1}
+              liveValue={rules.direction !== 'SHORT_ONLY' ? latestBar?.metrics.highBreakCount : latestBar?.metrics.lowBreakCount}
+              formatValue={v => v.toFixed(0)}
+              onHoverChange={hovering => setHoveredFilterKey(hovering ? 'barBreak' : null)}
+              diagram={<BreakCountDiagram count={rules.barBreakThreshold ?? 5} />}
+            />
           </div>
-          {(rules.barBreakFilter ?? 'none') !== 'none' && (
-            <div>
-              <p
-                className="text-[10px] text-gray-400 mb-0.5 uppercase tracking-wide font-medium cursor-help"
-                title="Number of new-high/new-low breaks required within the lookback window. Default 5."
-              >
-                Break Threshold
-              </p>
-              <input
-                type="number" step={1} min={0}
-                value={rules.barBreakThreshold ?? 5}
-                onChange={e => up({ barBreakThreshold: Number(e.target.value) })}
-                className="w-full px-1.5 py-1 text-[11px] border rounded text-center"
-              />
-            </div>
-          )}
 
           <div className="col-span-2">
             <ThresholdFilterControl
@@ -460,106 +424,80 @@ function RegimeEditor({ regime, rules, onChange, candles, currentIndex, config }
             />
           </div>
 
-          <div>
-            <p
-              className="text-[10px] text-gray-400 mb-0.5 uppercase tracking-wide font-medium cursor-help"
-              title="Same as EMA21 Slope above, but on the slower EMA50 — a longer-term trend-direction confirmation rather than short-term steepness."
-            >
-              EMA50 Slope
-            </p>
-            <select
-              value={rules.ema50SlopeFilter ?? 'none'}
-              onChange={e => up({ ema50SlopeFilter: e.target.value as RegimeRules['ema50SlopeFilter'] })}
-              className="w-full px-1.5 py-1 text-[11px] border rounded"
-            >
-              <option value="none">None</option>
-              <option value="min">≥ X (Favor Trade)</option>
-              <option value="max">≤ X (Not Overextended)</option>
-            </select>
+          <div className="col-span-2">
+            <ThresholdFilterControl
+              label="EMA50 Slope"
+              tooltip="Same as EMA21 Slope above, but on the slower EMA50 — a longer-term trend-direction confirmation rather than short-term steepness."
+              mode={rules.ema50SlopeFilter ?? 'none'}
+              offValue="none"
+              modeOptions={[
+                { value: 'none', label: 'Off' },
+                { value: 'min', label: 'Favor Trade' },
+                { value: 'max', label: 'Not Overextended' },
+              ]}
+              onModeChange={v => up({ ema50SlopeFilter: v as RegimeRules['ema50SlopeFilter'] })}
+              threshold={rules.ema50SlopeThreshold ?? 0}
+              onThresholdChange={v => up({ ema50SlopeThreshold: v })}
+              min={-2}
+              max={2}
+              step={0.05}
+              liveValue={latestBar?.metrics.ema50Slope}
+              onHoverChange={hovering => setHoveredFilterKey(hovering ? 'ema50Slope' : null)}
+              diagram={<EmaSlopeDiagram slope={rules.ema50SlopeThreshold ?? 0} min={-2} max={2} />}
+            />
           </div>
-          {(rules.ema50SlopeFilter ?? 'none') !== 'none' && (
-            <div>
-              <p
-                className="text-[10px] text-gray-400 mb-0.5 uppercase tracking-wide font-medium cursor-help"
-                title="Slope cutoff in price points per bar, already direction-aligned. 0 (default) = direction-only, no steepness required."
-              >
-                EMA50 Threshold
-              </p>
-              <input
-                type="number" step={0.05} value={rules.ema50SlopeThreshold ?? 0}
-                onChange={e => up({ ema50SlopeThreshold: Number(e.target.value) })}
-                className="w-full px-1.5 py-1 text-[11px] border rounded text-center"
-              />
-            </div>
-          )}
 
-          <div>
-            <p
-              className="text-[10px] text-gray-400 mb-0.5 uppercase tracking-wide font-medium cursor-help"
-              title="Fraction of bars over the 'EMA20 Interaction' lookback whose entire range never touches the EMA20 ('gap bars' — a Brooks strong-trend signal). 'Strong Trend' requires at least X of bars to be gap bars. 'Pullback/Touch' instead requires at most X, i.e. price is still interacting with the average — better suited to pullback/mean-reversion entries."
-            >
-              EMA20 Gap-Bar
-            </p>
-            <select
-              value={rules.ema20GapBarFilter ?? 'none'}
-              onChange={e => up({ ema20GapBarFilter: e.target.value as RegimeRules['ema20GapBarFilter'] })}
-              className="w-full px-1.5 py-1 text-[11px] border rounded"
-            >
-              <option value="none">None</option>
-              <option value="min">≥ X (Strong Trend)</option>
-              <option value="max">≤ X (Pullback/Touch)</option>
-            </select>
+          <div className="col-span-2">
+            <ThresholdFilterControl
+              label="EMA20 Gap-Bar"
+              tooltip="Fraction of bars over the 'EMA20 Interaction' lookback whose entire range never touches the EMA20 ('gap bars' — a Brooks strong-trend signal). Strong Trend requires at least X of bars to be gap bars. Pullback/Touch requires at most X — price is still interacting with the average, better suited to pullback/mean-reversion entries."
+              mode={rules.ema20GapBarFilter ?? 'none'}
+              offValue="none"
+              modeOptions={[
+                { value: 'none', label: 'Off' },
+                { value: 'min', label: 'Strong Trend' },
+                { value: 'max', label: 'Pullback/Touch' },
+              ]}
+              onModeChange={v => up({ ema20GapBarFilter: v as RegimeRules['ema20GapBarFilter'] })}
+              threshold={rules.ema20GapBarThreshold ?? 0.5}
+              onThresholdChange={v => up({ ema20GapBarThreshold: v })}
+              min={0}
+              max={1}
+              step={0.05}
+              liveValue={latestBar?.metrics.ema20GapBarRatio}
+              onHoverChange={hovering => setHoveredFilterKey(hovering ? 'ema20GapBar' : null)}
+              diagram={<EmaInteractionDiagram ratio={rules.ema20GapBarThreshold ?? 0.5} mode="gapBar" />}
+            />
           </div>
-          {(rules.ema20GapBarFilter ?? 'none') !== 'none' && (
-            <div>
-              <p
-                className="text-[10px] text-gray-400 mb-0.5 uppercase tracking-wide font-medium cursor-help"
-                title="Fraction of bars required to be gap bars, 0–1. Default 0.5."
-              >
-                Gap-Bar Threshold
-              </p>
-              <input
-                type="number" step={0.05} min={0} max={1}
-                value={rules.ema20GapBarThreshold ?? 0.5}
-                onChange={e => up({ ema20GapBarThreshold: Number(e.target.value) })}
-                className="w-full px-1.5 py-1 text-[11px] border rounded text-center"
-              />
-            </div>
-          )}
 
-          <div>
-            <p
-              className="text-[10px] text-gray-400 mb-0.5 uppercase tracking-wide font-medium cursor-help"
-              title="Fraction of closes above the EMA20 over the same 'EMA20 Interaction' lookback ('always-in' bias), automatically flipped for shorts so this always means 'is price staying on my trade's side of the average.' 'Sustained Bias' requires at least X (bias holding steady). 'Weak Bias' requires at most X (choppier back-and-forth around the average)."
-            >
-              EMA20 Bias
-            </p>
-            <select
-              value={rules.ema20BiasFilter ?? 'none'}
-              onChange={e => up({ ema20BiasFilter: e.target.value as RegimeRules['ema20BiasFilter'] })}
-              className="w-full px-1.5 py-1 text-[11px] border rounded"
-            >
-              <option value="none">None</option>
-              <option value="min">≥ X (Sustained Bias)</option>
-              <option value="max">≤ X (Weak Bias)</option>
-            </select>
+          <div className="col-span-2">
+            <ThresholdFilterControl
+              label="EMA20 Bias"
+              tooltip="Fraction of closes above the EMA20 over the same 'EMA20 Interaction' lookback ('always-in' bias), automatically flipped for shorts so this always means 'is price staying on my trade's side of the average.' Sustained Bias requires at least X (bias holding steady). Weak Bias requires at most X (choppier back-and-forth around the average)."
+              mode={rules.ema20BiasFilter ?? 'none'}
+              offValue="none"
+              modeOptions={[
+                { value: 'none', label: 'Off' },
+                { value: 'min', label: 'Sustained Bias' },
+                { value: 'max', label: 'Weak Bias' },
+              ]}
+              onModeChange={v => up({ ema20BiasFilter: v as RegimeRules['ema20BiasFilter'] })}
+              threshold={rules.ema20BiasThreshold ?? 0.5}
+              onThresholdChange={v => up({ ema20BiasThreshold: v })}
+              min={0}
+              max={1}
+              step={0.05}
+              liveValue={
+                rules.direction !== 'SHORT_ONLY'
+                  ? latestBar?.metrics.ema20CloseAboveRatio
+                  : latestBar?.metrics.ema20CloseAboveRatio !== undefined
+                  ? 1 - latestBar.metrics.ema20CloseAboveRatio
+                  : undefined
+              }
+              onHoverChange={hovering => setHoveredFilterKey(hovering ? 'ema20Bias' : null)}
+              diagram={<EmaInteractionDiagram ratio={rules.ema20BiasThreshold ?? 0.5} mode="bias" />}
+            />
           </div>
-          {(rules.ema20BiasFilter ?? 'none') !== 'none' && (
-            <div>
-              <p
-                className="text-[10px] text-gray-400 mb-0.5 uppercase tracking-wide font-medium cursor-help"
-                title="Fraction of closes required on the trade's side of the EMA20, 0–1. Default 0.5."
-              >
-                Bias Threshold
-              </p>
-              <input
-                type="number" step={0.05} min={0} max={1}
-                value={rules.ema20BiasThreshold ?? 0.5}
-                onChange={e => up({ ema20BiasThreshold: Number(e.target.value) })}
-                className="w-full px-1.5 py-1 text-[11px] border rounded text-center"
-              />
-            </div>
-          )}
         </div>
       </div>
 

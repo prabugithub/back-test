@@ -49,6 +49,10 @@ export function ThresholdFilterControl<M extends string>({
   const isActive = mode !== offValue;
   const liveValuePct =
     liveValue !== undefined && max > min ? Math.min(100, Math.max(0, ((liveValue - min) / (max - min)) * 100)) : null;
+  // 'min' filters always mean "at least X" and 'max' filters "at most X" (see passesXxx
+  // functions in autoBacktestEngine.ts) — this holds across every filter that uses this
+  // control, so the operator can be inferred from the mode value itself.
+  const operator = String(mode) === 'min' ? '≥' : String(mode) === 'max' ? '≤' : null;
 
   return (
     <div
@@ -85,6 +89,12 @@ export function ThresholdFilterControl<M extends string>({
           </button>
         ))}
       </div>
+
+      {isActive && operator && (
+        <p className="text-[11px] text-gray-600">
+          Currently requires: <span className="font-mono font-semibold text-indigo-600">{operator} {formatValue(threshold)}</span>
+        </p>
+      )}
 
       {isActive && (
         <div className="flex items-center gap-2">
