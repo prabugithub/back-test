@@ -291,6 +291,9 @@ export type AlBrooksSignal = string; // 'H1','H2','H3','H4',... 'L1','L2','L3','
 export interface AlBrooksMarker {
   time: number;
   signal: AlBrooksSignal;
+  /** Bar index of the swing extreme (hSwingHigh/lSwingLow) that anchors this pullback —
+   *  i.e. the end of the impulse leg, before the pullback that led to this signal began. */
+  anchorIndex: number;
 }
 
 /**
@@ -346,13 +349,17 @@ export function calculateAlBrooks(
   let hCount = 0;
   let hArmed = false;       // true after a low break (pullback started)
   let hSwingHigh = -Infinity;   // price level at pullback start; reset threshold
+  let hSwingHighBarIndex = ema21Period; // bar index of hSwingHigh, for anchoring filter windows
   let latestHigh = -Infinity;   // running max high since last H signal
+  let latestHighBarIndex = ema21Period; // bar index that set the current latestHigh
 
   // ── L System State (bear-context pullback counting) ───────
   let lCount = 0;
   let lArmed = false;       // true after a high break (pullback started)
   let lSwingLow = Infinity;    // price level at pullback start; reset threshold
+  let lSwingLowBarIndex = ema21Period; // bar index of lSwingLow, for anchoring filter windows
   let latestLow = Infinity;    // running min low since last L signal
+  let latestLowBarIndex = ema21Period; // bar index that set the current latestLow
 
   // ── Main loop ─────────────────────────────────────────────
   for (let i = ema21Period; i < candles.length; i++) {
@@ -368,6 +375,8 @@ export function calculateAlBrooks(
     // These accumulate since the last signal of their type,
     // so swing points capture the true move even through
     // inside bars.
+    if (c.high > latestHigh) latestHighBarIndex = i;
+    if (c.low < latestLow) latestLowBarIndex = i;
     latestHigh = Math.max(latestHigh, c.high);
     latestLow = Math.min(latestLow, c.low);
 
@@ -385,6 +394,7 @@ export function calculateAlBrooks(
     if (lowBreak && !hArmed) {
       hArmed = true;
       hSwingHigh = latestHigh;
+      hSwingHighBarIndex = latestHighBarIndex;
     }
     // L arm: high break starts a pullback in bear context.
     //        lSwingLow = latestLow (the true low of the
@@ -392,6 +402,7 @@ export function calculateAlBrooks(
     if (highBreak && !lArmed) {
       lArmed = true;
       lSwingLow = latestLow;
+      lSwingLowBarIndex = latestLowBarIndex;
     }
 
     // ── 4. Signal checks (using previous arm state) ──────
@@ -413,7 +424,7 @@ export function calculateAlBrooks(
 
       const depthOk = c.low <= ema21 + getAtr(c.timestamp) * atrDepthMultiplier;
       if (!usePullbackDepth || depthOk) {
-        result.push({ time: c.timestamp, signal: `H${hCount}` });
+        result.push({ time: c.timestamp, signal: `H${hCount}`, anchorIndex: hSwingHighBarIndex });
       }
     }
 
@@ -425,7 +436,7 @@ export function calculateAlBrooks(
 
       const depthOk = c.high >= ema21 - getAtr(c.timestamp) * atrDepthMultiplier;
       if (!usePullbackDepth || depthOk) {
-        result.push({ time: c.timestamp, signal: `L${lCount}` });
+        result.push({ time: c.timestamp, signal: `L${lCount}`, anchorIndex: lSwingLowBarIndex });
       }
     }
 

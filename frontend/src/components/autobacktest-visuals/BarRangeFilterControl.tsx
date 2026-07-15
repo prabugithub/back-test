@@ -38,7 +38,7 @@ export function BarRangeFilterControl({
 }: BarRangeFilterControlProps) {
   return (
     <div
-      className="border border-gray-200 rounded-lg p-2 space-y-2"
+      className="border border-gray-200 rounded-xl p-3 space-y-2 shadow-sm hover:shadow-md hover:border-gray-300 transition-all duration-200"
       onMouseEnter={() => onHoverChange?.(true)}
       onMouseLeave={() => onHoverChange?.(false)}
       onFocus={() => onHoverChange?.(true)}
@@ -69,7 +69,7 @@ export function BarRangeFilterControl({
             key={opt.value}
             type="button"
             onClick={() => onModeChange(opt.value)}
-            className={`flex-1 px-1 py-1 text-[10px] rounded border transition-colors ${
+            className={`flex-1 px-1 py-1 text-[10px] rounded border transition-all duration-150 active:scale-95 ${
               mode === opt.value
                 ? 'bg-indigo-600 border-indigo-600 text-white font-medium'
                 : 'bg-white border-gray-200 text-gray-500 hover:border-indigo-300'

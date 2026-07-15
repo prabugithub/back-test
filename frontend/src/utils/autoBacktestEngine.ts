@@ -437,14 +437,19 @@ export interface AutoSignal {
 // Instrumentation snapshot for a single bar — shared by evaluateAutoSignals' filter
 // gating (below) and the config UI's live filter-preview (autobacktest-visuals/).
 // Kept as one function so both call sites derive every metric identically.
-export function computeEntryMetrics(candles: Candle[], currentIndex: number, config: AutoBacktestConfig): EntryMetricsSnapshot {
+export function computeEntryMetrics(
+  candles: Candle[],
+  currentIndex: number,
+  config: AutoBacktestConfig,
+  trendAnchorIndex: number = currentIndex
+): EntryMetricsSnapshot {
   const pivots = calculatePivotPoints(candles.slice(0, currentIndex + 1));
   const pivotSeqStats = getPivotSequenceStats(pivots, 4);
-  const barOverlapRatios = calculateBarOverlap(candles, currentIndex, config.barOverlapLookback ?? 8);
+  const barOverlapRatios = calculateBarOverlap(candles, trendAnchorIndex, config.barOverlapLookback ?? 8);
   const barRangeSamples = calculateBarRanges(candles, currentIndex, config.barRangeLookback ?? 20);
   const { barRangeAvg, bullBarRangeAvg, bearBarRangeAvg } = averageBarRanges(barRangeSamples);
   const { highBreakCount, lowBreakCount, barsCompared: barBreakWindow } =
-    calculateBarBreaks(candles, currentIndex, config.barBreakLookback ?? 20);
+    calculateBarBreaks(candles, trendAnchorIndex, config.barBreakLookback ?? 20);
   const { gapBarRatio, closeAboveRatio, barsCompared: ema20InteractionWindow } =
     calculateEMAInteraction(candles, currentIndex, 20, config.emaInteractionLookback ?? 20);
   return {
@@ -452,12 +457,12 @@ export function computeEntryMetrics(candles: Candle[], currentIndex: number, con
     barRangeAvg,
     bullBarRangeAvg,
     bearBarRangeAvg,
-    efficiencyRatio: calculateEfficiencyRatio(candles, currentIndex, config.efficiencyRatioLookback ?? 10),
+    efficiencyRatio: calculateEfficiencyRatio(candles, trendAnchorIndex, config.efficiencyRatioLookback ?? 10),
     highBreakCount,
     lowBreakCount,
     barBreakWindow,
-    ema21Slope: calculateEMASlope(candles, currentIndex, 21, config.ema21SlopeLookback ?? 10),
-    ema50Slope: calculateEMASlope(candles, currentIndex, 50, config.ema50SlopeLookback ?? 20),
+    ema21Slope: calculateEMASlope(candles, trendAnchorIndex, 21, config.ema21SlopeLookback ?? 10),
+    ema50Slope: calculateEMASlope(candles, trendAnchorIndex, 50, config.ema50SlopeLookback ?? 20),
     ema20GapBarRatio: gapBarRatio,
     ema20CloseAboveRatio: closeAboveRatio,
     ema20InteractionWindow,
@@ -501,10 +506,19 @@ export function evaluateAutoSignals(
   const currentAbMarker = alBrooks.find(m => m.time === currentTs) ?? null;
   const pivotSeq = getPivotSeq(pivots);
 
+  // For pullback-continuation entries (H_SIGNAL/CONFLUENCE), the trend-cleanliness filters
+  // (Bar Overlap, Efficiency Ratio, Break Count, EMA Slope) should grade the impulse leg that
+  // preceded the pullback, not the pullback bars ending at this entry bar — so anchor their
+  // window at the fired marker's swing extreme instead of currentIndex. PIVOT-mode entries
+  // have no pullback concept, so they keep the window ending at currentIndex.
+  const trendAnchorIndex = (regimeRules.entryMode !== 'PIVOT' && currentAbMarker)
+    ? currentAbMarker.anchorIndex
+    : currentIndex;
+
   // Instrumentation snapshot — computed once per bar, used both for filter gating below
   // and (via the returned AutoSignal.entryMetrics) for stamping the resulting Trade
   // without recomputing.
-  const entryMetrics = computeEntryMetrics(candles, currentIndex, config);
+  const entryMetrics = computeEntryMetrics(candles, currentIndex, config, trendAnchorIndex);
 
   if (regimeRules.direction !== 'SHORT_ONLY') {
     const signal = evalLong(regimeRules, currentCandle, currentPivot, currentAbMarker, pivots, ema21, ema60, atr, currentIndex, candles, pivotSeq, ltMarket, htMarket, regime, entryMetrics);

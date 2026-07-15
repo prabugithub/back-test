@@ -18,6 +18,7 @@ import {
   getEmaAt,
   getAtrAt,
 } from '../utils/autoBacktestEngine';
+import { calculateAlBrooks } from '../utils/indicators';
 
 // One entry per Quality Setup Filter that has a live-preview diagram. Extend this list
 // as more filters get their own ThresholdFilterControl (see plan phases 2-4).
@@ -71,9 +72,15 @@ export function useFilterPreviewData(
     const start = Math.max(METRICS_WARMUP, end - PREVIEW_WINDOW + 1);
     if (start > end) return [];
 
+    // Mirrors evaluateAutoSignals' trend-anchor logic (autoBacktestEngine.ts) so the preview
+    // never disagrees with what the real engine would compute for a pullback entry.
+    const alBrooks = calculateAlBrooks(candles.slice(0, end + 1));
+
     const bars: FilterPreviewBar[] = [];
     for (let i = start; i <= end; i++) {
-      const metrics = computeEntryMetrics(candles, i, config);
+      const marker = alBrooks.find(m => m.time === candles[i].timestamp) ?? null;
+      const trendAnchorIndex = (rules.entryMode !== 'PIVOT' && marker) ? marker.anchorIndex : i;
+      const metrics = computeEntryMetrics(candles, i, config, trendAnchorIndex);
       const ema21 = getEmaAt(candles, i, 21);
       const atr = getAtrAt(candles, i);
       const atrDepth = ema21 && atr > 0 ? Math.abs(candles[i].close - ema21) / atr : undefined;

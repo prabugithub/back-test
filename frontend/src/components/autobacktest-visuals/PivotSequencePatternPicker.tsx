@@ -28,7 +28,7 @@ export function PivotSequencePatternPicker({
 
   return (
     <div
-      className="border border-gray-200 rounded-lg p-2 space-y-2"
+      className="border border-gray-200 rounded-xl p-3 space-y-2 shadow-sm hover:shadow-md hover:border-gray-300 transition-all duration-200"
       onMouseEnter={() => onHoverChange?.(true)}
       onMouseLeave={() => onHoverChange?.(false)}
       onFocus={() => onHoverChange?.(true)}
@@ -42,7 +42,7 @@ export function PivotSequencePatternPicker({
         <button
           type="button"
           onClick={() => onFilterChange('none')}
-          className={`flex-1 px-1.5 py-1 text-[10px] rounded border transition-colors ${
+          className={`flex-1 px-1.5 py-1 text-[10px] rounded border transition-all duration-150 active:scale-95 ${
             !isCustom ? 'bg-indigo-600 border-indigo-600 text-white font-medium' : 'bg-white border-gray-200 text-gray-500 hover:border-indigo-300'
           }`}
         >
@@ -51,7 +51,7 @@ export function PivotSequencePatternPicker({
         <button
           type="button"
           onClick={() => onFilterChange('custom')}
-          className={`flex-1 px-1.5 py-1 text-[10px] rounded border transition-colors ${
+          className={`flex-1 px-1.5 py-1 text-[10px] rounded border transition-all duration-150 active:scale-95 ${
             isCustom ? 'bg-indigo-600 border-indigo-600 text-white font-medium' : 'bg-white border-gray-200 text-gray-500 hover:border-indigo-300'
           }`}
         >
@@ -69,7 +69,7 @@ export function PivotSequencePatternPicker({
                 type="button"
                 onClick={() => onTogglePattern(p)}
                 title={p}
-                className={`flex flex-col items-center gap-0.5 px-1 py-1 rounded border transition-colors ${
+                className={`flex flex-col items-center gap-0.5 px-1 py-1 rounded border transition-all duration-150 active:scale-95 ${
                   active ? 'bg-indigo-50 border-indigo-400' : 'bg-white border-gray-200 hover:border-indigo-300'
                 }`}
               >
