@@ -291,9 +291,20 @@ export type AlBrooksSignal = string; // 'H1','H2','H3','H4',... 'L1','L2','L3','
 export interface AlBrooksMarker {
   time: number;
   signal: AlBrooksSignal;
-  /** Bar index of the swing extreme (hSwingHigh/lSwingLow) that anchors this pullback —
-   *  i.e. the end of the impulse leg, before the pullback that led to this signal began. */
+  /** Bar index of the swing extreme that ends the ORIGINAL impulse leg (== legEndIndex
+   *  while the pullback is in progress). Frozen for the whole pullback: H1, H2, H3…
+   *  of the same pullback structure all carry the same anchor. */
   anchorIndex: number;
+  /** Bar index where the impulse leg began — the extreme of the *previous* pullback
+   *  (lowest low before a bull leg / highest high before a bear leg). Together with
+   *  legEndIndex this spans the exact bars of the impulse leg, so strength metrics
+   *  (efficiency ratio, overlap, …) can grade the leg itself instead of a fixed
+   *  lookback that may bleed into pre-leg chop or the pullback. */
+  legStartIndex: number;
+  /** Bar index of the leg's swing extreme, frozen on the first pullback bar. Stays
+   *  frozen until price breaks beyond it (new leg), so deeper pullback signals keep
+   *  grading the original leg. */
+  legEndIndex: number;
 }
 
 /**
@@ -361,6 +372,31 @@ export function calculateAlBrooks(
   let latestLow = Infinity;    // running min low since last L signal
   let latestLowBarIndex = ema21Period; // bar index that set the current latestLow
 
+  // ── Leg tracking (parallel to the signal machinery above; never feeds back
+  //    into hCount/hArmed/lCount/lArmed, so signal timing is unchanged) ──────
+  //
+  // Tracks the ORIGINAL impulse leg for filter windowing. Deliberately diverges
+  // from the hCount reset: hCount resets whenever price exceeds hSwingHigh (which
+  // after H1 is only the minor push high), but the *leg* re-opens only when price
+  // breaks the original leg extreme. So H1/H2/H3 — and even fresh H1s after a
+  // minor-push hCount reset — all grade against the same frozen leg until the
+  // original swing high actually breaks.
+  let hLegStartIndex = ema21Period;   // where the current bull leg began
+  let hLegMaxHigh = -Infinity;        // running max high of the leg; stops updating while frozen
+  let hLegMaxHighBarIndex = ema21Period;
+  let hLegFrozen = false;             // true = pullback in progress, leg extent locked
+  let hLegEndIndex = ema21Period;     // valid while frozen: bar index of the leg's swing high
+  let hPullbackLow = Infinity;        // running min low during the pullback → next leg's start
+  let hPullbackLowBarIndex = ema21Period;
+
+  let lLegStartIndex = ema21Period;   // where the current bear leg began
+  let lLegMinLow = Infinity;          // running min low of the leg; stops updating while frozen
+  let lLegMinLowBarIndex = ema21Period;
+  let lLegFrozen = false;
+  let lLegEndIndex = ema21Period;
+  let lPullbackHigh = -Infinity;      // running max high during the pullback → next leg's start
+  let lPullbackHighBarIndex = ema21Period;
+
   // ── Main loop ─────────────────────────────────────────────
   for (let i = ema21Period; i < candles.length; i++) {
     const c = candles[i];
@@ -379,6 +415,20 @@ export function calculateAlBrooks(
     if (c.low < latestLow) latestLowBarIndex = i;
     latestHigh = Math.max(latestHigh, c.high);
     latestLow = Math.min(latestLow, c.low);
+
+    // Leg trackers: while the leg is open, extend its extreme; while frozen
+    // (pullback in progress), track the pullback's extreme instead — that
+    // becomes the next leg's start when the original extreme breaks.
+    if (!hLegFrozen) {
+      if (c.high > hLegMaxHigh) { hLegMaxHigh = c.high; hLegMaxHighBarIndex = i; }
+    } else if (c.low < hPullbackLow) {
+      hPullbackLow = c.low; hPullbackLowBarIndex = i;
+    }
+    if (!lLegFrozen) {
+      if (c.low < lLegMinLow) { lLegMinLow = c.low; lLegMinLowBarIndex = i; }
+    } else if (c.high > lPullbackHigh) {
+      lPullbackHigh = c.high; lPullbackHighBarIndex = i;
+    }
 
 
     // ── 2. Capture arm state from BEFORE this bar ────────
@@ -405,6 +455,23 @@ export function calculateAlBrooks(
       lSwingLowBarIndex = latestLowBarIndex;
     }
 
+    // ── 3b. Freeze leg on pullback start ─────────────────
+    // Keyed on legFrozen (NOT hArmed/lArmed): re-arms after H1/L1 fire must not
+    // move the frozen leg — the leg stays locked to the original impulse extreme
+    // for the entire pullback structure.
+    if (lowBreak && !hLegFrozen) {
+      hLegFrozen = true;
+      hLegEndIndex = hLegMaxHighBarIndex; // true swing high of the whole leg (survives inside bars)
+      hPullbackLow = c.low;
+      hPullbackLowBarIndex = i;
+    }
+    if (highBreak && !lLegFrozen) {
+      lLegFrozen = true;
+      lLegEndIndex = lLegMinLowBarIndex;
+      lPullbackHigh = c.high;
+      lPullbackHighBarIndex = i;
+    }
+
     // ── 4. Signal checks (using previous arm state) ──────
     let canFireH = highBreak && wasHArmed;
     let canFireL = lowBreak && wasLArmed;
@@ -424,7 +491,15 @@ export function calculateAlBrooks(
 
       const depthOk = c.low <= ema21 + getAtr(c.timestamp) * atrDepthMultiplier;
       if (!usePullbackDepth || depthOk) {
-        result.push({ time: c.timestamp, signal: `H${hCount}`, anchorIndex: hSwingHighBarIndex });
+        result.push({
+          time: c.timestamp,
+          signal: `H${hCount}`,
+          // hLegFrozen is always true here in practice (the lowBreak that armed
+          // also froze the leg); the fallback covers defensive edge ordering.
+          anchorIndex: hLegFrozen ? hLegEndIndex : hSwingHighBarIndex,
+          legStartIndex: hLegStartIndex,
+          legEndIndex: hLegFrozen ? hLegEndIndex : hLegMaxHighBarIndex,
+        });
       }
     }
 
@@ -436,7 +511,13 @@ export function calculateAlBrooks(
 
       const depthOk = c.high >= ema21 - getAtr(c.timestamp) * atrDepthMultiplier;
       if (!usePullbackDepth || depthOk) {
-        result.push({ time: c.timestamp, signal: `L${lCount}`, anchorIndex: lSwingLowBarIndex });
+        result.push({
+          time: c.timestamp,
+          signal: `L${lCount}`,
+          anchorIndex: lLegFrozen ? lLegEndIndex : lSwingLowBarIndex,
+          legStartIndex: lLegStartIndex,
+          legEndIndex: lLegFrozen ? lLegEndIndex : lLegMinLowBarIndex,
+        });
       }
     }
 
@@ -453,6 +534,27 @@ export function calculateAlBrooks(
       lCount = 0;
       lArmed = false;
       lSwingLow = Infinity;
+    }
+
+    // ── 5. Leg unfreeze: original leg extreme broke → new leg ────────────
+    // Independent of the hCount/lCount resets above: those fire on minor push
+    // extremes after H1/L1, but the leg only re-opens when the ORIGINAL leg
+    // extreme breaks (while frozen, hLegMaxHigh/lLegMinLow stop updating, so
+    // they ARE the original extremes). The new leg starts at the pullback's
+    // own extreme, and its running extreme restarts at this breakout bar.
+    if (hLegFrozen && c.high > hLegMaxHigh) {
+      hLegFrozen = false;
+      hLegStartIndex = hPullbackLowBarIndex;
+      hLegMaxHigh = c.high;
+      hLegMaxHighBarIndex = i;
+      hPullbackLow = Infinity;
+    }
+    if (lLegFrozen && c.low < lLegMinLow) {
+      lLegFrozen = false;
+      lLegStartIndex = lPullbackHighBarIndex;
+      lLegMinLow = c.low;
+      lLegMinLowBarIndex = i;
+      lPullbackHigh = -Infinity;
     }
 
   }

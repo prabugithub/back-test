@@ -36,6 +36,7 @@ export function countActiveConfirmationFilters(rules: RegimeRules): number {
   if (isActive(rules.barOverlapFilter)) count++;
   if (isActive(rules.barRangeFilter)) count++;
   if (isActive(rules.barBreakFilter)) count++;
+  if (isActive(rules.consecutiveBreakFilter)) count++;
   if (isActive(rules.ema21SlopeFilter)) count++;
   if (isActive(rules.ema50SlopeFilter)) count++;
   if (isActive(rules.ema20GapBarFilter)) count++;

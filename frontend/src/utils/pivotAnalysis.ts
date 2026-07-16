@@ -297,6 +297,40 @@ export function calculateBarBreaks(candles: Candle[], currentIndex: number, look
     return { highBreakCount, lowBreakCount, barsCompared };
 }
 
+export interface ConsecutiveBreakRuns {
+    maxConsecutiveHighBreaks: number; // longest run of bars: high > prev.high AND NOT low < prev.low
+    maxConsecutiveLowBreaks: number;  // longest run of bars: low < prev.low AND NOT high > prev.high
+}
+
+/**
+ * Longest run of consecutive directional breakout bars within [startIndex, endIndex]
+ * — the Brooks "impulse micro-channel" test. A bar extends the high-run only when it
+ * breaks the prior bar's high WITHOUT breaking its low (an outside bar breaks both
+ * runs; an inside bar breaks both too). Distinct from calculateBarBreaks, which
+ * counts total breaks in the window regardless of consecutiveness — a leg can have
+ * many scattered high breaks yet never a clean 4-bar run.
+ */
+export function calculateConsecutiveBreaks(
+    candles: Candle[],
+    startIndex: number,
+    endIndex: number
+): ConsecutiveBreakRuns {
+    let maxHigh = 0, maxLow = 0;
+    let runHigh = 0, runLow = 0;
+    const first = Math.max(1, startIndex + 1);
+    for (let i = first; i <= Math.min(endIndex, candles.length - 1); i++) {
+        const c = candles[i];
+        const prev = candles[i - 1];
+        const highBreak = c.high > prev.high;
+        const lowBreak = c.low < prev.low;
+        runHigh = highBreak && !lowBreak ? runHigh + 1 : 0;
+        runLow = lowBreak && !highBreak ? runLow + 1 : 0;
+        if (runHigh > maxHigh) maxHigh = runHigh;
+        if (runLow > maxLow) maxLow = runLow;
+    }
+    return { maxConsecutiveHighBreaks: maxHigh, maxConsecutiveLowBreaks: maxLow };
+}
+
 /**
  * Slope (points-per-bar rate of change) of an EMA of the given period, measured
  * over slopeLookback bars ending at currentIndex. Same formula as the inline

@@ -421,6 +421,14 @@ export function createSharedActions(set: StoreSet, get: StoreGet) {
         pivotHighSeqAtEntry: !isReducing ? (pivotHighSeq.length ? pivotHighSeq.join('-') : undefined) : undefined,
         pivotLowSeqAtEntry: !isReducing ? (pivotLowSeq.length ? pivotLowSeq.join('-') : undefined) : undefined,
         pivotGapAvgBarsAtEntry: !isReducing ? pivotGapAvgBarsAtEntry : undefined,
+        // Leg fields come only from the auto-signal's entryMetrics — no fallback
+        // recompute: undefined means the entry was graded at currentIndex windows
+        // (manual trade, PIVOT mode, or degenerate leg).
+        legStartIndexAtEntry: !isReducing ? entryMetricsOverride?.legStartIndex : undefined,
+        legEndIndexAtEntry: !isReducing ? entryMetricsOverride?.legEndIndex : undefined,
+        legBarCountAtEntry: !isReducing ? entryMetricsOverride?.legBarCount : undefined,
+        maxConsecutiveHighBreaksAtEntry: !isReducing ? entryMetricsOverride?.maxConsecutiveHighBreaks : undefined,
+        maxConsecutiveLowBreaksAtEntry: !isReducing ? entryMetricsOverride?.maxConsecutiveLowBreaks : undefined,
         interval: sessionConfig?.interval || '5',
       };
 

@@ -8,6 +8,7 @@ import {
   passesBarOverlap,
   passesBarRange,
   passesBarBreak,
+  passesConsecutiveBreak,
   passesEmaSlope,
   passesEma20GapBar,
   passesEma20Bias,
@@ -26,6 +27,7 @@ export type PreviewFilterKey =
   | 'barOverlap'
   | 'barRange'
   | 'barBreak'
+  | 'consecutiveBreak'
   | 'ema21Slope'
   | 'ema50Slope'
   | 'ema20GapBar'
@@ -79,8 +81,10 @@ export function useFilterPreviewData(
     const bars: FilterPreviewBar[] = [];
     for (let i = start; i <= end; i++) {
       const marker = alBrooks.find(m => m.time === candles[i].timestamp) ?? null;
-      const trendAnchorIndex = (rules.entryMode !== 'PIVOT' && marker) ? marker.anchorIndex : i;
-      const metrics = computeEntryMetrics(candles, i, config, trendAnchorIndex);
+      const legWindow = (rules.entryMode !== 'PIVOT' && marker && marker.legEndIndex > marker.legStartIndex)
+        ? { startIndex: marker.legStartIndex, endIndex: marker.legEndIndex }
+        : null;
+      const metrics = computeEntryMetrics(candles, i, config, legWindow);
       const ema21 = getEmaAt(candles, i, 21);
       const atr = getAtrAt(candles, i);
       const atrDepth = ema21 && atr > 0 ? Math.abs(candles[i].close - ema21) / atr : undefined;
@@ -88,6 +92,7 @@ export function useFilterPreviewData(
         barOverlap: passesBarOverlap(rules, metrics.barOverlapAvg),
         barRange: passesBarRange(rules, metrics.bullBarRangeAvg, metrics.bearBarRangeAvg, metrics.barRangeAvg, isLong),
         barBreak: passesBarBreak(rules, metrics.highBreakCount, metrics.lowBreakCount, isLong),
+        consecutiveBreak: passesConsecutiveBreak(rules, metrics.maxConsecutiveHighBreaks, metrics.maxConsecutiveLowBreaks, isLong),
         ema21Slope: passesEmaSlope(rules.ema21SlopeFilter, rules.ema21SlopeThreshold, metrics.ema21Slope, isLong),
         ema50Slope: passesEmaSlope(rules.ema50SlopeFilter, rules.ema50SlopeThreshold, metrics.ema50Slope, isLong),
         ema20GapBar: passesEma20GapBar(rules, metrics.ema20GapBarRatio),

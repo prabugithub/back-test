@@ -149,6 +149,13 @@ export function runBatchSimulation(
       trade.ema20GapBarRatioAtEntry = entryMetrics?.ema20GapBarRatio ?? emaInteractionFallback.gapBarRatio;
       trade.ema20CloseAboveRatioAtEntry = entryMetrics?.ema20CloseAboveRatio ?? emaInteractionFallback.closeAboveRatio;
       trade.ema20InteractionWindowAtEntry = entryMetrics?.ema20InteractionWindow ?? emaInteractionFallback.barsCompared;
+      // Leg fields have no fallback recompute: undefined simply means the entry
+      // was graded with currentIndex windows (PIVOT mode / degenerate leg).
+      trade.legStartIndexAtEntry = entryMetrics?.legStartIndex;
+      trade.legEndIndexAtEntry = entryMetrics?.legEndIndex;
+      trade.legBarCountAtEntry = entryMetrics?.legBarCount;
+      trade.maxConsecutiveHighBreaksAtEntry = entryMetrics?.maxConsecutiveHighBreaks;
+      trade.maxConsecutiveLowBreaksAtEntry = entryMetrics?.maxConsecutiveLowBreaks;
     }
 
     trades.push(trade);

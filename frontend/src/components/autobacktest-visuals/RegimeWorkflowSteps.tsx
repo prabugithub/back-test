@@ -47,6 +47,7 @@ export const QUALITY_FILTER_GUIDE: { filter: string; trend: string; range: strin
   { filter: 'Bar Overlap', trend: '≤0.4 (Clean/Trend)', range: '≥0.5 (Choppy) or None', reversal: 'None — structure still forming' },
   { filter: 'Bar Range', trend: 'Dominance ≥1.0×', range: 'None', reversal: 'Dominance ≥1.0× once turn confirms' },
   { filter: 'Break Count', trend: '≥5 (Persistent)', range: '≤3 (Exhausted/quiet)', reversal: 'None' },
+  { filter: 'Consecutive Breaks', trend: '≥4 (strong impulse leg)', range: 'None', reversal: 'None' },
   { filter: 'EMA21 Slope', trend: '≥0 (Favor Trade)', range: '≤0.1 (Flat) or None', reversal: 'None — slope hasn’t turned yet' },
   { filter: 'EMA50 Slope', trend: '≥0 (Favor Trade)', range: '≤0.1 (Flat) or None', reversal: 'None' },
   { filter: 'EMA20 Gap-Bar', trend: '≥0.4 (continuation) or ≤0.3 (pullback entries)', range: '≤0.3 (still touching)', reversal: '≤0.3 (still touching)' },
@@ -278,7 +279,7 @@ export function ConfirmationStep({ rules, up, latestBar, onHoverFilterKey, showG
 
         <ThresholdFilterControl
           label="Efficiency Ratio"
-          tooltip="How directly price traveled from A to B over the lookback window (Kaufman Efficiency Ratio). Near 1 = a straight, efficient trend; near 0 = price zigzagged and cancelled itself out (chop)."
+          tooltip="How directly price traveled from A to B (Kaufman Efficiency Ratio). Near 1 = a straight, efficient trend; near 0 = price zigzagged and cancelled itself out (chop). For H/L-signal entry modes this grades the frozen impulse leg that preceded the pullback (its exact bars — H1/H2 of the same pullback grade the same leg); the fixed lookback applies only in Pivot mode."
           mode={rules.efficiencyRatioFilter ?? 'none'}
           offValue="none"
           modeOptions={[
@@ -299,7 +300,7 @@ export function ConfirmationStep({ rules, up, latestBar, onHoverFilterKey, showG
 
         <ThresholdFilterControl
           label="Bar Overlap"
-          tooltip="How much each bar's range overlaps the previous bar's range, averaged over the 'Overlap' lookback (Instrumentation Lookbacks section above). Low overlap = clean directional bars; high overlap = choppy/ranging."
+          tooltip="How much each bar's range overlaps the previous bar's range, averaged. Low overlap = clean directional bars; high overlap = choppy/ranging. For H/L-signal entry modes this grades the frozen impulse leg before the pullback; the 'Overlap' lookback (Instrumentation Lookbacks above) applies only in Pivot mode."
           mode={rules.barOverlapFilter ?? 'none'}
           offValue="none"
           modeOptions={[
@@ -340,7 +341,7 @@ export function ConfirmationStep({ rules, up, latestBar, onHoverFilterKey, showG
 
         <ThresholdFilterControl
           label="Break Count"
-          tooltip="Counts, over the 'Breaks' lookback, how many bars made a new high (for longs) or new low (for shorts) vs. the bar before it — a momentum/persistence check. Persistent requires at least X breaks (momentum still active). Exhausted requires at most X (momentum fading — useful for reversal/fade entries)."
+          tooltip="Counts how many bars made a new high (for longs) or new low (for shorts) vs. the bar before it — a momentum/persistence check. Persistent requires at least X breaks (momentum still active). Exhausted requires at most X (momentum fading — useful for reversal/fade entries). For H/L-signal entry modes this counts within the frozen impulse leg; the 'Breaks' lookback applies only in Pivot mode."
           mode={rules.barBreakFilter ?? 'none'}
           offValue="none"
           modeOptions={[
@@ -358,6 +359,28 @@ export function ConfirmationStep({ rules, up, latestBar, onHoverFilterKey, showG
           formatValue={v => v.toFixed(0)}
           onHoverChange={hovering => onHoverFilterKey(hovering ? 'barBreak' : null)}
           diagram={<BreakCountDiagram count={rules.barBreakThreshold ?? 5} />}
+        />
+
+        <ThresholdFilterControl
+          label="Consecutive Breaks"
+          tooltip="Longest run of consecutive bars inside the frozen impulse leg that each broke the prior bar's high without breaking its low (flipped to low-breaks for shorts) — the Brooks impulse micro-channel test. Unlike Break Count (total breaks, possibly scattered), this demands an unbroken streak, e.g. a 4-bar breakout. Streak Required needs a run of at least X; Streak Capped fades legs whose best run stays at or under X. Pivot entry mode has no leg, so the Breaks lookback window is used instead."
+          mode={rules.consecutiveBreakFilter ?? 'none'}
+          offValue="none"
+          modeOptions={[
+            { value: 'none', label: 'Off' },
+            { value: 'min', label: 'Streak Required' },
+            { value: 'max', label: 'Streak Capped' },
+          ]}
+          onModeChange={v => up({ consecutiveBreakFilter: v as RegimeRules['consecutiveBreakFilter'] })}
+          threshold={rules.consecutiveBreakThreshold ?? 4}
+          onThresholdChange={v => up({ consecutiveBreakThreshold: v })}
+          min={2}
+          max={10}
+          step={1}
+          liveValue={rules.direction !== 'SHORT_ONLY' ? latestBar?.metrics.maxConsecutiveHighBreaks : latestBar?.metrics.maxConsecutiveLowBreaks}
+          formatValue={v => v.toFixed(0)}
+          onHoverChange={hovering => onHoverFilterKey(hovering ? 'consecutiveBreak' : null)}
+          diagram={<BreakCountDiagram count={rules.consecutiveBreakThreshold ?? 4} />}
         />
 
         <ThresholdFilterControl

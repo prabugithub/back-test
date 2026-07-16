@@ -62,6 +62,11 @@ export interface Trade {
   pivotHighSeqAtEntry?: string;    // last up-to-4 bearish trend labels (HH/LH), oldest→newest, joined with '-'
   pivotLowSeqAtEntry?: string;     // last up-to-4 bullish trend labels (HL/LL), oldest→newest, joined with '-'
   pivotGapAvgBarsAtEntry?: number; // mean bar-count gap between consecutive same-type pivots across both sequences
+  legStartIndexAtEntry?: number;  // bar index where the frozen impulse leg began (undefined = leg window not used; metrics windowed at entry bar)
+  legEndIndexAtEntry?: number;    // bar index of the leg's swing extreme (frozen at pullback start)
+  legBarCountAtEntry?: number;    // bars in the frozen leg, inclusive of both ends
+  maxConsecutiveHighBreaksAtEntry?: number; // longest run of bars each breaking prior high without breaking prior low, within the leg/window
+  maxConsecutiveLowBreaksAtEntry?: number;  // mirror: prior-low breaks without prior-high breaks
   interval?: string;
   liveOptionToken?: string;
   optionType?: 'CE' | 'PE';
