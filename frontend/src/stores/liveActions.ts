@@ -140,10 +140,15 @@ export function createLiveActions(set: StoreSet, get: StoreGet) {
           }
 
           if (openPosition) {
-            const qty =
-              openPosition.positionType === 'LONG'
-                ? Math.abs(openPosition.buyQty - openPosition.sellQty)
-                : -Math.abs(openPosition.sellQty - openPosition.buyQty);
+            // We only ever BUY options to open (CE for long, PE for short), so Dhan's own
+            // positionType is always 'LONG' here (buyQty > sellQty) — it reflects "we own the
+            // option", not "we're long/short the underlying". The underlying direction is
+            // encoded by CE vs PE instead, so derive the sign from the trading symbol suffix.
+            // Getting this wrong flips the sign for PE (short) positions, which makes the
+            // backend monitor register direction:'LONG' and fire an immediate spurious SL exit.
+            const isPut = /PE$/i.test((openPosition.tradingSymbol || '').trim());
+            const rawQty = Math.abs(openPosition.buyQty - openPosition.sellQty);
+            const qty = isPut ? -rawQty : rawQty;
             const avgPrice =
               openPosition.positionType === 'LONG'
                 ? openPosition.buyAvg

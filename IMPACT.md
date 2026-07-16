@@ -133,8 +133,9 @@ Handles logic that runs in both modes. Live path is always top-guarded with an e
 → matches by `liveOptionToken` if store has one, otherwise takes first open FNO position
 → if broker position found: updates store and calls `registerMonitorIfNeeded()` (covers page-refresh path where monitor was lost)
 → if no broker position found and store has one: clears store position (notifies user) — **skips clear if `pendingOrderId` is set** (entry order still pending fill at broker)
+→ **`quantity` sign is derived from the CE/PE suffix of `openPosition.tradingSymbol`, never from Dhan's `positionType`.** We only ever BUY options to open (CE for long, PE for short), so the broker's `positionType` is always `'LONG'` (bought = `buyQty > sellQty`) even for a short (PE) trade — it reflects "we own the option," not "we're long/short the underlying." Deriving sign from `positionType` previously flipped short positions to a positive `quantity` within the first 3s poll after entry, which made `registerMonitorIfNeeded()` re-register the backend monitor with `direction: 'LONG'` for a short trade — since a short's spot-level `stopLoss` sits above entry, the monitor's `price <= stopLoss` (LONG) check fired instantly. Fixed 2026-07-16.
 
-**Check when changing:** token matching logic, position clear condition, pending-order guard, notification spam, monitor re-registration
+**Check when changing:** token matching logic, position clear condition, pending-order guard, notification spam, monitor re-registration, quantity sign derivation (must stay keyed off option type, not broker `positionType`)
 
 #### `loadSecondaryCandles()`
 → fetches HTF candles from Dhan API for the active `secondaryTimeframe`
