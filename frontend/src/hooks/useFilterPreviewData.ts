@@ -81,7 +81,7 @@ export function useFilterPreviewData(
     const bars: FilterPreviewBar[] = [];
     for (let i = start; i <= end; i++) {
       const marker = alBrooks.find(m => m.time === candles[i].timestamp) ?? null;
-      const legWindow = (rules.entryMode !== 'PIVOT' && marker && marker.legEndIndex > marker.legStartIndex)
+      const legWindow = (rules.entryMode !== 'PIVOT' && marker)
         ? { startIndex: marker.legStartIndex, endIndex: marker.legEndIndex }
         : null;
       const metrics = computeEntryMetrics(candles, i, config, legWindow);

@@ -178,11 +178,19 @@ export function SessionSettingsPanel({ config, onChange, isOpen, onClose }: Sess
                   className="w-12 px-1.5 py-1 text-xs border rounded text-center"
                 />
               </div>
-              <div className="flex items-center justify-between gap-1 col-span-2">
-                <span className="text-[10px] text-gray-500" title="Bars looked back for EMA20 gap-bar / always-in interaction instrumentation on trade records">EMA20 Interaction</span>
+              <div className="flex items-center justify-between gap-1">
+                <span className="text-[10px] text-gray-500" title="Bars looked back for EMA20 gap-bar / always-in interaction instrumentation on trade records">EMA20 Int</span>
                 <input
                   type="number" min={5} max={50} value={config.emaInteractionLookback}
                   onChange={e => onChange({ emaInteractionLookback: Number(e.target.value) })}
+                  className="w-12 px-1.5 py-1 text-xs border rounded text-center"
+                />
+              </div>
+              <div className="flex items-center justify-between gap-1">
+                <span className="text-[10px] text-gray-500" title="Bars looked back when searching for the longest consecutive high/low-break run (Consecutive Breaks filter)">Consecutive</span>
+                <input
+                  type="number" min={4} max={30} value={config.consecutiveBreakLookback ?? 10}
+                  onChange={e => onChange({ consecutiveBreakLookback: Number(e.target.value) })}
                   className="w-12 px-1.5 py-1 text-xs border rounded text-center"
                 />
               </div>

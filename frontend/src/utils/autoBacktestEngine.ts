@@ -99,12 +99,11 @@ export interface RegimeRules {
   barBreakFilter?: 'none' | 'min' | 'max';
   barBreakThreshold?: number;
 
-  // Consecutive directional-break filter — longest run of bars within the frozen impulse
-  // leg that each broke the prior bar's high WITHOUT breaking its low (mirrored for shorts).
-  // The Brooks "impulse micro-channel" test — distinct from barBreakFilter (total breaks,
-  // possibly scattered). No lookback param: the leg itself is the window (falls back to
-  // barBreakLookback bars in PIVOT mode, which has no leg).
-  // 'min': leg must contain a run >= threshold (e.g. 4-bar breakout). 'max': run must stay <= threshold.
+  // Consecutive directional-break filter — longest run of bars that each broke the prior
+  // bar's high WITHOUT breaking its low (mirrored for shorts), over consecutiveBreakLookback
+  // bars ending at the frozen impulse-leg extreme (entry bar in PIVOT mode). The Brooks
+  // "impulse micro-channel" test — distinct from barBreakFilter (total breaks, possibly scattered).
+  // 'min': window must contain a run >= threshold (e.g. 4-bar breakout). 'max': run must stay <= threshold.
   consecutiveBreakFilter?: 'none' | 'min' | 'max';
   consecutiveBreakThreshold?: number; // bars, default 4
 
@@ -181,6 +180,10 @@ export interface AutoBacktestConfig {
 
   // EMA20 interaction (Brooks gap-bar / always-in) instrumentation — recorded on trade entries
   emaInteractionLookback: number; // bars looked back for EMA20 gap-bar/always-in interaction stats (default 20)
+
+  // Consecutive directional-break instrumentation — longest unbroken run of prior-high
+  // (or prior-low) breaks within the window (Brooks impulse micro-channel)
+  consecutiveBreakLookback?: number; // bars looked back for the consecutive-break run search (default 10)
 
   // Per-regime rule sets
   uptrend: RegimeRules;   // Bull-Trend, Bull-Trending-range
@@ -286,6 +289,7 @@ export const defaultAutoBacktestConfig: AutoBacktestConfig = {
   ema21SlopeLookback: 10,
   ema50SlopeLookback: 20,
   emaInteractionLookback: 20,
+  consecutiveBreakLookback: 10,
   uptrend: { ...defaultLongRules, enabled: true },
   downtrend: { ...defaultShortRules, enabled: true },
   range: { ...defaultRangeRules, enabled: false },
@@ -464,10 +468,15 @@ export interface LegWindow {
 //
 // When legWindow is given (H/L-signal entry modes), the trend-strength metrics
 // (ER, overlap, breaks, bar ranges, EMA slopes, EMA20 gap-bar, consecutive breaks)
-// grade exactly the bars of the frozen impulse leg — the config lookbacks don't
-// apply. Inherently-"now" context (pivots, EMA20 close-above bias) always stays
-// at currentIndex. Without legWindow (PIVOT mode / degenerate leg), everything
-// windows at currentIndex with the config lookbacks, as before.
+// window ENDS at the frozen impulse-leg extreme — the swing high/low before the
+// pullback, held constant for H1/H2/H3 of the same pullback — so the pullback's
+// own bars never dilute them. Window LENGTHS always come from the config's
+// Instrumentation Lookbacks (Session Settings), never from the leg length: real
+// legs are frequently 1-3 bars, and leg-length windows made metrics degenerate
+// (ER over 1 transition is always 1.0) and the configured lookbacks inert.
+// Inherently-"now" context (pivots, EMA20 close-above bias) always stays at
+// currentIndex. Without legWindow (PIVOT mode), everything windows at
+// currentIndex, as before.
 export function computeEntryMetrics(
   candles: Candle[],
   currentIndex: number,
@@ -477,42 +486,36 @@ export function computeEntryMetrics(
   const pivots = calculatePivotPoints(candles.slice(0, currentIndex + 1));
   const pivotSeqStats = getPivotSequenceStats(pivots, 4);
 
-  const leg = legWindow && legWindow.startIndex >= 0 && legWindow.endIndex > legWindow.startIndex
-    ? legWindow
-    : null;
-  // Window end + lookbacks chosen so each metric covers exactly [legStart, legEnd]:
-  // functions comparing bar-to-prev-bar (overlap/breaks) need legSpan comparisons;
-  // functions sampling whole bars (ranges/EMA interaction) need legSpan + 1 bars.
+  const leg = legWindow && legWindow.endIndex >= 0 ? legWindow : null;
   const end = leg ? leg.endIndex : currentIndex;
-  const legSpan = leg ? leg.endIndex - leg.startIndex : 0;
 
-  const barOverlapRatios = calculateBarOverlap(candles, end, leg ? legSpan : (config.barOverlapLookback ?? 8));
-  const barRangeSamples = calculateBarRanges(candles, end, leg ? legSpan + 1 : (config.barRangeLookback ?? 20));
+  const barOverlapRatios = calculateBarOverlap(candles, end, config.barOverlapLookback ?? 8);
+  const barRangeSamples = calculateBarRanges(candles, end, config.barRangeLookback ?? 20);
   const { barRangeAvg, bullBarRangeAvg, bearBarRangeAvg } = averageBarRanges(barRangeSamples);
   const { highBreakCount, lowBreakCount, barsCompared: barBreakWindow } =
-    calculateBarBreaks(candles, end, leg ? legSpan : (config.barBreakLookback ?? 20));
-  const { gapBarRatio } =
-    calculateEMAInteraction(candles, end, 20, leg ? legSpan + 1 : (config.emaInteractionLookback ?? 20));
+    calculateBarBreaks(candles, end, config.barBreakLookback ?? 20);
+  const legInteraction = calculateEMAInteraction(candles, end, 20, config.emaInteractionLookback ?? 20);
   // Close-above bias is "always-in" context at the entry bar, not a leg-strength
-  // metric — so it keeps its own currentIndex window even in leg mode.
-  const { closeAboveRatio, barsCompared: ema20InteractionWindow } =
-    calculateEMAInteraction(candles, currentIndex, 20, config.emaInteractionLookback ?? 20);
-  const consecutiveBreaks = calculateConsecutiveBreaks(
-    candles,
-    leg ? leg.startIndex : currentIndex - (config.barBreakLookback ?? 20) + 1,
-    end
-  );
+  // metric — so it windows at currentIndex even when the leg anchor is active.
+  const entryInteraction = end === currentIndex
+    ? legInteraction
+    : calculateEMAInteraction(candles, currentIndex, 20, config.emaInteractionLookback ?? 20);
+  const gapBarRatio = legInteraction.gapBarRatio;
+  const closeAboveRatio = entryInteraction.closeAboveRatio;
+  const ema20InteractionWindow = entryInteraction.barsCompared;
+  const consecutiveLookback = config.consecutiveBreakLookback ?? 10;
+  const consecutiveBreaks = calculateConsecutiveBreaks(candles, end - consecutiveLookback, end);
   return {
     barOverlapAvg: averageBarOverlap(barOverlapRatios),
     barRangeAvg,
     bullBarRangeAvg,
     bearBarRangeAvg,
-    efficiencyRatio: calculateEfficiencyRatio(candles, end, leg ? legSpan : (config.efficiencyRatioLookback ?? 10)),
+    efficiencyRatio: calculateEfficiencyRatio(candles, end, config.efficiencyRatioLookback ?? 10),
     highBreakCount,
     lowBreakCount,
     barBreakWindow,
-    ema21Slope: calculateEMASlope(candles, end, 21, leg ? legSpan : (config.ema21SlopeLookback ?? 10)),
-    ema50Slope: calculateEMASlope(candles, end, 50, leg ? legSpan : (config.ema50SlopeLookback ?? 20)),
+    ema21Slope: calculateEMASlope(candles, end, 21, config.ema21SlopeLookback ?? 10),
+    ema50Slope: calculateEMASlope(candles, end, 50, config.ema50SlopeLookback ?? 20),
     ema20GapBarRatio: gapBarRatio,
     ema20CloseAboveRatio: closeAboveRatio,
     ema20InteractionWindow,
@@ -521,7 +524,7 @@ export function computeEntryMetrics(
     pivotGapAvgBars: averagePivotGapBars(pivotSeqStats),
     legStartIndex: leg?.startIndex,
     legEndIndex: leg?.endIndex,
-    legBarCount: leg ? legSpan + 1 : undefined,
+    legBarCount: leg ? Math.max(1, leg.endIndex - leg.startIndex + 1) : undefined,
     maxConsecutiveHighBreaks: consecutiveBreaks.maxConsecutiveHighBreaks,
     maxConsecutiveLowBreaks: consecutiveBreaks.maxConsecutiveLowBreaks,
   };
@@ -570,15 +573,12 @@ export function evaluateAutoSignals(
     if (!passesHtFilter(regimeRules.htStructureFilter, htMarket)) continue;
 
     // For pullback-continuation entries (H_SIGNAL/CONFLUENCE), the trend-strength filters
-    // (ER, Bar Overlap, Break Count, ranges, slopes, gap-bar, consecutive breaks) grade the
-    // FROZEN impulse leg that preceded the pullback — the exact bars from the leg's start
-    // low to its swing high — not a fixed lookback ending at this entry bar. The marker's
-    // leg bounds stay frozen for the whole pullback (H1/H2/H3 grade the same leg) until
-    // price breaks the original extreme. PIVOT-mode entries have no pullback concept, so
-    // they keep windows ending at currentIndex.
-    const legWindow = (regimeRules.entryMode !== 'PIVOT'
-        && currentAbMarker
-        && currentAbMarker.legEndIndex > currentAbMarker.legStartIndex)
+    // (ER, Bar Overlap, Break Count, ranges, slopes, gap-bar, consecutive breaks) window
+    // ENDING at the FROZEN impulse-leg extreme — the swing high/low before the pullback,
+    // held constant for H1/H2/H3 of the same pullback until price breaks the original
+    // extreme — with lengths from the configured Instrumentation Lookbacks. PIVOT-mode
+    // entries have no pullback concept, so they keep windows ending at currentIndex.
+    const legWindow = (regimeRules.entryMode !== 'PIVOT' && currentAbMarker)
       ? { startIndex: currentAbMarker.legStartIndex, endIndex: currentAbMarker.legEndIndex }
       : null;
 

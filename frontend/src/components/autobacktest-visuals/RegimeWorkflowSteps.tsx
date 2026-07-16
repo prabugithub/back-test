@@ -279,7 +279,7 @@ export function ConfirmationStep({ rules, up, latestBar, onHoverFilterKey, showG
 
         <ThresholdFilterControl
           label="Efficiency Ratio"
-          tooltip="How directly price traveled from A to B (Kaufman Efficiency Ratio). Near 1 = a straight, efficient trend; near 0 = price zigzagged and cancelled itself out (chop). For H/L-signal entry modes this grades the frozen impulse leg that preceded the pullback (its exact bars — H1/H2 of the same pullback grade the same leg); the fixed lookback applies only in Pivot mode."
+          tooltip="How directly price traveled from A to B over the 'Efficiency' lookback (Kaufman Efficiency Ratio). Near 1 = a straight, efficient trend; near 0 = price zigzagged and cancelled itself out (chop). For H/L-signal entry modes the window ends at the frozen impulse-leg high/low before the pullback (H1/H2 of the same pullback grade the same window); in Pivot mode it ends at the entry bar."
           mode={rules.efficiencyRatioFilter ?? 'none'}
           offValue="none"
           modeOptions={[
@@ -300,7 +300,7 @@ export function ConfirmationStep({ rules, up, latestBar, onHoverFilterKey, showG
 
         <ThresholdFilterControl
           label="Bar Overlap"
-          tooltip="How much each bar's range overlaps the previous bar's range, averaged. Low overlap = clean directional bars; high overlap = choppy/ranging. For H/L-signal entry modes this grades the frozen impulse leg before the pullback; the 'Overlap' lookback (Instrumentation Lookbacks above) applies only in Pivot mode."
+          tooltip="How much each bar's range overlaps the previous bar's range, averaged over the 'Overlap' lookback (Instrumentation Lookbacks in Session Settings). Low overlap = clean directional bars; high overlap = choppy/ranging. For H/L-signal entry modes the window ends at the frozen impulse-leg extreme before the pullback; in Pivot mode it ends at the entry bar."
           mode={rules.barOverlapFilter ?? 'none'}
           offValue="none"
           modeOptions={[
@@ -341,7 +341,7 @@ export function ConfirmationStep({ rules, up, latestBar, onHoverFilterKey, showG
 
         <ThresholdFilterControl
           label="Break Count"
-          tooltip="Counts how many bars made a new high (for longs) or new low (for shorts) vs. the bar before it — a momentum/persistence check. Persistent requires at least X breaks (momentum still active). Exhausted requires at most X (momentum fading — useful for reversal/fade entries). For H/L-signal entry modes this counts within the frozen impulse leg; the 'Breaks' lookback applies only in Pivot mode."
+          tooltip="Counts, over the 'Breaks' lookback, how many bars made a new high (for longs) or new low (for shorts) vs. the bar before it — a momentum/persistence check. Persistent requires at least X breaks (momentum still active). Exhausted requires at most X (momentum fading — useful for reversal/fade entries). For H/L-signal entry modes the window ends at the frozen impulse-leg extreme; in Pivot mode it ends at the entry bar."
           mode={rules.barBreakFilter ?? 'none'}
           offValue="none"
           modeOptions={[
@@ -363,7 +363,7 @@ export function ConfirmationStep({ rules, up, latestBar, onHoverFilterKey, showG
 
         <ThresholdFilterControl
           label="Consecutive Breaks"
-          tooltip="Longest run of consecutive bars inside the frozen impulse leg that each broke the prior bar's high without breaking its low (flipped to low-breaks for shorts) — the Brooks impulse micro-channel test. Unlike Break Count (total breaks, possibly scattered), this demands an unbroken streak, e.g. a 4-bar breakout. Streak Required needs a run of at least X; Streak Capped fades legs whose best run stays at or under X. Pivot entry mode has no leg, so the Breaks lookback window is used instead."
+          tooltip="Longest run of consecutive bars that each broke the prior bar's high without breaking its low (flipped to low-breaks for shorts) — the Brooks impulse micro-channel test, searched over the 'Consecutive' lookback (Session Settings). Unlike Break Count (total breaks, possibly scattered), this demands an unbroken streak, e.g. a 4-bar breakout. Streak Required needs a run of at least X; Streak Capped fades moves whose best run stays at or under X. For H/L-signal entry modes the window ends at the frozen impulse-leg extreme; in Pivot mode it ends at the entry bar."
           mode={rules.consecutiveBreakFilter ?? 'none'}
           offValue="none"
           modeOptions={[
