@@ -613,6 +613,7 @@ function positionsToRoundTrips(positions: GroupedPosition[]): RoundTrip[] {
         entryPrice: p.avgEntryPrice,
         sl: p.stopLoss ?? 0,
         tp: p.target ?? 0,
+        atrDepth: p.executions[0]?.atrDepthAtEntry ?? 0,
       };
     });
 }

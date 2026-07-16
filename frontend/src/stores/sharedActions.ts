@@ -133,7 +133,7 @@ export function createSharedActions(set: StoreSet, get: StoreGet) {
       // Backend positionMonitor owns all exits. Update hit-flags for display only
       // and return so the backtest dialog/auto-exit code below cannot fire.
       // exitTriggeredByBackend is a secondary guard against races.
-      const { isLiveMode, autoExitTarget } = get();
+      const { isLiveMode } = get();
       const isLiveOption = isLiveMode && (position as any).liveOptionToken;
 
       if (isLiveOption) {
@@ -278,6 +278,24 @@ export function createSharedActions(set: StoreSet, get: StoreGet) {
           if (stopLoss === undefined && target === undefined) {
             useNotificationStore.getState().notify(
               'Cannot enter a live trade without a Stop Loss or Target. Draw RR levels or wait for a valid pivot before trading.',
+              'warning'
+            );
+            return;
+          }
+          // Mirrors the isTargetWrong/isSLWrong sanitization further below (which runs
+          // AFTER the broker order is placed) — if price drifted between when these levels
+          // were computed (off currentCandle.close) and now (live tick), that sanitization
+          // can wipe BOTH to undefined for a fresh entry, with no position to fall back on.
+          // Catch that here, before the broker order is sent, instead of ending up with a
+          // live position with zero backend SL/TP protection.
+          const isEntryLong = type === 'BUY';
+          const entryTargetUsable =
+            target !== undefined && !((isEntryLong && target < currentPrice) || (!isEntryLong && target > currentPrice));
+          const entrySLUsable =
+            stopLoss !== undefined && !((isEntryLong && stopLoss > currentPrice) || (!isEntryLong && stopLoss < currentPrice));
+          if (!entryTargetUsable && !entrySLUsable) {
+            useNotificationStore.getState().notify(
+              'Stop Loss / Target no longer valid at the current price (market moved). Redraw RR levels or wait for a fresh pivot before trading.',
               'warning'
             );
             return;

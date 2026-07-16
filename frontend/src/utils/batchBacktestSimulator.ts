@@ -200,10 +200,16 @@ export function runBatchSimulation(
     // 'exact' (default): fill at the sl/tp price itself the instant intrabar high/low touches it.
     // 'close': legacy — mirrors checkSLTPHits() backtest path (sharedActions.ts), only fires when
     //          candle.close crosses the level, filled at that close.
-    if (position) {
-      const isLong = position.quantity > 0;
-      const sl = position.stopLoss ?? 0;
-      const tp = position.target ?? 0;
+    // `position` is a mutable `let` only ever reassigned inside the `enterPosition`/
+    // `exitPosition` closures (called later in this same loop body) — TS's control-flow
+    // narrowing doesn't see those closured assignments as reachable here, so it narrows
+    // the loop-body type of `position` down to `null` and a plain `if (position)` collapses
+    // to `never`. Re-widen explicitly to the declared type before narrowing.
+    const pos = position as SimPosition | null;
+    if (pos) {
+      const isLong = pos.quantity > 0;
+      const sl = pos.stopLoss ?? 0;
+      const tp = pos.target ?? 0;
       const fillMode = config.slTpFillMode ?? 'exact';
 
       if (fillMode === 'exact') {
