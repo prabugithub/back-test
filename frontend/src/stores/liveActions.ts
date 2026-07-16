@@ -174,10 +174,19 @@ export function createLiveActions(set: StoreSet, get: StoreGet) {
               },
             });
 
-            // Ensure backend monitor is registered (covers page-refresh + fill-after-refresh paths)
+            // Ensure backend monitor is registered (covers page-refresh + fill-after-refresh paths).
+            // Guard: skip when neither stopLoss nor target is known yet — this poll runs on its
+            // own independent 3s timer, decoupled from any specific trade's lifecycle, so it can
+            // land in the network-round-trip window of a brand-new entry before executeTrade's
+            // own set({ position }) has run (currentStorePos still null above). Registering with
+            // both levels blank would just 400 against the backend's own validation and get
+            // clobbered moments later by the entry flow's correct registration anyway — skipping
+            // here avoids the noisy failed call instead of relying on that backend rejection.
             const sessionCfg = get().sessionConfig;
             const syncedPos = get().position;
-            if (syncedPos && sessionCfg) registerMonitorIfNeeded(syncedPos, sessionCfg);
+            if (syncedPos && sessionCfg && (syncedPos.stopLoss || syncedPos.target)) {
+              registerMonitorIfNeeded(syncedPos, sessionCfg);
+            }
 
             if (!currentStorePos && qty !== 0) {
               useNotificationStore

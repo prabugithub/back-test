@@ -270,6 +270,18 @@ export function createSharedActions(set: StoreSet, get: StoreGet) {
             useNotificationStore.getState().notify('Fresh entries blocked after 2:36 PM', 'warning');
             return;
           }
+          // Backend's POST /api/live/monitor rejects registration when both are missing
+          // (400 "At least one of stopLoss or target must be provided") — but that request
+          // fires only after the broker order is already placed, and registerMonitorIfNeeded
+          // swallows the failure in a .catch(), so a real live position could otherwise end up
+          // with zero backend SL/TP monitoring. Block before the order is ever sent instead.
+          if (stopLoss === undefined && target === undefined) {
+            useNotificationStore.getState().notify(
+              'Cannot enter a live trade without a Stop Loss or Target. Draw RR levels or wait for a valid pivot before trading.',
+              'warning'
+            );
+            return;
+          }
         }
         try {
           const notify = (msg: string, t: any) => useNotificationStore.getState().notify(msg, t);
@@ -764,7 +776,14 @@ export function createSharedActions(set: StoreSet, get: StoreGet) {
       }
       set({ position: { ...position, target: newTarget, tpHit: false, tpDialogShown: false } });
       if (isLiveMode && (position as any).liveOptionToken) {
-        await syncTargetWithMonitor((position as any).liveOptionToken, newTarget);
+        const synced = await syncTargetWithMonitor((position as any).liveOptionToken, newTarget);
+        if (!synced) {
+          useNotificationStore.getState().notify(
+            `Target changed locally to ${newTarget.toFixed(2)}, but the backend monitor sync FAILED — this position may have no server-side SL/TP protection. Verify or close manually.`,
+            'error'
+          );
+          return;
+        }
       }
       useNotificationStore.getState().notify(`Target updated to ${newTarget.toFixed(2)}`, 'success');
     },

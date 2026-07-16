@@ -222,11 +222,18 @@ export function registerMonitorIfNeeded(position: Position, sessionConfig: Sessi
 
 /**
  * Syncs a new TP target to the backend position monitor.
+ * Returns false if the sync failed (e.g. the position was never registered — the backend
+ * PATCH 404s the same way for "not found" and "already exited", so the caller must not
+ * assume it's safe to blindly re-register on failure).
  */
-export async function syncTargetWithMonitor(token: string, target: number): Promise<void> {
-  await updatePositionMonitor(token, { target }).catch((e) =>
-    console.warn('[Monitor] Update target failed:', e)
-  );
+export async function syncTargetWithMonitor(token: string, target: number): Promise<boolean> {
+  try {
+    await updatePositionMonitor(token, { target });
+    return true;
+  } catch (e) {
+    console.warn('[Monitor] Update target failed:', e);
+    return false;
+  }
 }
 
 export interface PollCallbacks {
