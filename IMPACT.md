@@ -185,6 +185,11 @@ All Dhan broker API calls live here. Called only from `sharedActions.ts` execute
 
 **If adding a setting:** decide Data vs Trade panel based on whether it requires a data reload.
 
+### Export Loaded Data (`handleExportCandlesCSV`, Data Settings panel)
+→ reads `candles`, `instrument`, `sessionConfig.interval` directly from the store (read-only, no store action) and builds a CSV client-side via `Blob`/`URL.createObjectURL`
+→ **not** a data reload — exports whatever is already in `candles` as-is; does not call `performDataReload`/`fetchCandles`
+→ disabled when `candles.length === 0`
+
 ### Trade entry (`handleExecuteTrade`)
 → reads `manualLevels` first, falls back to pivot + `targetRR`
 → calls `initiateTrade()`
@@ -353,6 +358,7 @@ The Market/Entry/Confirmation/Exit/Risk step nav described above (tab row, one s
 - **Store fields:** `savedAutoBacktestConfigs: SavedAutoBacktestConfig[]`, `activeAutoBacktestConfigId`/`activeAutoBacktestConfigName` (which saved entry, if any, is currently loaded — determines whether the panel's "Save" button overwrites in place or is disabled).
 - **Store actions** (`autoBacktestActions.ts`): `loadSavedAutoBacktestConfigsList`, `saveAutoBacktestConfigAs`, `updateActiveAutoBacktestConfig`, `applySavedAutoBacktestConfig`, `deleteSavedAutoBacktestConfig`. `applySavedAutoBacktestConfig` calls the existing `setAutoBacktestConfig` setter (so the `autoExitSL` sync side-effect still runs) rather than setting `autoBacktestConfig` directly.
 - **Do not confuse with `AUTO_BT_PRESETS`/`applyPreset`** (`autoBacktestEngine.ts`/`AutoBacktestPanel.tsx`) — that remains a separate, hardcoded, non-persisted, in-memory-only mechanism (3 fixed presets). The two features are independent UI sections in the panel and neither reads/writes the other's state.
+- **`handleExportConfig`** (`AutoBacktestPanel.tsx`, "Export" button next to "Save As...") — reads the live `config` (`autoBacktestConfig` from the store, i.e. whatever is currently being edited, not necessarily the saved/active one) and downloads it as JSON via `Blob`/`URL.createObjectURL`. Purely local — no Firestore read/write, independent of `saveAutoBacktestConfigAs`/`updateActiveAutoBacktestConfig`. Wraps the config with `{ name: activeConfigName ?? 'unsaved-auto-bt-config', exportedAt, config }`.
 
 **Check when changing:** if `AutoBacktestConfig`'s shape changes, old saved Firestore docs still have the old shape — `applySavedAutoBacktestConfig` passes the stored `config` straight to `setAutoBacktestConfig` with no migration/default-backfill, so a saved config from before a new field existed will be missing that field (same class of gap as `AUTO_BT_PRESETS` partial objects already have via `?? default` fallbacks at read sites — saved configs have no such fallback layer).
 

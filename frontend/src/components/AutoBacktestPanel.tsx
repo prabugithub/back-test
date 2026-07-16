@@ -2,7 +2,7 @@ import { useMemo, useState, useEffect } from 'react';
 import { createPortal } from 'react-dom';
 import {
   ArrowLeft, Zap, TrendingUp, TrendingDown, Minus, RefreshCw, BarChart2, Save, Trash2, FolderOpen,
-  Settings2, Compass, LogIn, ShieldCheck, LogOut, ShieldAlert,
+  Settings2, Compass, LogIn, ShieldCheck, LogOut, ShieldAlert, Download,
 } from 'lucide-react';
 import { useSessionStore } from '../stores/sessionStore';
 import { EntryMetricsDashboard } from './EntryMetricsDashboard';
@@ -150,6 +150,7 @@ export function AutoBacktestPanel({ onClose }: AutoBacktestPanelProps) {
 
   const savedConfigs = useSessionStore(s => s.savedAutoBacktestConfigs);
   const activeConfigId = useSessionStore(s => s.activeAutoBacktestConfigId);
+  const activeConfigName = useSessionStore(s => s.activeAutoBacktestConfigName);
   const loadSavedAutoBacktestConfigsList = useSessionStore(s => s.loadSavedAutoBacktestConfigsList);
   const saveAutoBacktestConfigAs = useSessionStore(s => s.saveAutoBacktestConfigAs);
   const updateActiveAutoBacktestConfig = useSessionStore(s => s.updateActiveAutoBacktestConfig);
@@ -205,6 +206,22 @@ export function AutoBacktestPanel({ onClose }: AutoBacktestPanelProps) {
       riskPerTrade: config.riskPerTrade,
       minQuantity: config.minQuantity,
     });
+  };
+
+  const handleExportConfig = () => {
+    const exportPayload = {
+      name: activeConfigName || 'unsaved-auto-bt-config',
+      exportedAt: new Date().toISOString(),
+      config,
+    };
+    const blob = new Blob([JSON.stringify(exportPayload, null, 2)], { type: 'application/json' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    const safeName = (activeConfigName || 'unsaved').replace(/[^a-zA-Z0-9-_]/g, '_');
+    a.download = `autobt-config-${safeName}-${new Date().toISOString().split('T')[0]}.json`;
+    a.click();
+    URL.revokeObjectURL(url);
   };
 
   const regimes: RegimeKey[] = ['uptrend', 'downtrend', 'range', 'reversal'];
@@ -332,6 +349,13 @@ export function AutoBacktestPanel({ onClose }: AutoBacktestPanelProps) {
                 className="px-2 py-1 text-[10px] bg-gray-50 text-gray-700 border border-gray-200 rounded-lg hover:bg-gray-100 font-medium transition-all duration-150 active:scale-95"
               >
                 Save As...
+              </button>
+              <button
+                onClick={handleExportConfig}
+                title="Export current auto-backtest settings as JSON"
+                className="px-2 py-1 text-[10px] bg-green-50 text-green-700 border border-green-200 rounded-lg hover:bg-green-100 font-medium flex items-center gap-1 transition-all duration-150 active:scale-95"
+              >
+                <Download size={12} /> Export
               </button>
             </div>
           </div>

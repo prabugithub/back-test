@@ -220,6 +220,8 @@ Requires **"Load Data"** to apply.
 | To Date | End of data range |
 | Jump To Date | Loads full range but starts playback at this date |
 
+**Export Loaded Data** button (below "Load Data"): downloads the candles currently held in the session (`sessionStore.candles`) as a CSV (`Timestamp,DateTime,Open,High,Low,Close,Volume`). This is a pure client-side export of whatever is already loaded — it does **not** trigger a new fetch/reload, and respects whatever timeframe/date range/instrument is currently active (e.g. 5-min Nifty data loaded via the Local source). Disabled when no candles are loaded. Filename: `{instrument}-{timeframe}m-{date}.csv`.
+
 #### Trade Settings (sliders icon ▤)
 
 All changes apply **immediately** — no button needed.
@@ -753,6 +755,7 @@ The existing **Quick Presets** row (Trend Follow / Range Trader / All Regimes) i
 | **Save** | Overwrites the currently active configuration with the current filter values. Disabled until a configuration has been loaded or saved via Save As. |
 | **Load** | Select an entry from the dropdown, click Load — replaces the entire current configuration (all regimes + global settings) with the saved one. |
 | **Delete** | Select an entry, confirm, and it's removed from Firestore and the dropdown. |
+| **Export** | Downloads the current in-memory Auto-Backtest configuration (all 4 regimes + global settings) as a JSON file — client-side only, no Firestore write. Includes the active saved-config name (or `unsaved-auto-bt-config`) and an `exportedAt` timestamp. Filename: `autobt-config-{name}-{date}.json`. |
 
 The dropdown lists every saved configuration by name, marking the currently active one. Loading or saving as always keeps the dropdown selection in sync with the active configuration.
 
@@ -789,4 +792,4 @@ Dialogs (open on demand):
 
 ---
 
-**Last Updated:** 2026-07-15
+**Last Updated:** 2026-07-15 (added CSV export of loaded candles + JSON export of Auto-Backtest config)

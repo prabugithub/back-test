@@ -483,7 +483,7 @@ export function evaluateAutoSignals(
   const currentCandle = candles[currentIndex];
   const currentTs = currentCandle.timestamp;
 
-  // Pre-compute indicators
+  // Pre-compute indicators (shared across every regime's evaluation below)
   const pivots = calculatePivotPoints(visibleCandles);
   const alBrooks = calculateAlBrooks(visibleCandles);
   const ema21 = getEmaAt(candles, currentIndex, 21);
@@ -492,42 +492,51 @@ export function evaluateAutoSignals(
 
   // Detect regime from LT market structure
   const { ltMarket, htMarket } = analyzeMarketStructure(visibleCandles, pivots);
-  const regime = getRegimeKey(ltMarket);
-  const regimeRules = config[regime];
-
-  // Per-regime HT filter
-  if (!passesHtFilter(regimeRules.htStructureFilter, htMarket)) return null;
-
-  // Regime must be enabled
-  if (!regimeRules.enabled) return null;
+  const matchedRegime = getRegimeKey(ltMarket);
 
   // Shared indicators at this bar
   const currentPivot = pivots.find(p => p.time === currentTs) ?? null;
   const currentAbMarker = alBrooks.find(m => m.time === currentTs) ?? null;
   const pivotSeq = getPivotSeq(pivots);
 
-  // For pullback-continuation entries (H_SIGNAL/CONFLUENCE), the trend-cleanliness filters
-  // (Bar Overlap, Efficiency Ratio, Break Count, EMA Slope) should grade the impulse leg that
-  // preceded the pullback, not the pullback bars ending at this entry bar — so anchor their
-  // window at the fired marker's swing extreme instead of currentIndex. PIVOT-mode entries
-  // have no pullback concept, so they keep the window ending at currentIndex.
-  const trendAnchorIndex = (regimeRules.entryMode !== 'PIVOT' && currentAbMarker)
-    ? currentAbMarker.anchorIndex
-    : currentIndex;
+  // Try the auto-detected regime first — this reproduces the old single-regime behavior
+  // exactly when only that regime is configured. Then fall back to any other *enabled*
+  // regime, so a regime's H1/H2/entry setup fires whenever its own rules (enabled, HT
+  // filter, quality filters) pass, instead of being silently skipped just because the
+  // bar happens to be classified into a different regime than the one you configured.
+  const regimeOrder: RegimeKey[] = [
+    matchedRegime,
+    ...(['uptrend', 'downtrend', 'range', 'reversal'] as RegimeKey[]).filter(k => k !== matchedRegime),
+  ];
 
-  // Instrumentation snapshot — computed once per bar, used both for filter gating below
-  // and (via the returned AutoSignal.entryMetrics) for stamping the resulting Trade
-  // without recomputing.
-  const entryMetrics = computeEntryMetrics(candles, currentIndex, config, trendAnchorIndex);
+  for (const regime of regimeOrder) {
+    const regimeRules = config[regime];
+    if (!regimeRules.enabled) continue;
+    if (!passesHtFilter(regimeRules.htStructureFilter, htMarket)) continue;
 
-  if (regimeRules.direction !== 'SHORT_ONLY') {
-    const signal = evalLong(regimeRules, currentCandle, currentPivot, currentAbMarker, pivots, ema21, ema60, atr, currentIndex, candles, pivotSeq, ltMarket, htMarket, regime, entryMetrics);
-    if (signal) return signal;
-  }
+    // For pullback-continuation entries (H_SIGNAL/CONFLUENCE), the trend-cleanliness filters
+    // (Bar Overlap, Efficiency Ratio, Break Count, EMA Slope) should grade the impulse leg that
+    // preceded the pullback, not the pullback bars ending at this entry bar — so anchor their
+    // window at the fired marker's swing extreme instead of currentIndex. PIVOT-mode entries
+    // have no pullback concept, so they keep the window ending at currentIndex.
+    const trendAnchorIndex = (regimeRules.entryMode !== 'PIVOT' && currentAbMarker)
+      ? currentAbMarker.anchorIndex
+      : currentIndex;
 
-  if (regimeRules.direction !== 'LONG_ONLY') {
-    const signal = evalShort(regimeRules, currentCandle, currentPivot, currentAbMarker, pivots, ema21, ema60, atr, currentIndex, candles, pivotSeq, ltMarket, htMarket, regime, entryMetrics);
-    if (signal) return signal;
+    // Instrumentation snapshot — computed once per candidate regime, used both for filter
+    // gating below and (via the returned AutoSignal.entryMetrics) for stamping the resulting
+    // Trade without recomputing.
+    const entryMetrics = computeEntryMetrics(candles, currentIndex, config, trendAnchorIndex);
+
+    if (regimeRules.direction !== 'SHORT_ONLY') {
+      const signal = evalLong(regimeRules, currentCandle, currentPivot, currentAbMarker, pivots, ema21, ema60, atr, currentIndex, candles, pivotSeq, ltMarket, htMarket, regime, entryMetrics);
+      if (signal) return signal;
+    }
+
+    if (regimeRules.direction !== 'LONG_ONLY') {
+      const signal = evalShort(regimeRules, currentCandle, currentPivot, currentAbMarker, pivots, ema21, ema60, atr, currentIndex, candles, pivotSeq, ltMarket, htMarket, regime, entryMetrics);
+      if (signal) return signal;
+    }
   }
 
   return null;

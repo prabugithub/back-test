@@ -22,6 +22,35 @@ export function InstrumentSelector() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [useDateBasedLoading, setUseDateBasedLoading] = useState(false);
+  const [selectedYear, setSelectedYear] = useState<string>(''); // '' = custom range
+
+  // Years available for quick-select (local data starts 2015)
+  const yearOptions = (() => {
+    const currentYear = new Date().getFullYear();
+    const years: number[] = [];
+    for (let y = currentYear; y >= 2015; y--) years.push(y);
+    return years;
+  })();
+
+  const handleYearSelect = (year: string) => {
+    setSelectedYear(year);
+    if (year) {
+      const currentYear = new Date().getFullYear();
+      const start = `${year}-01-01`;
+      setFromDate(start);
+      // Cap "to date" at today for the current year so we don't request future data
+      setToDate(Number(year) === currentYear ? new Date().toISOString().split('T')[0] : `${year}-12-31`);
+      // Default playback to start at the beginning of the selected range
+      setJumpToDate(start);
+    }
+  };
+
+  // Keep Jump to Date in sync with From Date when the user edits it manually
+  const handleFromDateChange = (value: string) => {
+    setFromDate(value);
+    setJumpToDate(value);
+    setSelectedYear('');
+  };
 
   // Auto-bind defaults for Live mode
   useEffect(() => {
@@ -523,7 +552,7 @@ export function InstrumentSelector() {
               <input
                 type="date"
                 value={fromDate}
-                onChange={(e) => setFromDate(e.target.value)}
+                onChange={(e) => handleFromDateChange(e.target.value)}
                 disabled={dataSource === 'live' && !useDateBasedLoading}
                 className={`w-full px-3 py-2 border rounded focus:outline-none focus:ring-2 focus:ring-blue-500 ${dataSource === 'live' && !useDateBasedLoading ? 'bg-gray-100 cursor-not-allowed text-gray-500' : ''}`}
               />
@@ -596,6 +625,25 @@ export function InstrumentSelector() {
             </p>
           </div>
 
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1">
+              Year
+            </label>
+            <select
+              value={selectedYear}
+              onChange={(e) => handleYearSelect(e.target.value)}
+              className="w-full px-3 py-2 border rounded focus:outline-none focus:ring-2 focus:ring-blue-500"
+            >
+              <option value="">Custom Range</option>
+              {yearOptions.map((y) => (
+                <option key={y} value={y}>{y}</option>
+              ))}
+            </select>
+            <p className="mt-1 text-xs text-gray-500">
+              Pick a year to load Jan 1 – Dec 31, or use Custom Range below.
+            </p>
+          </div>
+
           <div className="grid grid-cols-3 gap-4">
             <div>
               <label className="block text-sm font-medium text-gray-700 mb-1">
@@ -604,7 +652,7 @@ export function InstrumentSelector() {
               <input
                 type="date"
                 value={fromDate}
-                onChange={(e) => setFromDate(e.target.value)}
+                onChange={(e) => handleFromDateChange(e.target.value)}
                 className="w-full px-3 py-2 border rounded focus:outline-none focus:ring-2 focus:ring-blue-500"
               />
             </div>
@@ -616,7 +664,7 @@ export function InstrumentSelector() {
               <input
                 type="date"
                 value={toDate}
-                onChange={(e) => setToDate(e.target.value)}
+                onChange={(e) => { setToDate(e.target.value); setSelectedYear(''); }}
                 className="w-full px-3 py-2 border rounded focus:outline-none focus:ring-2 focus:ring-blue-500"
               />
             </div>

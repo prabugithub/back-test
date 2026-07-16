@@ -50,30 +50,56 @@ export function runBatchSimulation(
 
   function enterPosition(candle: Candle, signal: AutoSignal, qty: number, candleIndex: number) {
     const entryPrice = candle.close;
-    const maAnalysis = analyzeManualEntry(candles, candleIndex, signal.type);
-    const entryMetrics = signal.entryMetrics;
-    const barOverlapAtEntry = calculateBarOverlap(candles, candleIndex, config.barOverlapLookback ?? 8);
-    const barOverlapAvgAtEntry = entryMetrics?.barOverlapAvg ?? averageBarOverlap(barOverlapAtEntry);
-    const barRangeSamples = calculateBarRanges(candles, candleIndex, config.barRangeLookback ?? 20);
-    const barRangeFallback = averageBarRanges(barRangeSamples);
-    const barRangeAvg = entryMetrics?.barRangeAvg ?? barRangeFallback.barRangeAvg;
-    const bullBarRangeAvg = entryMetrics?.bullBarRangeAvg ?? barRangeFallback.bullBarRangeAvg;
-    const bearBarRangeAvg = entryMetrics?.bearBarRangeAvg ?? barRangeFallback.bearBarRangeAvg;
-    const efficiencyRatioAtEntry = entryMetrics?.efficiencyRatio ?? calculateEfficiencyRatio(candles, candleIndex, config.efficiencyRatioLookback ?? 10);
-    const barBreakFallback = calculateBarBreaks(candles, candleIndex, config.barBreakLookback ?? 20);
-    const highBreakCount = entryMetrics?.highBreakCount ?? barBreakFallback.highBreakCount;
-    const lowBreakCount = entryMetrics?.lowBreakCount ?? barBreakFallback.lowBreakCount;
-    const barsCompared = entryMetrics?.barBreakWindow ?? barBreakFallback.barsCompared;
-    const ema21SlopeAtEntry = entryMetrics?.ema21Slope ?? calculateEMASlope(candles, candleIndex, 21, config.ema21SlopeLookback ?? 10);
-    const ema50SlopeAtEntry = entryMetrics?.ema50Slope ?? calculateEMASlope(candles, candleIndex, 50, config.ema50SlopeLookback ?? 20);
-    const emaInteractionFallback = calculateEMAInteraction(candles, candleIndex, 20, config.emaInteractionLookback ?? 20);
-    const gapBarRatio = entryMetrics?.ema20GapBarRatio ?? emaInteractionFallback.gapBarRatio;
-    const closeAboveRatio = entryMetrics?.ema20CloseAboveRatio ?? emaInteractionFallback.closeAboveRatio;
-    const emaInteractionWindow = entryMetrics?.ema20InteractionWindow ?? emaInteractionFallback.barsCompared;
+
+    // Blend into an already-open position instead of overwriting it — lets
+    // "enter even with a position open" (skipIfPositionOpen: false) pyramid correctly.
+    // Mirrors the same-direction averaging / opposite-direction reduce math in
+    // sharedActions.ts's executeTrade (the live/step-through path), so batch and
+    // interactive runs stay consistent.
+    const currentQty = position ? position.quantity : 0;
+    const currentAvgPrice = position ? position.averagePrice : 0;
+    const currentRealizedPnL = position ? position.realizedPnL : 0;
+    const tradeSign = signal.type === 'BUY' ? 1 : -1;
+    const isReducing = currentQty !== 0 && Math.sign(currentQty) !== tradeSign;
+
+    let newAvgPrice: number;
+    let newRealizedPnL = currentRealizedPnL;
+    let tradePnL: number | undefined;
+    let newStopLoss: number | undefined;
+    let newTarget: number | undefined;
+
+    if (!isReducing) {
+      // Fresh entry or same-direction add — blend average price, adopt the newest SL/TP.
+      newAvgPrice = currentQty === 0
+        ? entryPrice
+        : (Math.abs(currentQty) * currentAvgPrice + qty * entryPrice) / (Math.abs(currentQty) + qty);
+      newStopLoss = signal.sl;
+      newTarget = signal.tp;
+    } else {
+      // Opposite-direction signal against an open position — realize PnL on the closing
+      // portion; if it more than covers the open qty, the remainder flips to the new side.
+      const qtyClosing = Math.min(Math.abs(currentQty), qty);
+      const pnlPerShare = currentQty > 0 ? entryPrice - currentAvgPrice : currentAvgPrice - entryPrice;
+      tradePnL = pnlPerShare * qtyClosing;
+      newRealizedPnL += tradePnL;
+      const remaining = qty - qtyClosing;
+      if (remaining > 0) {
+        newAvgPrice = entryPrice;
+        newStopLoss = signal.sl;
+        newTarget = signal.tp;
+      } else {
+        newAvgPrice = currentAvgPrice;
+        newStopLoss = position?.stopLoss;
+        newTarget = position?.target;
+      }
+    }
+
+    const newQty = currentQty + qty * tradeSign;
+
     const journal: TradeJournal = {
       ltMarket: signal.ltMarket,
       htMarket: signal.htMarket,
-      entryPosition: maAnalysis.entryPosition,
+      entryPosition: analyzeManualEntry(candles, candleIndex, signal.type).entryPosition,
       llhhPivot: signal.llhhPivot,
       entrySign: signal.reason,
       notes: `[Batch BT] ${signal.reason}`,
@@ -83,42 +109,59 @@ export function runBatchSimulation(
       myViewMoveAlign: 'Yes',
       tradeCategory: 'System',
     };
-    trades.push({
+
+    const trade: Trade = {
       id: `batch-${Date.now()}-${tradeCounter++}`,
       timestamp: candle.timestamp,
       type: signal.type,
       price: entryPrice,
       quantity: qty,
       instrument,
-      stopLoss: signal.sl,
-      target: signal.tp,
+      pnl: tradePnL,
+      stopLoss: newStopLoss,
+      target: newTarget,
       exitReason: 'MANUAL',
       journal,
-      barOverlapAtEntry,
-      barOverlapAvgAtEntry,
-      barRangeAvgAtEntry: barRangeAvg,
-      bullBarRangeAvgAtEntry: bullBarRangeAvg,
-      bearBarRangeAvgAtEntry: bearBarRangeAvg,
-      efficiencyRatioAtEntry,
-      highBreakCountAtEntry: highBreakCount,
-      lowBreakCountAtEntry: lowBreakCount,
-      barBreakWindowAtEntry: barsCompared,
-      ema21SlopeAtEntry,
-      ema50SlopeAtEntry,
-      ema20GapBarRatioAtEntry: gapBarRatio,
-      ema20CloseAboveRatioAtEntry: closeAboveRatio,
-      ema20InteractionWindowAtEntry: emaInteractionWindow,
       interval,
-    });
-    position = {
-      instrument,
-      quantity: signal.type === 'BUY' ? qty : -qty,
-      averagePrice: entryPrice,
-      realizedPnL: 0,
-      unrealizedPnL: 0,
-      stopLoss: signal.sl,
-      target: signal.tp,
     };
+
+    // Entry-condition instrumentation only makes sense for the leg that opens/adds
+    // exposure, not for a pure reduce against an existing position (matches the
+    // `!isReducing` gating in sharedActions.ts).
+    if (!isReducing) {
+      const entryMetrics = signal.entryMetrics;
+      const barOverlapAtEntry = calculateBarOverlap(candles, candleIndex, config.barOverlapLookback ?? 8);
+      const barRangeSamples = calculateBarRanges(candles, candleIndex, config.barRangeLookback ?? 20);
+      const barRangeFallback = averageBarRanges(barRangeSamples);
+      const barBreakFallback = calculateBarBreaks(candles, candleIndex, config.barBreakLookback ?? 20);
+      const emaInteractionFallback = calculateEMAInteraction(candles, candleIndex, 20, config.emaInteractionLookback ?? 20);
+      trade.barOverlapAtEntry = barOverlapAtEntry;
+      trade.barOverlapAvgAtEntry = entryMetrics?.barOverlapAvg ?? averageBarOverlap(barOverlapAtEntry);
+      trade.barRangeAvgAtEntry = entryMetrics?.barRangeAvg ?? barRangeFallback.barRangeAvg;
+      trade.bullBarRangeAvgAtEntry = entryMetrics?.bullBarRangeAvg ?? barRangeFallback.bullBarRangeAvg;
+      trade.bearBarRangeAvgAtEntry = entryMetrics?.bearBarRangeAvg ?? barRangeFallback.bearBarRangeAvg;
+      trade.efficiencyRatioAtEntry = entryMetrics?.efficiencyRatio ?? calculateEfficiencyRatio(candles, candleIndex, config.efficiencyRatioLookback ?? 10);
+      trade.highBreakCountAtEntry = entryMetrics?.highBreakCount ?? barBreakFallback.highBreakCount;
+      trade.lowBreakCountAtEntry = entryMetrics?.lowBreakCount ?? barBreakFallback.lowBreakCount;
+      trade.barBreakWindowAtEntry = entryMetrics?.barBreakWindow ?? barBreakFallback.barsCompared;
+      trade.ema21SlopeAtEntry = entryMetrics?.ema21Slope ?? calculateEMASlope(candles, candleIndex, 21, config.ema21SlopeLookback ?? 10);
+      trade.ema50SlopeAtEntry = entryMetrics?.ema50Slope ?? calculateEMASlope(candles, candleIndex, 50, config.ema50SlopeLookback ?? 20);
+      trade.ema20GapBarRatioAtEntry = entryMetrics?.ema20GapBarRatio ?? emaInteractionFallback.gapBarRatio;
+      trade.ema20CloseAboveRatioAtEntry = entryMetrics?.ema20CloseAboveRatio ?? emaInteractionFallback.closeAboveRatio;
+      trade.ema20InteractionWindowAtEntry = entryMetrics?.ema20InteractionWindow ?? emaInteractionFallback.barsCompared;
+    }
+
+    trades.push(trade);
+
+    position = newQty !== 0 ? {
+      instrument,
+      quantity: newQty,
+      averagePrice: newAvgPrice,
+      realizedPnL: newRealizedPnL,
+      unrealizedPnL: 0,
+      stopLoss: newStopLoss,
+      target: newTarget,
+    } : null;
   }
 
   function exitPosition(candle: Candle, reason: 'SL' | 'TP' | 'TIME_OVER', fillPrice?: number) {

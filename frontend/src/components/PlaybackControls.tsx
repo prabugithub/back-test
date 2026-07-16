@@ -1,5 +1,5 @@
 import { useState, useEffect, useMemo, useCallback, useRef } from 'react';
-import { Play, Pause, ChevronLeft, ChevronRight, FastForward, CalendarClock, Settings, X, Calendar, Activity, SlidersHorizontal, Zap, Columns2 } from 'lucide-react';
+import { Play, Pause, ChevronLeft, ChevronRight, FastForward, CalendarClock, Settings, X, Calendar, Activity, SlidersHorizontal, Zap, Columns2, Download } from 'lucide-react';
 import { useSessionStore } from '../stores/sessionStore';
 import { useNotificationStore } from '../stores/notificationStore';
 import { formatTimestamp } from '../utils/formatters';
@@ -178,6 +178,7 @@ export function PlaybackControls({ onOpenHistory, onOpenDashboard }: { onOpenHis
     setSecondaryTimeframe,
     isLiveMode,
     livePrice,
+    instrument,
   } = useSessionStore();
 
   const currentCandle = useSessionStore((s) => s.candles[s.currentIndex] || null);
@@ -257,6 +258,25 @@ export function PlaybackControls({ onOpenHistory, onOpenDashboard }: { onOpenHis
   const [fromDate, setFromDate] = useState('');
   const [toDate, setToDate] = useState('');
   const [isReloading, setIsReloading] = useState(false);
+  const [selectedYear, setSelectedYear] = useState<string>(''); // '' = custom range
+
+  // Years available for quick-select (data starts 2015)
+  const yearOptions = useMemo(() => {
+    const currentYear = new Date().getFullYear();
+    const years: number[] = [];
+    for (let y = currentYear; y >= 2015; y--) years.push(y);
+    return years;
+  }, []);
+
+  const handleYearSelect = (year: string) => {
+    setSelectedYear(year);
+    if (year) {
+      const currentYear = new Date().getFullYear();
+      setFromDate(`${year}-01-01`);
+      // Cap "to date" at today for the current year so we don't request future data
+      setToDate(Number(year) === currentYear ? new Date().toISOString().split('T')[0] : `${year}-12-31`);
+    }
+  };
 
   const resetSession = useSessionStore((s) => s.resetSession);
   const sessionConfig = useSessionStore((s) => s.sessionConfig);
@@ -269,6 +289,7 @@ export function PlaybackControls({ onOpenHistory, onOpenDashboard }: { onOpenHis
       if (sessionConfig.fromDate) setFromDate(sessionConfig.fromDate);
       if (sessionConfig.toDate) setToDate(sessionConfig.toDate);
       setSettingsJumpDate(''); // Reset jump date when opening settings
+      setSelectedYear(''); // Reset year quick-select when opening settings
     }
   }, [showSettings, sessionConfig]);
 
@@ -393,6 +414,29 @@ export function PlaybackControls({ onOpenHistory, onOpenDashboard }: { onOpenHis
 
   // Handle data reload with new timeframe/dates
   const handleReloadData = () => performDataReload(fromDate, toDate, timeframe, settingsJumpDate);
+
+  // Export the currently loaded candles (no refetch) as CSV
+  const handleExportCandlesCSV = () => {
+    if (candles.length === 0) {
+      useNotificationStore.getState().notify('No data loaded to export.', 'warning');
+      return;
+    }
+
+    let csvContent = 'Timestamp,DateTime,Open,High,Low,Close,Volume\n';
+    candles.forEach((c) => {
+      csvContent += `${c.timestamp},${formatTimestamp(c.timestamp)},${c.open},${c.high},${c.low},${c.close},${c.volume}\n`;
+    });
+
+    const blob = new Blob([csvContent], { type: 'text/csv' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    const safeInstrument = (instrument || 'data').replace(/[^a-zA-Z0-9-_]/g, '_');
+    const tf = sessionConfig?.interval || timeframe;
+    a.download = `${safeInstrument}-${tf}m-${new Date().toISOString().split('T')[0]}.csv`;
+    a.click();
+    URL.revokeObjectURL(url);
+  };
 
   // Helper to jump by time
   const handleTimeJump = (days: number) => {
@@ -835,6 +879,26 @@ export function PlaybackControls({ onOpenHistory, onOpenDashboard }: { onOpenHis
 
             <div className="border-t my-2"></div>
 
+            {/* Year Quick-Select */}
+            <div>
+              <label className="block text-xs font-medium text-gray-700 mb-1">
+                Year
+              </label>
+              <select
+                value={selectedYear}
+                onChange={(e) => handleYearSelect(e.target.value)}
+                className="w-full px-2 py-1.5 text-sm border border-gray-300 rounded focus:outline-none focus:ring-2 focus:ring-blue-500"
+              >
+                <option value="">Custom Range</option>
+                {yearOptions.map((y) => (
+                  <option key={y} value={y}>{y}</option>
+                ))}
+              </select>
+              <p className="text-[10px] text-gray-500 mt-1">
+                Pick a year to load Jan 1 – Dec 31, or use Custom Range below.
+              </p>
+            </div>
+
             {/* Date Range */}
             <div>
               <label className="block text-xs font-medium text-gray-700 mb-1">
@@ -843,7 +907,7 @@ export function PlaybackControls({ onOpenHistory, onOpenDashboard }: { onOpenHis
               <input
                 type="date"
                 value={fromDate}
-                onChange={(e) => setFromDate(e.target.value)}
+                onChange={(e) => { setFromDate(e.target.value); setSelectedYear(''); }}
                 className="w-full px-2 py-1.5 text-sm border border-gray-300 rounded focus:outline-none focus:ring-2 focus:ring-blue-500"
               />
             </div>
@@ -855,7 +919,7 @@ export function PlaybackControls({ onOpenHistory, onOpenDashboard }: { onOpenHis
               <input
                 type="date"
                 value={toDate}
-                onChange={(e) => setToDate(e.target.value)}
+                onChange={(e) => { setToDate(e.target.value); setSelectedYear(''); }}
                 className="w-full px-2 py-1.5 text-sm border border-gray-300 rounded focus:outline-none focus:ring-2 focus:ring-blue-500"
               />
             </div>
@@ -867,6 +931,17 @@ export function PlaybackControls({ onOpenHistory, onOpenDashboard }: { onOpenHis
               className="w-full px-3 py-2 bg-blue-600 text-white rounded font-medium text-sm hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed mb-2"
             >
               {isReloading ? 'Loading...' : 'Load Data'}
+            </button>
+
+            {/* Export currently loaded candles (no refetch) */}
+            <button
+              onClick={handleExportCandlesCSV}
+              disabled={candles.length === 0}
+              className="w-full flex items-center justify-center gap-1.5 px-3 py-2 bg-green-50 text-green-700 border border-green-200 rounded font-medium text-sm hover:bg-green-100 disabled:opacity-50 disabled:cursor-not-allowed"
+              title="Export currently loaded candles as CSV (does not fetch new data)"
+            >
+              <Download size={14} />
+              Export Loaded Data ({candles.length} candles)
             </button>
           </div>
         </div>
