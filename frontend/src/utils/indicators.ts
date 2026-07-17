@@ -288,23 +288,36 @@ export function calculatePivotPoints(candles: Candle[]): PivotPoint[] {
 
 export type AlBrooksSignal = string; // 'H1','H2','H3','H4',... 'L1','L2','L3','L4',...
 
+/** Inclusive bar-index bounds of a completed breakout leg. */
+export interface AlBrooksLeg {
+  /** Bar of the last H/L signal fired before the breakout (hSwingHigh/lSwingLow break)
+   *  confirmed the leg. */
+  startIndex: number;
+  /** Bar of the leg's swing extreme, frozen when the next pullback began. */
+  endIndex: number;
+}
+
+/** Per-bar lookup of the most recently COMPLETED leg of each side, as of that bar.
+ *  null until the side's first leg completes. Lets any bar (e.g. a manual trade
+ *  entry) grade the same leg the H/L markers of the surrounding pullback grade. */
+export interface AlBrooksLegsByBar {
+  bull: (AlBrooksLeg | null)[];
+  bear: (AlBrooksLeg | null)[];
+}
+
 export interface AlBrooksMarker {
   time: number;
   signal: AlBrooksSignal;
-  /** Bar index of the swing extreme that ends the ORIGINAL impulse leg (== legEndIndex
-   *  while the pullback is in progress). Frozen for the whole pullback: H1, H2, H3…
-   *  of the same pullback structure all carry the same anchor. */
-  anchorIndex: number;
-  /** Bar index where the impulse leg began — the extreme of the *previous* pullback
-   *  (lowest low before a bull leg / highest high before a bear leg). Together with
-   *  legEndIndex this spans the exact bars of the impulse leg, so strength metrics
-   *  (efficiency ratio, overlap, …) can grade the leg itself instead of a fixed
-   *  lookback that may bleed into pre-leg chop or the pullback. */
-  legStartIndex: number;
-  /** Bar index of the leg's swing extreme, frozen on the first pullback bar. Stays
-   *  frozen until price breaks beyond it (new leg), so deeper pullback signals keep
-   *  grading the original leg. */
-  legEndIndex: number;
+  /** Bounds of the most recently COMPLETED breakout leg of this signal's side at
+   *  fire time (H markers → bull leg, L markers → bear leg), for strength metrics
+   *  (efficiency ratio, overlap, …) to grade actual leg bars instead of a fixed
+   *  lookback. A leg starts at the last H/L bar fired before its hSwingHigh /
+   *  lSwingLow broke (the hCount/lCount reset = breakout confirmed) and ends at
+   *  the swing extreme frozen when the next pullback began. Every signal of the
+   *  same pullback carries the same completed leg. undefined until the side's
+   *  first leg completes. */
+  legStartIndex?: number;
+  legEndIndex?: number;
 }
 
 /**
@@ -336,9 +349,26 @@ export function calculateAlBrooks(
   usePullbackDepth: boolean = false,
   atrDepthMultiplier: number = 1.0
 ): AlBrooksMarker[] {
-  const result: AlBrooksMarker[] = [];
+  return runAlBrooks(candles, usePullbackDepth, atrDepthMultiplier).markers;
+}
 
-  if (!candles || candles.length < 22) return result;
+/** Per-bar completed-leg lookup for both sides — see AlBrooksLegsByBar. The depth
+ *  filter only hides markers, never changes leg tracking, so no params needed. */
+export function calculateAlBrooksLegs(candles: Candle[]): AlBrooksLegsByBar {
+  return runAlBrooks(candles, false, 1.0).legs;
+}
+
+function runAlBrooks(
+  candles: Candle[],
+  usePullbackDepth: boolean,
+  atrDepthMultiplier: number
+): { markers: AlBrooksMarker[]; legs: AlBrooksLegsByBar } {
+  const result: AlBrooksMarker[] = [];
+  const bullLegs: (AlBrooksLeg | null)[] = new Array(candles?.length ?? 0).fill(null);
+  const bearLegs: (AlBrooksLeg | null)[] = new Array(candles?.length ?? 0).fill(null);
+  const done = { markers: result, legs: { bull: bullLegs, bear: bearLegs } };
+
+  if (!candles || candles.length < 22) return done;
 
   // ── ATR (14-period) for optional quality filter ──────────
   const atrValues = calculateATR(candles, 14);
@@ -360,42 +390,38 @@ export function calculateAlBrooks(
   let hCount = 0;
   let hArmed = false;       // true after a low break (pullback started)
   let hSwingHigh = -Infinity;   // price level at pullback start; reset threshold
-  let hSwingHighBarIndex = ema21Period; // bar index of hSwingHigh, for anchoring filter windows
   let latestHigh = -Infinity;   // running max high since last H signal
-  let latestHighBarIndex = ema21Period; // bar index that set the current latestHigh
 
   // ── L System State (bear-context pullback counting) ───────
   let lCount = 0;
   let lArmed = false;       // true after a high break (pullback started)
   let lSwingLow = Infinity;    // price level at pullback start; reset threshold
-  let lSwingLowBarIndex = ema21Period; // bar index of lSwingLow, for anchoring filter windows
   let latestLow = Infinity;    // running min low since last L signal
-  let latestLowBarIndex = ema21Period; // bar index that set the current latestLow
 
   // ── Leg tracking (parallel to the signal machinery above; never feeds back
   //    into hCount/hArmed/lCount/lArmed, so signal timing is unchanged) ──────
   //
-  // Tracks the ORIGINAL impulse leg for filter windowing. Deliberately diverges
-  // from the hCount reset: hCount resets whenever price exceeds hSwingHigh (which
-  // after H1 is only the minor push high), but the *leg* re-opens only when price
-  // breaks the original leg extreme. So H1/H2/H3 — and even fresh H1s after a
-  // minor-push hCount reset — all grade against the same frozen leg until the
-  // original swing high actually breaks.
-  let hLegStartIndex = ema21Period;   // where the current bull leg began
-  let hLegMaxHigh = -Infinity;        // running max high of the leg; stops updating while frozen
-  let hLegMaxHighBarIndex = ema21Period;
-  let hLegFrozen = false;             // true = pullback in progress, leg extent locked
-  let hLegEndIndex = ema21Period;     // valid while frozen: bar index of the leg's swing high
-  let hPullbackLow = Infinity;        // running min low during the pullback → next leg's start
-  let hPullbackLowBarIndex = ema21Period;
+  // A breakout leg lives through three phases per side:
+  //   candidate → every H fired replaces the candidate start; a deeper pullback
+  //               low (lowBreak) before the breakout discards it — "until
+  //               hSwingHigh breaks, the newest H is the leg start";
+  //   active    → the hCount reset (c.high > hSwingHigh = breakout confirmed)
+  //               promotes the candidate to an open leg whose running swing
+  //               extreme is tracked;
+  //   completed → the first lowBreak after confirmation freezes the leg at its
+  //               swing extreme. Markers and per-bar lookups always report the
+  //               most recently COMPLETED leg of their side.
+  let hCandidateStart: number | null = null; // bar of the newest H fired, pre-breakout
+  let hActiveStart: number | null = null;    // non-null = confirmed leg still running
+  let hActiveMaxHigh = -Infinity;            // running swing extreme of the active leg
+  let hActiveMaxHighBar = -1;
+  let hCompletedLeg: AlBrooksLeg | null = null;
 
-  let lLegStartIndex = ema21Period;   // where the current bear leg began
-  let lLegMinLow = Infinity;          // running min low of the leg; stops updating while frozen
-  let lLegMinLowBarIndex = ema21Period;
-  let lLegFrozen = false;
-  let lLegEndIndex = ema21Period;
-  let lPullbackHigh = -Infinity;      // running max high during the pullback → next leg's start
-  let lPullbackHighBarIndex = ema21Period;
+  let lCandidateStart: number | null = null;
+  let lActiveStart: number | null = null;
+  let lActiveMinLow = Infinity;
+  let lActiveMinLowBar = -1;
+  let lCompletedLeg: AlBrooksLeg | null = null;
 
   // ── Main loop ─────────────────────────────────────────────
   for (let i = ema21Period; i < candles.length; i++) {
@@ -411,25 +437,36 @@ export function calculateAlBrooks(
     // These accumulate since the last signal of their type,
     // so swing points capture the true move even through
     // inside bars.
-    if (c.high > latestHigh) latestHighBarIndex = i;
-    if (c.low < latestLow) latestLowBarIndex = i;
     latestHigh = Math.max(latestHigh, c.high);
     latestLow = Math.min(latestLow, c.low);
 
-    // Leg trackers: while the leg is open, extend its extreme; while frozen
-    // (pullback in progress), track the pullback's extreme instead — that
-    // becomes the next leg's start when the original extreme breaks.
-    if (!hLegFrozen) {
-      if (c.high > hLegMaxHigh) { hLegMaxHigh = c.high; hLegMaxHighBarIndex = i; }
-    } else if (c.low < hPullbackLow) {
-      hPullbackLow = c.low; hPullbackLowBarIndex = i;
+    // ── Leg extension / completion / candidate invalidation ──────────────
+    // Extend the active leg's swing extreme (this bar may itself be the extreme).
+    if (hActiveStart !== null && c.high > hActiveMaxHigh) {
+      hActiveMaxHigh = c.high; hActiveMaxHighBar = i;
     }
-    if (!lLegFrozen) {
-      if (c.low < lLegMinLow) { lLegMinLow = c.low; lLegMinLowBarIndex = i; }
-    } else if (c.high > lPullbackHigh) {
-      lPullbackHigh = c.high; lPullbackHighBarIndex = i;
+    if (lActiveStart !== null && c.low < lActiveMinLow) {
+      lActiveMinLow = c.low; lActiveMinLowBar = i;
     }
-
+    // A lowBreak starts a pullback in bull context: it completes an active bull
+    // leg at its swing extreme, and discards a not-yet-confirmed candidate (a
+    // deeper pullback low before breakout — the next H becomes the new start).
+    // Runs BEFORE the fire block so a signal firing on this same bar already
+    // references the just-completed leg. Mirrored for the bear side.
+    if (lowBreak) {
+      if (hActiveStart !== null) {
+        hCompletedLeg = { startIndex: hActiveStart, endIndex: hActiveMaxHighBar };
+        hActiveStart = null;
+      }
+      hCandidateStart = null;
+    }
+    if (highBreak) {
+      if (lActiveStart !== null) {
+        lCompletedLeg = { startIndex: lActiveStart, endIndex: lActiveMinLowBar };
+        lActiveStart = null;
+      }
+      lCandidateStart = null;
+    }
 
     // ── 2. Capture arm state from BEFORE this bar ────────
     // Ensures the bar that starts a pullback cannot also fire
@@ -444,7 +481,6 @@ export function calculateAlBrooks(
     if (lowBreak && !hArmed) {
       hArmed = true;
       hSwingHigh = latestHigh;
-      hSwingHighBarIndex = latestHighBarIndex;
     }
     // L arm: high break starts a pullback in bear context.
     //        lSwingLow = latestLow (the true low of the
@@ -452,24 +488,6 @@ export function calculateAlBrooks(
     if (highBreak && !lArmed) {
       lArmed = true;
       lSwingLow = latestLow;
-      lSwingLowBarIndex = latestLowBarIndex;
-    }
-
-    // ── 3b. Freeze leg on pullback start ─────────────────
-    // Keyed on legFrozen (NOT hArmed/lArmed): re-arms after H1/L1 fire must not
-    // move the frozen leg — the leg stays locked to the original impulse extreme
-    // for the entire pullback structure.
-    if (lowBreak && !hLegFrozen) {
-      hLegFrozen = true;
-      hLegEndIndex = hLegMaxHighBarIndex; // true swing high of the whole leg (survives inside bars)
-      hPullbackLow = c.low;
-      hPullbackLowBarIndex = i;
-    }
-    if (highBreak && !lLegFrozen) {
-      lLegFrozen = true;
-      lLegEndIndex = lLegMinLowBarIndex;
-      lPullbackHigh = c.high;
-      lPullbackHighBarIndex = i;
     }
 
     // ── 4. Signal checks (using previous arm state) ──────
@@ -489,16 +507,18 @@ export function calculateAlBrooks(
       hArmed = false;
       latestHigh = c.high;  // reset tracker for next up-move
 
+      // The newest H is the candidate start of the next breakout leg — replaced
+      // by later H fires, discarded by a deeper pullback low, promoted to an
+      // active leg when hSwingHigh breaks.
+      hCandidateStart = i;
+
       const depthOk = c.low <= ema21 + getAtr(c.timestamp) * atrDepthMultiplier;
       if (!usePullbackDepth || depthOk) {
         result.push({
           time: c.timestamp,
           signal: `H${hCount}`,
-          // hLegFrozen is always true here in practice (the lowBreak that armed
-          // also froze the leg); the fallback covers defensive edge ordering.
-          anchorIndex: hLegFrozen ? hLegEndIndex : hSwingHighBarIndex,
-          legStartIndex: hLegStartIndex,
-          legEndIndex: hLegFrozen ? hLegEndIndex : hLegMaxHighBarIndex,
+          legStartIndex: hCompletedLeg?.startIndex,
+          legEndIndex: hCompletedLeg?.endIndex,
         });
       }
     }
@@ -509,14 +529,15 @@ export function calculateAlBrooks(
       lArmed = false;
       latestLow = c.low;   // reset tracker for next down-move
 
+      lCandidateStart = i;
+
       const depthOk = c.high >= ema21 - getAtr(c.timestamp) * atrDepthMultiplier;
       if (!usePullbackDepth || depthOk) {
         result.push({
           time: c.timestamp,
           signal: `L${lCount}`,
-          anchorIndex: lLegFrozen ? lLegEndIndex : lSwingLowBarIndex,
-          legStartIndex: lLegStartIndex,
-          legEndIndex: lLegFrozen ? lLegEndIndex : lLegMinLowBarIndex,
+          legStartIndex: lCompletedLeg?.startIndex,
+          legEndIndex: lCompletedLeg?.endIndex,
         });
       }
     }
@@ -524,40 +545,41 @@ export function calculateAlBrooks(
     // ── 1. Reset checks (highest priority) ───────────────
     // H reset: price exceeds hSwingHigh → trend resumed,
     //          count resets and current arm is invalidated.
+    //          For the leg tracker this IS the breakout confirmation: the
+    //          candidate (last H fired) becomes an active leg starting there.
+    //          A bar that fires an H and breaks hSwingHigh together starts the
+    //          leg at itself. No candidate (H suppressed on an outside bar, or
+    //          none fired yet) → the breakout opens no leg: legs only start
+    //          from an H.
     if (hSwingHigh !== -Infinity && c.high > hSwingHigh) {
       hCount = 0;
       hArmed = false;
       hSwingHigh = -Infinity;
+      if (hCandidateStart !== null) {
+        hActiveStart = hCandidateStart;
+        hActiveMaxHigh = c.high;
+        hActiveMaxHighBar = i;
+        hCandidateStart = null;
+      }
     }
     // L reset: price drops below lSwingLow → bear trend resumed.
     if (lSwingLow !== Infinity && c.low < lSwingLow) {
       lCount = 0;
       lArmed = false;
       lSwingLow = Infinity;
+      if (lCandidateStart !== null) {
+        lActiveStart = lCandidateStart;
+        lActiveMinLow = c.low;
+        lActiveMinLowBar = i;
+        lCandidateStart = null;
+      }
     }
 
-    // ── 5. Leg unfreeze: original leg extreme broke → new leg ────────────
-    // Independent of the hCount/lCount resets above: those fire on minor push
-    // extremes after H1/L1, but the leg only re-opens when the ORIGINAL leg
-    // extreme breaks (while frozen, hLegMaxHigh/lLegMinLow stop updating, so
-    // they ARE the original extremes). The new leg starts at the pullback's
-    // own extreme, and its running extreme restarts at this breakout bar.
-    if (hLegFrozen && c.high > hLegMaxHigh) {
-      hLegFrozen = false;
-      hLegStartIndex = hPullbackLowBarIndex;
-      hLegMaxHigh = c.high;
-      hLegMaxHighBarIndex = i;
-      hPullbackLow = Infinity;
-    }
-    if (lLegFrozen && c.low < lLegMinLow) {
-      lLegFrozen = false;
-      lLegStartIndex = lPullbackHighBarIndex;
-      lLegMinLow = c.low;
-      lLegMinLowBarIndex = i;
-      lPullbackHigh = -Infinity;
-    }
-
+    // Per-bar lookup: the most recently completed leg of each side as of this
+    // bar (a leg completed by this very bar's pullback start is included).
+    bullLegs[i] = hCompletedLeg;
+    bearLegs[i] = lCompletedLeg;
   }
 
-  return result;
+  return done;
 }

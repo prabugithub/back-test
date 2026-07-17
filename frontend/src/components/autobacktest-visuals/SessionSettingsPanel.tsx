@@ -194,6 +194,22 @@ export function SessionSettingsPanel({ config, onChange, isOpen, onClose }: Sess
                   className="w-12 px-1.5 py-1 text-xs border rounded text-center"
                 />
               </div>
+              <div className="flex items-center justify-between gap-1">
+                <span className="text-[10px] text-gray-500" title="Minimum bars a completed breakout leg needs before its strength metrics count — H/L entries with a shorter (or no) leg are blocked while any leg-strength filter is active">Leg Min Bars</span>
+                <input
+                  type="number" min={2} max={20} value={config.legMinBarCount ?? 5}
+                  onChange={e => onChange({ legMinBarCount: Number(e.target.value) })}
+                  className="w-12 px-1.5 py-1 text-xs border rounded text-center"
+                />
+              </div>
+              <div className="flex items-center justify-between gap-1">
+                <span className="text-[10px] text-gray-500" title="Longer legs are trimmed to their most recent this-many bars when computing leg-strength metrics (ER, overlap, breaks, ranges, gap-bar, consecutive)">Leg Max Bars</span>
+                <input
+                  type="number" min={5} max={50} value={config.legMaxBarCount ?? 15}
+                  onChange={e => onChange({ legMaxBarCount: Number(e.target.value) })}
+                  className="w-12 px-1.5 py-1 text-xs border rounded text-center"
+                />
+              </div>
             </div>
           </CardShell>
         </div>

@@ -11,8 +11,8 @@ import {
   type SessionState,
 } from '../services/firebaseSessionService';
 import { useNotificationStore } from './notificationStore';
-import { calculatePivotPoints, calculateATR, calculateEMA } from '../utils/indicators';
-import { analyzeMarketStructure, calculateBarOverlap, averageBarOverlap, calculateBarRanges, averageBarRanges, calculateEfficiencyRatio, calculateBarBreaks, calculateEMASlope, calculateEMAInteraction, getPivotSequenceStats, averagePivotGapBars } from '../utils/pivotAnalysis';
+import { calculatePivotPoints, calculateATR, calculateEMA, calculateAlBrooksLegs } from '../utils/indicators';
+import { analyzeMarketStructure, calculateBarOverlap } from '../utils/pivotAnalysis';
 import {
   executeLiveOrder,
   registerMonitorIfNeeded,
@@ -21,7 +21,7 @@ import {
 } from '../services/liveExecutionService';
 import type { Trade, Position, TradeJournal } from '../types';
 import type { SessionStore, SessionConfig, StoreSet, StoreGet } from './sessionStore';
-import type { EntryMetricsSnapshot } from '../utils/autoBacktestEngine';
+import { computeEntryMetrics, type EntryMetricsSnapshot } from '../utils/autoBacktestEngine';
 
 const generateTradeId = () =>
   `${Date.now()}-${Math.random().toString(36).substring(2, 11)}`;
@@ -334,27 +334,35 @@ export function createSharedActions(set: StoreSet, get: StoreGet) {
       const emaVal = emaSeries[emaSeries.length - 1]?.value ?? 0;
       const atrDepthAtEntry = atrVal > 0 ? Math.abs(currentPrice - emaVal) / atrVal : 0;
       const barOverlapAtEntry = calculateBarOverlap(candles, currentIndex, autoBacktestConfig.barOverlapLookback ?? 8);
-      const barOverlapAvgAtEntry = entryMetricsOverride?.barOverlapAvg ?? averageBarOverlap(barOverlapAtEntry);
-      const barRangeSamples = calculateBarRanges(candles, currentIndex, autoBacktestConfig.barRangeLookback ?? 20);
-      const barRangeFallback = averageBarRanges(barRangeSamples);
-      const barRangeAvg = entryMetricsOverride?.barRangeAvg ?? barRangeFallback.barRangeAvg;
-      const bullBarRangeAvg = entryMetricsOverride?.bullBarRangeAvg ?? barRangeFallback.bullBarRangeAvg;
-      const bearBarRangeAvg = entryMetricsOverride?.bearBarRangeAvg ?? barRangeFallback.bearBarRangeAvg;
-      const efficiencyRatioAtEntry = entryMetricsOverride?.efficiencyRatio ?? calculateEfficiencyRatio(candles, currentIndex, autoBacktestConfig.efficiencyRatioLookback ?? 10);
-      const barBreakFallback = calculateBarBreaks(candles, currentIndex, autoBacktestConfig.barBreakLookback ?? 20);
-      const highBreakCount = entryMetricsOverride?.highBreakCount ?? barBreakFallback.highBreakCount;
-      const lowBreakCount = entryMetricsOverride?.lowBreakCount ?? barBreakFallback.lowBreakCount;
-      const barsCompared = entryMetricsOverride?.barBreakWindow ?? barBreakFallback.barsCompared;
-      const ema21SlopeAtEntry = entryMetricsOverride?.ema21Slope ?? calculateEMASlope(candles, currentIndex, 21, autoBacktestConfig.ema21SlopeLookback ?? 10);
-      const ema50SlopeAtEntry = entryMetricsOverride?.ema50Slope ?? calculateEMASlope(candles, currentIndex, 50, autoBacktestConfig.ema50SlopeLookback ?? 20);
-      const emaInteractionFallback = calculateEMAInteraction(candles, currentIndex, 20, autoBacktestConfig.emaInteractionLookback ?? 20);
-      const gapBarRatio = entryMetricsOverride?.ema20GapBarRatio ?? emaInteractionFallback.gapBarRatio;
-      const closeAboveRatio = entryMetricsOverride?.ema20CloseAboveRatio ?? emaInteractionFallback.closeAboveRatio;
-      const emaInteractionWindow = entryMetricsOverride?.ema20InteractionWindow ?? emaInteractionFallback.barsCompared;
-      const pivotSeqStatsFallback = getPivotSequenceStats(pivotsForEntry, 4);
-      const pivotHighSeq = entryMetricsOverride?.pivotHighSeq ?? pivotSeqStatsFallback.highSeq;
-      const pivotLowSeq = entryMetricsOverride?.pivotLowSeq ?? pivotSeqStatsFallback.lowSeq;
-      const pivotGapAvgBarsAtEntry = entryMetricsOverride?.pivotGapAvgBars ?? averagePivotGapBars(pivotSeqStatsFallback);
+      // Manual/fallback instrumentation — the same computeEntryMetrics the auto engine
+      // uses, graded over the completed breakout leg matching the trade's direction
+      // (BUY → bull leg, SELL → bear leg) when one exists. A short leg still records
+      // (manual entries are never blocked — legBarCountAtEntry shows it was under Leg
+      // Min Bars); no completed leg yet → entry-bar windows, leg fields undefined.
+      // Reducing trades stamp no entry metrics, so skip the work.
+      const legsAtEntry = !isReducing ? calculateAlBrooksLegs(visibleCandlesForEntry) : null;
+      const legAtEntry = legsAtEntry
+        ? (type === 'BUY' ? legsAtEntry.bull[currentIndex] : legsAtEntry.bear[currentIndex])
+        : null;
+      const fallbackMetrics = !isReducing
+        ? computeEntryMetrics(candles, currentIndex, autoBacktestConfig, legAtEntry)
+        : null;
+      const barOverlapAvgAtEntry = entryMetricsOverride?.barOverlapAvg ?? fallbackMetrics?.barOverlapAvg;
+      const barRangeAvg = entryMetricsOverride?.barRangeAvg ?? fallbackMetrics?.barRangeAvg;
+      const bullBarRangeAvg = entryMetricsOverride?.bullBarRangeAvg ?? fallbackMetrics?.bullBarRangeAvg;
+      const bearBarRangeAvg = entryMetricsOverride?.bearBarRangeAvg ?? fallbackMetrics?.bearBarRangeAvg;
+      const efficiencyRatioAtEntry = entryMetricsOverride?.efficiencyRatio ?? fallbackMetrics?.efficiencyRatio;
+      const highBreakCount = entryMetricsOverride?.highBreakCount ?? fallbackMetrics?.highBreakCount;
+      const lowBreakCount = entryMetricsOverride?.lowBreakCount ?? fallbackMetrics?.lowBreakCount;
+      const barsCompared = entryMetricsOverride?.barBreakWindow ?? fallbackMetrics?.barBreakWindow;
+      const ema21SlopeAtEntry = entryMetricsOverride?.ema21Slope ?? fallbackMetrics?.ema21Slope;
+      const ema50SlopeAtEntry = entryMetricsOverride?.ema50Slope ?? fallbackMetrics?.ema50Slope;
+      const gapBarRatio = entryMetricsOverride?.ema20GapBarRatio ?? fallbackMetrics?.ema20GapBarRatio;
+      const closeAboveRatio = entryMetricsOverride?.ema20CloseAboveRatio ?? fallbackMetrics?.ema20CloseAboveRatio;
+      const emaInteractionWindow = entryMetricsOverride?.ema20InteractionWindow ?? fallbackMetrics?.ema20InteractionWindow;
+      const pivotHighSeq = entryMetricsOverride?.pivotHighSeq ?? fallbackMetrics?.pivotHighSeq ?? [];
+      const pivotLowSeq = entryMetricsOverride?.pivotLowSeq ?? fallbackMetrics?.pivotLowSeq ?? [];
+      const pivotGapAvgBarsAtEntry = entryMetricsOverride?.pivotGapAvgBars ?? fallbackMetrics?.pivotGapAvgBars;
       const isInitialWith =
         (type === 'BUY' && ltMarket.startsWith('Bull')) ||
         (type === 'SELL' && ltMarket.startsWith('Bear'));
@@ -421,14 +429,14 @@ export function createSharedActions(set: StoreSet, get: StoreGet) {
         pivotHighSeqAtEntry: !isReducing ? (pivotHighSeq.length ? pivotHighSeq.join('-') : undefined) : undefined,
         pivotLowSeqAtEntry: !isReducing ? (pivotLowSeq.length ? pivotLowSeq.join('-') : undefined) : undefined,
         pivotGapAvgBarsAtEntry: !isReducing ? pivotGapAvgBarsAtEntry : undefined,
-        // Leg fields come only from the auto-signal's entryMetrics — no fallback
-        // recompute: undefined means the entry was graded at currentIndex windows
-        // (manual trade, PIVOT mode, or degenerate leg).
-        legStartIndexAtEntry: !isReducing ? entryMetricsOverride?.legStartIndex : undefined,
-        legEndIndexAtEntry: !isReducing ? entryMetricsOverride?.legEndIndex : undefined,
-        legBarCountAtEntry: !isReducing ? entryMetricsOverride?.legBarCount : undefined,
-        maxConsecutiveHighBreaksAtEntry: !isReducing ? entryMetricsOverride?.maxConsecutiveHighBreaks : undefined,
-        maxConsecutiveLowBreaksAtEntry: !isReducing ? entryMetricsOverride?.maxConsecutiveLowBreaks : undefined,
+        // Leg fields: from the auto-signal's entryMetrics, or the direction-matched
+        // completed leg for manual entries. undefined means the entry was graded at
+        // currentIndex windows (PIVOT mode, or no completed leg yet).
+        legStartIndexAtEntry: !isReducing ? (entryMetricsOverride?.legStartIndex ?? fallbackMetrics?.legStartIndex) : undefined,
+        legEndIndexAtEntry: !isReducing ? (entryMetricsOverride?.legEndIndex ?? fallbackMetrics?.legEndIndex) : undefined,
+        legBarCountAtEntry: !isReducing ? (entryMetricsOverride?.legBarCount ?? fallbackMetrics?.legBarCount) : undefined,
+        maxConsecutiveHighBreaksAtEntry: !isReducing ? (entryMetricsOverride?.maxConsecutiveHighBreaks ?? fallbackMetrics?.maxConsecutiveHighBreaks) : undefined,
+        maxConsecutiveLowBreaksAtEntry: !isReducing ? (entryMetricsOverride?.maxConsecutiveLowBreaks ?? fallbackMetrics?.maxConsecutiveLowBreaks) : undefined,
         interval: sessionConfig?.interval || '5',
       };
 

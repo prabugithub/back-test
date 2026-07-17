@@ -174,6 +174,18 @@ The bar that **starts** a pullback (arms the system) **cannot** also fire the si
 ### Optional Depth Filter
 - When `usePullbackDepth` is enabled, H signals only fire if `c.low <= EMA21 + ATR * multiplier` and L signals only fire if `c.high >= EMA21 - ATR * multiplier`.
 
+### Breakout-Leg Tracking (for strength metrics)
+
+Runs in parallel with the H/L counting (never changes signal timing). Each side tracks a leg through three phases:
+
+1. **Candidate** — every H signal fired replaces the candidate leg-start bar ("until `hSwingHigh` breaks, the newest H is the leg start"). A low break before the breakout discards the candidate — the next H becomes the new start.
+2. **Active** — the `hCount` reset (`c.high > hSwingHigh`, minor push-high resets included) confirms the breakout: the candidate becomes an open leg and its running swing high is tracked. A breakout with no candidate (e.g. the H was suppressed on an outside bar) opens no leg — legs only start from an H.
+3. **Completed** — the first low break after confirmation freezes the leg: `{startIndex: candidate H bar, endIndex: swing-high bar}`.
+
+Markers carry the most recently **completed** leg of their side (`legStartIndex`/`legEndIndex`, `undefined` before the first completes) — every signal of the same pullback grades the same leg. `calculateAlBrooksLegs` exposes the same lookup per bar (`bull`/`bear` arrays) so manual trade entries on non-signal bars grade the direction-matched leg. Mirrored for L (bear legs confirm on `lSwingLow` break, complete on the next high break).
+
+Strength metrics (Efficiency Ratio, Bar Overlap, Bar Breaks, Bar Ranges, EMA20 Gap-Bar, Consecutive Breaks) window over the completed leg's own bars, trimmed to the most recent `legMaxBarCount` bars; legs shorter than `legMinBarCount` block filtered auto entries (manual entries record over available bars). EMA21/EMA50 slopes keep their configured lookbacks.
+
 ---
 
 ## Pivot Position Detection (Trade Journal)

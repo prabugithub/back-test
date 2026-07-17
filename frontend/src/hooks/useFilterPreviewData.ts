@@ -5,6 +5,7 @@ import {
   type AutoBacktestConfig,
   type EntryMetricsSnapshot,
   computeEntryMetrics,
+  legStrengthFiltersActive,
   passesBarOverlap,
   passesBarRange,
   passesBarBreak,
@@ -81,23 +82,28 @@ export function useFilterPreviewData(
     const bars: FilterPreviewBar[] = [];
     for (let i = start; i <= end; i++) {
       const marker = alBrooks.find(m => m.time === candles[i].timestamp) ?? null;
-      const legWindow = (rules.entryMode !== 'PIVOT' && marker)
+      const legWindow = (rules.entryMode !== 'PIVOT' && marker
+        && marker.legStartIndex !== undefined && marker.legEndIndex !== undefined)
         ? { startIndex: marker.legStartIndex, endIndex: marker.legEndIndex }
         : null;
       const metrics = computeEntryMetrics(candles, i, config, legWindow);
+      // Mirror evaluateAutoSignals' leg gate: with leg-strength filters active, an H/L
+      // entry with no completed leg (or one shorter than legMinBarCount) is blocked.
+      const legGated = rules.entryMode !== 'PIVOT' && legStrengthFiltersActive(rules)
+        && (!legWindow || metrics.legTooShort === true);
       const ema21 = getEmaAt(candles, i, 21);
       const atr = getAtrAt(candles, i);
       const atrDepth = ema21 && atr > 0 ? Math.abs(candles[i].close - ema21) / atr : undefined;
       const pass: Partial<Record<PreviewFilterKey, boolean>> = {
-        barOverlap: passesBarOverlap(rules, metrics.barOverlapAvg),
-        barRange: passesBarRange(rules, metrics.bullBarRangeAvg, metrics.bearBarRangeAvg, metrics.barRangeAvg, isLong),
-        barBreak: passesBarBreak(rules, metrics.highBreakCount, metrics.lowBreakCount, isLong),
-        consecutiveBreak: passesConsecutiveBreak(rules, metrics.maxConsecutiveHighBreaks, metrics.maxConsecutiveLowBreaks, isLong),
+        barOverlap: !legGated && passesBarOverlap(rules, metrics.barOverlapAvg),
+        barRange: !legGated && passesBarRange(rules, metrics.bullBarRangeAvg, metrics.bearBarRangeAvg, metrics.barRangeAvg, isLong),
+        barBreak: !legGated && passesBarBreak(rules, metrics.highBreakCount, metrics.lowBreakCount, isLong),
+        consecutiveBreak: !legGated && passesConsecutiveBreak(rules, metrics.maxConsecutiveHighBreaks, metrics.maxConsecutiveLowBreaks, isLong),
         ema21Slope: passesEmaSlope(rules.ema21SlopeFilter, rules.ema21SlopeThreshold, metrics.ema21Slope, isLong),
         ema50Slope: passesEmaSlope(rules.ema50SlopeFilter, rules.ema50SlopeThreshold, metrics.ema50Slope, isLong),
-        ema20GapBar: passesEma20GapBar(rules, metrics.ema20GapBarRatio),
+        ema20GapBar: !legGated && passesEma20GapBar(rules, metrics.ema20GapBarRatio),
         ema20Bias: passesEma20Bias(rules, metrics.ema20CloseAboveRatio, isLong),
-        efficiencyRatio: passesEfficiencyRatio(rules, metrics.efficiencyRatio),
+        efficiencyRatio: !legGated && passesEfficiencyRatio(rules, metrics.efficiencyRatio),
         atrDepth: passesAtrDepth(rules, candles[i].close, ema21, atr),
         highSeq: passesSeqFilter(rules.highSeqFilter, rules.highSeqPatterns, metrics.pivotHighSeq ?? []),
         lowSeq: passesSeqFilter(rules.lowSeqFilter, rules.lowSeqPatterns, metrics.pivotLowSeq ?? []),
