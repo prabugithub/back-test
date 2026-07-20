@@ -1,4 +1,4 @@
-import type { Trade } from '../types';
+import type { Trade, ExitReason } from '../types';
 
 export interface GroupedPosition {
     id: string;
@@ -17,12 +17,26 @@ export interface GroupedPosition {
     durationMinutes?: number;
     stopLoss?: number;
     target?: number;
-    exitReason?: 'SL' | 'TP' | 'MANUAL' | 'TIME_OVER';
+    exitReason?: ExitReason;
     slHit?: boolean;
     tpHit?: boolean;
     hitFirst?: 'SL' | 'TP';
     trendReversed?: boolean;
     trendReversedPnL?: number;
+}
+
+// Badge color + label per exit reason — shared by TradeHistoryDialog and
+// TradeReportDialog so the auto-exit-engine reasons render consistently.
+export function exitReasonBadge(reason: ExitReason): { cls: string; label: string } {
+  switch (reason) {
+    case 'TP': return { cls: 'bg-green-100 text-green-700', label: 'TP' };
+    case 'SL': return { cls: 'bg-red-100 text-red-700', label: 'SL' };
+    case 'TIME_OVER': return { cls: 'bg-orange-100 text-orange-700', label: 'TIME OVER' };
+    case 'REVERSAL': return { cls: 'bg-amber-100 text-amber-700', label: 'REVERSAL' };
+    case 'OPP_SIGNAL': return { cls: 'bg-purple-100 text-purple-700', label: 'OPP SIGNAL' };
+    case 'LEG_DECAY': return { cls: 'bg-sky-100 text-sky-700', label: 'LEG DECAY' };
+    default: return { cls: 'bg-gray-100 text-gray-600', label: reason };
+  }
 }
 
 export interface TradePerformanceSummary {

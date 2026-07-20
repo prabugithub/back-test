@@ -19,9 +19,9 @@ import {
   syncTargetWithMonitor,
   pollOrderFillStatus,
 } from '../services/liveExecutionService';
-import type { Trade, Position, TradeJournal } from '../types';
+import type { Trade, Position, TradeJournal, ExitReason } from '../types';
 import type { SessionStore, SessionConfig, StoreSet, StoreGet } from './sessionStore';
-import { computeEntryMetrics, type EntryMetricsSnapshot } from '../utils/autoBacktestEngine';
+import { computeEntryMetrics, type EntryMetricsSnapshot, type RegimeKey } from '../utils/autoBacktestEngine';
 
 const generateTradeId = () =>
   `${Date.now()}-${Math.random().toString(36).substring(2, 11)}`;
@@ -237,9 +237,12 @@ export function createSharedActions(set: StoreSet, get: StoreGet) {
       stopLoss?: number,
       target?: number,
       priceOverride?: number,
-      exitReason: 'SL' | 'TP' | 'MANUAL' | 'TIME_OVER' = 'MANUAL',
+      exitReason: ExitReason = 'MANUAL',
       journal?: TradeJournal,
-      entryMetricsOverride?: EntryMetricsSnapshot
+      entryMetricsOverride?: EntryMetricsSnapshot,
+      // Present only when the auto engine opened this trade — stamps the position
+      // so the exit engine (runAutoTrailStop/runAutoExitCheck) manages it.
+      autoMeta?: { auto: true; regime: RegimeKey; barIndex: number }
     ) => {
       const { candles, currentIndex, trades, position, instrument, sessionConfig, isLiveMode, livePrice, autoBacktestConfig } = get();
       const currentCandle = candles[currentIndex];
@@ -410,6 +413,7 @@ export function createSharedActions(set: StoreSet, get: StoreGet) {
         trendReversed: position?.trendReversed,
         trendReversedPnL: position?.trendReversedPnL,
         withTrendSeen: isSameSide ? position?.withTrendSeen || isInitialWith : isInitialWith,
+        slTrailed: isReducing ? position?.slTrailed || undefined : undefined,
         journal: journal || undefined,
         atrDepthAtEntry: !isReducing ? atrDepthAtEntry : undefined,
         barOverlapAtEntry: !isReducing ? barOverlapAtEntry : undefined,
@@ -488,6 +492,15 @@ export function createSharedActions(set: StoreSet, get: StoreGet) {
         trendReversed: isFlip ? undefined : position?.trendReversed,
         trendReversedPnL: isFlip ? undefined : position?.trendReversedPnL,
         withTrendSeen: trade.withTrendSeen,
+        // Exit-engine stamps: a fresh open or flip takes the (auto) opener's
+        // regime/bar and resets per-trade exit state; same-side adds and partial
+        // reduces keep the original stamps. Manual opens leave them all undefined.
+        autoEntry: currentQty === 0 || isFlip ? autoMeta?.auto : position?.autoEntry,
+        entryRegime: currentQty === 0 || isFlip ? autoMeta?.regime : position?.entryRegime,
+        entryBarIndex: currentQty === 0 || isFlip ? autoMeta?.barIndex : position?.entryBarIndex,
+        exitWithTrendSeen: currentQty === 0 || isFlip ? undefined : position?.exitWithTrendSeen,
+        exitAgainstBars: currentQty === 0 || isFlip ? undefined : position?.exitAgainstBars,
+        slTrailed: currentQty === 0 || isFlip ? undefined : position?.slTrailed,
         liveOptionToken: atmOptionToken || (position as any)?.liveOptionToken,
         pendingOrderId: pendingLiveOrderId,
       } as Position;

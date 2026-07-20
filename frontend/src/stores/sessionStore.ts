@@ -1,12 +1,12 @@
 import { create } from 'zustand';
-import type { Candle, Trade, Position, TradeJournal, Drawing } from '../types';
+import type { Candle, Trade, Position, TradeJournal, Drawing, ExitReason } from '../types';
 import type { SessionState } from '../services/firebaseSessionService';
 import type { SavedAutoBacktestConfig } from '../services/autoBacktestConfigService';
 import { createBacktestActions } from './backtestActions';
 import { createLiveActions } from './liveActions';
 import { createSharedActions } from './sharedActions';
 import { createAutoBacktestActions } from './autoBacktestActions';
-import { type AutoBacktestConfig, type EntryMetricsSnapshot, defaultAutoBacktestConfig } from '../utils/autoBacktestEngine';
+import { type AutoBacktestConfig, type EntryMetricsSnapshot, type RegimeKey, defaultAutoBacktestConfig } from '../utils/autoBacktestEngine';
 
 export interface SessionConfig {
   securityId: string;
@@ -96,7 +96,7 @@ export interface SessionStore {
   setSpeed: (speed: number) => void;
   setCurrentIndex: (index: number) => void;
   initiateTrade: (type: 'BUY' | 'SELL', quantity: number, stopLoss?: number, target?: number) => void;
-  resolveTradeRequest: (journal: TradeJournal | null, exitReason?: 'SL' | 'TP' | 'MANUAL' | 'TIME_OVER') => void;
+  resolveTradeRequest: (journal: TradeJournal | null, exitReason?: ExitReason) => void;
   resolveExitRequest: (confirm: boolean, journal?: TradeJournal) => void;
   resetSession: () => void;
 
@@ -115,7 +115,7 @@ export interface SessionStore {
   setAutoExitTarget: (auto: boolean) => void;
   setCrosshairPosition: (pos: { time: number | null; price: number | null; sourceChartId: 'primary' | 'secondary' | null }) => void;
   checkSLTPHits: (index: number, currentPrice?: number) => void;
-  executeTrade: (type: 'BUY' | 'SELL', quantity: number, stopLoss?: number, target?: number, priceOverride?: number, exitReason?: 'SL' | 'TP' | 'MANUAL' | 'TIME_OVER', journal?: TradeJournal, entryMetricsOverride?: EntryMetricsSnapshot) => void;
+  executeTrade: (type: 'BUY' | 'SELL', quantity: number, stopLoss?: number, target?: number, priceOverride?: number, exitReason?: ExitReason, journal?: TradeJournal, entryMetricsOverride?: EntryMetricsSnapshot, autoMeta?: { auto: true; regime: RegimeKey; barIndex: number }) => void;
   checkTrendReversal: (index: number, currentPrice?: number) => void;
   deleteTrade: (tradeId: string) => void;
   deleteTrades: (tradeIds: string[]) => void;
@@ -150,6 +150,8 @@ export interface SessionStore {
   setAutoBacktestConfig: (config: AutoBacktestConfig) => void;
   runAutoBacktestCheck: (index: number) => void;
   runAutoSquareOff: (index: number) => void;
+  runAutoTrailStop: (index: number) => void;
+  runAutoExitCheck: (index: number) => void;
   runBatchAutoBacktest: () => void;
 
   // ── Actions (saved auto-backtest configurations) ─────────────────────────────

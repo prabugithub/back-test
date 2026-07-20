@@ -50,7 +50,11 @@ export function createBacktestActions(set: StoreSet, get: StoreGet) {
         const nextIndex = currentIndex + 1;
         set({ currentIndex: nextIndex });
         get().checkTrendReversal(nextIndex);
+        // Canonical per-bar exit order — mirrored in batchBacktestSimulator's loop:
+        // trail SL → SL/TP touch check → signal exits → square-off → entry check.
+        get().runAutoTrailStop(nextIndex);
         get().checkSLTPHits(nextIndex);
+        get().runAutoExitCheck(nextIndex);
         get().runAutoSquareOff(nextIndex);
         get().runAutoBacktestCheck(nextIndex);
       } else if (direction === 'backward' && currentIndex > 0) {
@@ -92,7 +96,7 @@ export function createBacktestActions(set: StoreSet, get: StoreGet) {
       set({ isPlaying: false, pendingTradeRequest: { type, quantity, stopLoss, target } });
     },
 
-    resolveTradeRequest: (journal: import('../types').TradeJournal | null, exitReason: 'SL' | 'TP' | 'MANUAL' | 'TIME_OVER' = 'MANUAL') => {
+    resolveTradeRequest: (journal: import('../types').TradeJournal | null, exitReason: import('../types').ExitReason = 'MANUAL') => {
       const { pendingTradeRequest } = get();
       if (!pendingTradeRequest) return;
       if (journal) {

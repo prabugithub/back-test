@@ -4,6 +4,7 @@ import type { Candle } from '../types';
 import {
   calculatePivotPoints,
   calculateAlBrooks,
+  calculateAlBrooksLegs,
   calculateEMA,
   calculateATR,
   type PivotPoint,
@@ -135,6 +136,55 @@ export interface RegimeRules {
   slAtrMultiplier: number;
   slFixedPoints: number;
   targetRR: number;
+
+  // ── Exit engine (auto-BT positions only; the ENTRY regime's rules manage the
+  //    trade for its whole life). All optional — undefined means the mechanism is
+  //    off, so saved configs predating these fields behave exactly as before. ──
+
+  // 1. Reversal exit — LT market structure reads against the position (same
+  //    with/against test as the Trend Reversal flag: label startsWith Bull/Bear;
+  //    'Range' is neutral and resets the against-counter) for N consecutive
+  //    checked bars. Fills at bar close, exitReason REVERSAL.
+  exitOnReversal?: boolean;
+  exitReversalConfirmBars?: number;       // default 1
+  // Structure must have read WITH the trade at least once before the exit arms
+  // (mirrors checkTrendReversal's withTrendSeen gate). Exposed per-regime because
+  // counter-trend regimes (range/reversal) may never see a with-trend read.
+  exitReversalRequireWithTrend?: boolean; // default true
+
+  // 2. Opposite-signal exit — an opposite Brooks pullback signal fires on the
+  //    current bar (L1/L2 against a long, H1/H2 against a short; 3rd+ signals are
+  //    never counted). Fills at bar close, exitReason OPP_SIGNAL.
+  exitOnOppSignal?: boolean;
+  exitOppAllow1?: boolean;                // default false — 1st opposite signal
+  exitOppAllow2?: boolean;                // default true  — 2nd (classic Brooks reversal trigger)
+
+  // 3. Pivot trailing stop — ratchet the SL behind the swing extreme of the most
+  //    recent CONFIRMED same-side pivot (bullish pivot's 3-bar min low for longs,
+  //    bearish pivot's 3-bar max high for shorts; pivots confirmed through the
+  //    PRIOR bar only). Never loosens. Exit still goes through the normal SL
+  //    machinery (exitReason SL, trade flagged slTrailed).
+  exitTrailPivot?: boolean;
+  exitTrailPivotBufferPoints?: number;    // default 2 — pad beyond the swing extreme (matches pivot slDistance's +2)
+
+  // 4. Leg-decay exit — re-grade the newest COMPLETED with-trend leg each bar
+  //    (only legs whose extreme formed after entry; windows respect
+  //    legMinBarCount/legMaxBarCount). 'min' = aligned metric must stay >=
+  //    threshold, 'max' = stay <= threshold; each violated check is one fail.
+  //    Exit when fails >= exitLegDecayMinFails. Fills at bar close, exitReason LEG_DECAY.
+  exitLegDecay?: boolean;
+  exitLegDecayMinBarsInTrade?: number;    // default 3 — no decay exit before this many bars in trade
+  exitLegDecayMinFails?: number;          // default 1
+  exitDecayEfficiencyFilter?: 'none' | 'min' | 'max';
+  exitDecayEfficiencyThreshold?: number;  // default 0.25
+  exitDecayConsecBreakFilter?: 'none' | 'min' | 'max';
+  exitDecayConsecBreakThreshold?: number; // default 3
+  exitDecayBarBreakFilter?: 'none' | 'min' | 'max';
+  exitDecayBarBreakThreshold?: number;    // default 4
+  exitDecayEma21SlopeFilter?: 'none' | 'min' | 'max';
+  exitDecayEma21SlopeThreshold?: number;  // default 0
+  exitDecayGapBarFilter?: 'none' | 'min' | 'max';
+  exitDecayGapBarThreshold?: number;      // default 0.3
 }
 
 // ─── Global config ────────────────────────────────────────────────────────────
@@ -1018,6 +1068,183 @@ function findRecentBearPivot(pivots: PivotPoint[], idx: number, candles: Candle[
     if (p.type === 'bearish' && p.time <= ts && p.time >= minTs) return p;
   }
   return null;
+}
+
+// ─── Exit engine (auto-BT positions only) ─────────────────────────────────────
+//
+// Both per-bar loops (interactive step-through via autoBacktestActions and the
+// batch simulator) call these two pure functions so their exit behavior stays
+// identical by construction. Canonical per-bar order:
+//   1. evaluateTrailStop        (before the SL/TP touch check)
+//   2. SL/TP touch check        (existing machinery, possibly-trailed SL)
+//   3. evaluateAutoExitSignal   (REVERSAL → OPP_SIGNAL → LEG_DECAY, fill at close)
+//   4. auto square-off
+//   5. entry check
+
+export type AutoExitReason = 'REVERSAL' | 'OPP_SIGNAL' | 'LEG_DECAY';
+
+export interface AutoExitPositionInfo {
+  quantity: number;               // signed — sign gives direction
+  stopLoss?: number;
+  entryBarIndex?: number;
+  entryRegime?: RegimeKey;        // rules come from config[entryRegime]; fallback: current ltMarket's regime
+  exitWithTrendSeen?: boolean;
+  exitAgainstBars?: number;
+}
+
+// Generic min/max gate for the leg-decay checks — same shape as the entry
+// predicates but keyed by explicit filter/threshold instead of RegimeRules fields.
+export function passesMinMax(
+  filter: 'none' | 'min' | 'max' | undefined,
+  threshold: number,
+  value: number | undefined
+): boolean {
+  const mode = filter ?? 'none';
+  if (mode === 'none' || value === undefined) return true;
+  if (mode === 'min') return value >= threshold;
+  return value <= threshold;
+}
+
+const resolveExitRules = (
+  candles: Candle[],
+  currentIndex: number,
+  entryRegime: RegimeKey | undefined,
+  config: AutoBacktestConfig
+): RegimeRules => {
+  if (entryRegime) return config[entryRegime];
+  // Restored old session with an open auto position but no stamped regime —
+  // fall back to the regime the current LT structure maps to.
+  const visible = candles.slice(0, currentIndex + 1);
+  const { ltMarket } = analyzeMarketStructure(visible, calculatePivotPoints(visible));
+  return config[getRegimeKey(ltMarket)];
+};
+
+// Phase 1 — pivot trailing stop. Uses only pivots confirmed through bar
+// currentIndex-1, so a pivot confirming on the current bar can never move the SL
+// that this same bar's touch check then tests. Trails behind the pivot's 3-bar
+// swing extreme (the same cluster its slDistance is measured from), padded by
+// the buffer. Ratchet only: returns null unless the candidate TIGHTENS the stop.
+export function evaluateTrailStop(
+  candles: Candle[],
+  currentIndex: number,
+  position: Pick<AutoExitPositionInfo, 'quantity' | 'stopLoss' | 'entryRegime'>,
+  config: AutoBacktestConfig
+): { newStopLoss: number } | null {
+  if (currentIndex < 5 || position.quantity === 0) return null;
+  const rules = resolveExitRules(candles, currentIndex, position.entryRegime, config);
+  if (!rules.exitTrailPivot) return null;
+
+  const isLong = position.quantity > 0;
+  const pivots = calculatePivotPoints(candles.slice(0, currentIndex));
+  let pivot: PivotPoint | null = null;
+  for (let i = pivots.length - 1; i >= 0; i--) {
+    if (pivots[i].type === (isLong ? 'bullish' : 'bearish')) { pivot = pivots[i]; break; }
+  }
+  if (!pivot || pivot.barIndex < 2) return null;
+
+  const buffer = rules.exitTrailPivotBufferPoints ?? 2;
+  const b = pivot.barIndex;
+  let candidate: number;
+  if (isLong) {
+    const swingLow = Math.min(candles[b].low, candles[b - 1].low, candles[b - 2].low);
+    candidate = swingLow - buffer;
+    if (position.stopLoss !== undefined && candidate <= position.stopLoss) return null;
+  } else {
+    const swingHigh = Math.max(candles[b].high, candles[b - 1].high, candles[b - 2].high);
+    candidate = swingHigh + buffer;
+    if (position.stopLoss !== undefined && candidate >= position.stopLoss) return null;
+  }
+  if (candidate <= 0) return null;
+  return { newStopLoss: candidate };
+}
+
+// Phase 2 — signal exits, evaluated on bar close (fill = candles[currentIndex].close).
+// Fixed precedence: REVERSAL → OPP_SIGNAL → LEG_DECAY. Always returns the updated
+// per-bar reversal state — callers must persist it onto the position even when
+// exit is null, or the confirm-bars counter resets every bar.
+export function evaluateAutoExitSignal(
+  candles: Candle[],
+  currentIndex: number,
+  position: AutoExitPositionInfo,
+  config: AutoBacktestConfig
+): {
+  exit: { reason: AutoExitReason; detail: string } | null;
+  state: { exitWithTrendSeen: boolean; exitAgainstBars: number };
+} {
+  const state = {
+    exitWithTrendSeen: position.exitWithTrendSeen ?? false,
+    exitAgainstBars: position.exitAgainstBars ?? 0,
+  };
+  if (currentIndex < 50 || position.quantity === 0) return { exit: null, state };
+
+  const rules = resolveExitRules(candles, currentIndex, position.entryRegime, config);
+  if (!rules.exitOnReversal && !rules.exitOnOppSignal && !rules.exitLegDecay) return { exit: null, state };
+  const isLong = position.quantity > 0;
+  const visible = candles.slice(0, currentIndex + 1);
+
+  // 1. REVERSAL — LT structure against the position for N consecutive checks
+  if (rules.exitOnReversal) {
+    const { ltMarket } = analyzeMarketStructure(visible, calculatePivotPoints(visible));
+    const isAgainst = isLong ? ltMarket.startsWith('Bear') : ltMarket.startsWith('Bull');
+    const isWith = isLong ? ltMarket.startsWith('Bull') : ltMarket.startsWith('Bear');
+    if (isWith) state.exitWithTrendSeen = true;
+    state.exitAgainstBars = isAgainst ? state.exitAgainstBars + 1 : 0;
+    const armed = state.exitWithTrendSeen || !(rules.exitReversalRequireWithTrend ?? true);
+    if (armed && state.exitAgainstBars >= (rules.exitReversalConfirmBars ?? 1)) {
+      return { exit: { reason: 'REVERSAL', detail: `LT:${ltMarket} against for ${state.exitAgainstBars} bar(s)` }, state };
+    }
+  }
+
+  // 2. OPP_SIGNAL — opposite Brooks pullback signal on the current bar
+  if (rules.exitOnOppSignal) {
+    const marker = calculateAlBrooks(visible).find(m => m.time === candles[currentIndex].timestamp) ?? null;
+    if (marker) {
+      const opp1 = isLong ? 'L1' : 'H1';
+      const opp2 = isLong ? 'L2' : 'H2';
+      const fired =
+        (marker.signal === opp1 && (rules.exitOppAllow1 ?? false)) ||
+        (marker.signal === opp2 && (rules.exitOppAllow2 ?? true));
+      if (fired) {
+        return { exit: { reason: 'OPP_SIGNAL', detail: `${marker.signal} against ${isLong ? 'long' : 'short'}` }, state };
+      }
+    }
+  }
+
+  // 3. LEG_DECAY — re-grade the newest completed with-trend leg formed after entry
+  if (rules.exitLegDecay && position.entryBarIndex !== undefined
+    && currentIndex - position.entryBarIndex >= (rules.exitLegDecayMinBarsInTrade ?? 3)) {
+    const legs = calculateAlBrooksLegs(visible);
+    const leg = isLong ? legs.bull[currentIndex] : legs.bear[currentIndex];
+    // Only grade legs whose extreme formed after entry — never re-judge the
+    // entry leg the confirmation filters already approved.
+    if (leg && leg.endIndex > position.entryBarIndex) {
+      const metrics = computeEntryMetrics(candles, currentIndex, config, leg);
+      if (!metrics.legTooShort) {
+        const fails: string[] = [];
+        if (!passesMinMax(rules.exitDecayEfficiencyFilter, rules.exitDecayEfficiencyThreshold ?? 0.25,
+          metrics.efficiencyRatio)) fails.push('ER');
+        if (!passesMinMax(rules.exitDecayConsecBreakFilter, rules.exitDecayConsecBreakThreshold ?? 3,
+          isLong ? metrics.maxConsecutiveHighBreaks : metrics.maxConsecutiveLowBreaks)) fails.push('consecBreak');
+        if (!passesMinMax(rules.exitDecayBarBreakFilter, rules.exitDecayBarBreakThreshold ?? 4,
+          isLong ? metrics.highBreakCount : metrics.lowBreakCount)) fails.push('barBreak');
+        if (!passesMinMax(rules.exitDecayEma21SlopeFilter, rules.exitDecayEma21SlopeThreshold ?? 0,
+          aligned(metrics.ema21Slope, isLong))) fails.push('ema21Slope');
+        if (!passesMinMax(rules.exitDecayGapBarFilter, rules.exitDecayGapBarThreshold ?? 0.3,
+          metrics.ema20GapBarRatio)) fails.push('gapBar');
+        if (fails.length >= (rules.exitLegDecayMinFails ?? 1)) {
+          return { exit: { reason: 'LEG_DECAY', detail: `leg[${leg.startIndex}-${leg.endIndex}] failed: ${fails.join(', ')}` }, state };
+        }
+      }
+    }
+  }
+
+  return { exit: null, state };
+}
+
+// Count of exit mechanisms switched on for a regime — UI badge helper.
+export function countActiveExitMechanisms(rules: RegimeRules): number {
+  return [rules.exitOnReversal, rules.exitOnOppSignal, rules.exitTrailPivot, rules.exitLegDecay]
+    .filter(Boolean).length;
 }
 
 // ─── Current market state utility (used by UI for live display) ───────────────

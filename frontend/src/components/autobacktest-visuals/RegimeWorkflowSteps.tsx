@@ -541,8 +541,12 @@ export function ConfirmationStep({ rules, up, latestBar, onHoverFilterKey, showG
 }
 
 // ─── Exit ───────────────────────────────────────────────────────────────────
-// Target RR + a read-only shortcut into the session-wide square-off/fill-mode settings.
-export function ExitStep({ rules, up, config, onOpenSessionSettings }: RegimeStepProps) {
+// Target RR, the four price-action exit mechanisms (auto-entered positions only,
+// managed by the ENTRY regime's rules for the trade's whole life), and a
+// read-only shortcut into the session-wide square-off/fill-mode settings.
+export function ExitStep({ rules, up, meta, isShort, config, onOpenSessionSettings }: RegimeStepProps) {
+  const opp1 = isShort ? 'H1' : 'L1';
+  const opp2 = isShort ? 'H2' : 'L2';
   return (
     <div className="space-y-3">
       <CardShell title="Target Risk:Reward">
@@ -553,6 +557,201 @@ export function ExitStep({ rules, up, config, onOpenSessionSettings }: RegimeSte
             className="w-20 px-2 py-1.5 text-sm border rounded-lg text-center font-semibold text-indigo-700"
           />
           <span className="text-sm text-gray-400">× risk</span>
+        </div>
+      </CardShell>
+
+      <p
+        className="text-[10px] text-gray-400 uppercase tracking-wide font-medium cursor-help"
+        title="Brooks-style trade management for auto-entered positions: exit when the market turns against the trade, trail while it stays strong. Signal exits fill at the bar's close; the trailing stop exits through the normal SL machinery. Manual trades are never touched."
+      >
+        Price-Action Exit Engine
+      </p>
+
+      <CardShell title="Reversal Exit">
+        <div className="flex items-center justify-between gap-2 flex-wrap">
+          <label className="flex items-center gap-2 cursor-pointer select-none"
+            title="Exits when the LT market structure (same read as the Trend Reversal flag) turns against the position for N consecutive bars. Fills at bar close, exit reason REVERSAL.">
+            <ToggleSwitch checked={rules.exitOnReversal ?? false} onChange={v => up({ exitOnReversal: v })} activeColor={meta.activeBg} />
+            <span className={`text-xs font-semibold ${rules.exitOnReversal ? meta.color : 'text-gray-400'}`}>
+              {rules.exitOnReversal ? 'On' : 'Off'}
+            </span>
+          </label>
+          <div className="flex items-center gap-1">
+            <span className="text-[10px] text-gray-500">Confirm bars:</span>
+            <input
+              type="number" min={1} max={10} value={rules.exitReversalConfirmBars ?? 1}
+              onChange={e => up({ exitReversalConfirmBars: Number(e.target.value) })}
+              className="w-10 px-1 py-0.5 text-[10px] border rounded text-center"
+            />
+          </div>
+          <label className="flex items-center gap-1 cursor-pointer"
+            title="Only arm the exit after the structure has read WITH the trade at least once. Turn off for counter-trend regimes (range/reversal), which may never see a with-trend read.">
+            <input
+              type="checkbox" checked={rules.exitReversalRequireWithTrend ?? true}
+              onChange={e => up({ exitReversalRequireWithTrend: e.target.checked })}
+              className="w-3 h-3"
+            />
+            <span className="text-[10px] text-gray-500">Require with-trend first</span>
+          </label>
+        </div>
+      </CardShell>
+
+      <CardShell title="Opposite Signal Exit">
+        <div className="flex items-center gap-3 flex-wrap">
+          <label className="flex items-center gap-2 cursor-pointer select-none"
+            title={`Exits when an opposite Brooks pullback signal fires against the position (${opp1}/${opp2} — 3rd+ signals never count). Fills at bar close, exit reason OPP_SIGNAL.`}>
+            <ToggleSwitch checked={rules.exitOnOppSignal ?? false} onChange={v => up({ exitOnOppSignal: v })} activeColor={meta.activeBg} />
+            <span className={`text-xs font-semibold ${rules.exitOnOppSignal ? meta.color : 'text-gray-400'}`}>
+              {rules.exitOnOppSignal ? 'On' : 'Off'}
+            </span>
+          </label>
+          <label className="flex items-center gap-1 cursor-pointer">
+            <input
+              type="checkbox" checked={rules.exitOppAllow1 ?? false}
+              onChange={e => up({ exitOppAllow1: e.target.checked })}
+              className="w-3 h-3"
+            />
+            <span className={`text-xs font-bold ${isShort ? 'text-green-700' : 'text-red-700'}`}>1st ({opp1})</span>
+          </label>
+          <label className="flex items-center gap-1 cursor-pointer">
+            <input
+              type="checkbox" checked={rules.exitOppAllow2 ?? true}
+              onChange={e => up({ exitOppAllow2: e.target.checked })}
+              className="w-3 h-3"
+            />
+            <span className={`text-xs font-bold ${isShort ? 'text-green-700' : 'text-red-700'}`}>2nd ({opp2})</span>
+          </label>
+        </div>
+      </CardShell>
+
+      <CardShell title="Pivot Trailing Stop">
+        <div className="flex items-center justify-between gap-2 flex-wrap">
+          <label className="flex items-center gap-2 cursor-pointer select-none"
+            title="Ratchets the SL behind the swing extreme of the most recent confirmed same-side pivot (never loosens; pivots confirmed through the prior bar only). Exits through the normal SL machinery, trade marked 'trailed'.">
+            <ToggleSwitch checked={rules.exitTrailPivot ?? false} onChange={v => up({ exitTrailPivot: v })} activeColor={meta.activeBg} />
+            <span className={`text-xs font-semibold ${rules.exitTrailPivot ? meta.color : 'text-gray-400'}`}>
+              {rules.exitTrailPivot ? 'On' : 'Off'}
+            </span>
+          </label>
+          <div className="flex items-center gap-1">
+            <span className="text-[10px] text-gray-500">Buffer pts:</span>
+            <input
+              type="number" min={0} step={0.5} value={rules.exitTrailPivotBufferPoints ?? 2}
+              onChange={e => up({ exitTrailPivotBufferPoints: Number(e.target.value) })}
+              className="w-12 px-1 py-0.5 text-[10px] border rounded text-center"
+            />
+          </div>
+        </div>
+      </CardShell>
+
+      <CardShell title="Leg Decay Exit">
+        <div className="flex items-center justify-between gap-2 flex-wrap mb-2">
+          <label className="flex items-center gap-2 cursor-pointer select-none"
+            title="Re-grades the newest completed with-trend leg each bar with the same metrics as the Confirmation filters (only legs formed after entry; windows respect Leg Min/Max Bars in Session Settings). Exits at bar close when enough checks fail, exit reason LEG_DECAY.">
+            <ToggleSwitch checked={rules.exitLegDecay ?? false} onChange={v => up({ exitLegDecay: v })} activeColor={meta.activeBg} />
+            <span className={`text-xs font-semibold ${rules.exitLegDecay ? meta.color : 'text-gray-400'}`}>
+              {rules.exitLegDecay ? 'On' : 'Off'}
+            </span>
+          </label>
+          <div className="flex items-center gap-1" title="No decay exit before this many bars in the trade.">
+            <span className="text-[10px] text-gray-500">Min bars in trade:</span>
+            <input
+              type="number" min={0} max={50} value={rules.exitLegDecayMinBarsInTrade ?? 3}
+              onChange={e => up({ exitLegDecayMinBarsInTrade: Number(e.target.value) })}
+              className="w-10 px-1 py-0.5 text-[10px] border rounded text-center"
+            />
+          </div>
+          <div className="flex items-center gap-1" title="Exit when at least this many of the enabled checks below fail on the same bar.">
+            <span className="text-[10px] text-gray-500">Min fails:</span>
+            <input
+              type="number" min={1} max={5} value={rules.exitLegDecayMinFails ?? 1}
+              onChange={e => up({ exitLegDecayMinFails: Number(e.target.value) })}
+              className="w-10 px-1 py-0.5 text-[10px] border rounded text-center"
+            />
+          </div>
+        </div>
+        <div className="grid grid-cols-1 @3xl:grid-cols-2 @6xl:grid-cols-3 gap-2">
+          <ThresholdFilterControl
+            label="Efficiency Ratio"
+            tooltip="Kaufman ER of the current with-trend leg. 'Hold ≥' fails the check when the leg's efficiency drops below the threshold (trend losing directness)."
+            mode={rules.exitDecayEfficiencyFilter ?? 'none'}
+            offValue="none"
+            modeOptions={[
+              { value: 'none', label: 'Off' },
+              { value: 'min', label: 'Hold ≥' },
+              { value: 'max', label: 'Stay ≤' },
+            ]}
+            onModeChange={v => up({ exitDecayEfficiencyFilter: v as RegimeRules['exitDecayEfficiencyFilter'] })}
+            threshold={rules.exitDecayEfficiencyThreshold ?? 0.25}
+            onThresholdChange={v => up({ exitDecayEfficiencyThreshold: v })}
+            diagram={null}
+            min={0} max={1} step={0.05}
+          />
+          <ThresholdFilterControl
+            label="Consecutive Breaks"
+            tooltip="Longest run of aligned prior-bar breaks in the current leg (micro-channel strength). 'Hold ≥' fails when the newest leg can no longer sustain a run of that length."
+            mode={rules.exitDecayConsecBreakFilter ?? 'none'}
+            offValue="none"
+            modeOptions={[
+              { value: 'none', label: 'Off' },
+              { value: 'min', label: 'Hold ≥' },
+              { value: 'max', label: 'Stay ≤' },
+            ]}
+            onModeChange={v => up({ exitDecayConsecBreakFilter: v as RegimeRules['exitDecayConsecBreakFilter'] })}
+            threshold={rules.exitDecayConsecBreakThreshold ?? 3}
+            onThresholdChange={v => up({ exitDecayConsecBreakThreshold: v })}
+            diagram={null}
+            min={1} max={10} step={1}
+          />
+          <ThresholdFilterControl
+            label="Break Count"
+            tooltip="Total aligned prior-bar breaks in the current leg window (momentum persistence). 'Hold ≥' fails when momentum dries up."
+            mode={rules.exitDecayBarBreakFilter ?? 'none'}
+            offValue="none"
+            modeOptions={[
+              { value: 'none', label: 'Off' },
+              { value: 'min', label: 'Hold ≥' },
+              { value: 'max', label: 'Stay ≤' },
+            ]}
+            onModeChange={v => up({ exitDecayBarBreakFilter: v as RegimeRules['exitDecayBarBreakFilter'] })}
+            threshold={rules.exitDecayBarBreakThreshold ?? 4}
+            onThresholdChange={v => up({ exitDecayBarBreakThreshold: v })}
+            diagram={null}
+            min={0} max={20} step={1}
+          />
+          <ThresholdFilterControl
+            label="EMA21 Slope"
+            tooltip="Direction-aligned EMA21 slope (flips automatically for shorts). 'Hold ≥' fails when the slope turns against the trade."
+            mode={rules.exitDecayEma21SlopeFilter ?? 'none'}
+            offValue="none"
+            modeOptions={[
+              { value: 'none', label: 'Off' },
+              { value: 'min', label: 'Hold ≥' },
+              { value: 'max', label: 'Stay ≤' },
+            ]}
+            onModeChange={v => up({ exitDecayEma21SlopeFilter: v as RegimeRules['exitDecayEma21SlopeFilter'] })}
+            threshold={rules.exitDecayEma21SlopeThreshold ?? 0}
+            onThresholdChange={v => up({ exitDecayEma21SlopeThreshold: v })}
+            diagram={null}
+            min={-2} max={2} step={0.05}
+            formatValue={v => v.toFixed(2)}
+          />
+          <ThresholdFilterControl
+            label="EMA20 Gap-Bar"
+            tooltip="Fraction of leg bars not touching the EMA20 (Brooks gap bars — strong trend). 'Hold ≥' fails when price starts hugging the average again."
+            mode={rules.exitDecayGapBarFilter ?? 'none'}
+            offValue="none"
+            modeOptions={[
+              { value: 'none', label: 'Off' },
+              { value: 'min', label: 'Hold ≥' },
+              { value: 'max', label: 'Stay ≤' },
+            ]}
+            onModeChange={v => up({ exitDecayGapBarFilter: v as RegimeRules['exitDecayGapBarFilter'] })}
+            threshold={rules.exitDecayGapBarThreshold ?? 0.3}
+            onThresholdChange={v => up({ exitDecayGapBarThreshold: v })}
+            diagram={null}
+            min={0} max={1} step={0.05}
+          />
         </div>
       </CardShell>
 

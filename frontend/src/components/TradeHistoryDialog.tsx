@@ -2,7 +2,7 @@ import { useRef, useEffect, useMemo, useState } from 'react';
 import { X, ChevronRight, ChevronDown, FileJson, Printer, FileSpreadsheet, Trash2, Link as LinkIcon, Eye, Activity } from 'lucide-react';
 import { useSessionStore } from '../stores/sessionStore';
 import { formatCurrency, formatTimestamp } from '../utils/formatters';
-import { groupTradesIntoPositions, calculatePerformanceStats } from '../utils/tradeAnalysis';
+import { groupTradesIntoPositions, calculatePerformanceStats, exitReasonBadge } from '../utils/tradeAnalysis';
 
 interface TradeHistoryDialogProps {
     isOpen: boolean;
@@ -393,11 +393,8 @@ export function TradeHistoryDialog({ isOpen, onClose, onOpenDashboard }: TradeHi
                                                             {pos.direction}
                                                         </span>
                                                         {pos.exitReason && pos.exitReason !== 'MANUAL' && (
-                                                            <span className={`ml-1 px-1 py-0.5 rounded text-[8px] font-bold ${pos.exitReason === 'TP' ? 'bg-green-100 text-green-700' :
-                                                                pos.exitReason === 'TIME_OVER' ? 'bg-orange-100 text-orange-700' :
-                                                                    'bg-red-100 text-red-700'
-                                                                }`}>
-                                                                {pos.exitReason === 'TIME_OVER' ? 'TIME OVER' : `${pos.exitReason} HIT`}
+                                                            <span className={`ml-1 px-1 py-0.5 rounded text-[8px] font-bold ${exitReasonBadge(pos.exitReason).cls}`}>
+                                                                {exitReasonBadge(pos.exitReason).label}{(pos.exitReason === 'TP' || pos.exitReason === 'SL') ? ' HIT' : ''}
                                                             </span>
                                                         )}
                                                     </td>
@@ -490,11 +487,8 @@ export function TradeHistoryDialog({ isOpen, onClose, onOpenDashboard }: TradeHi
                                                                                 <td className="px-3 py-2 text-right font-mono text-[10px]">{exec.quantity}</td>
                                                                                 <td className="px-3 py-2 text-right">
                                                                                     {exec.exitReason && exec.exitReason !== 'MANUAL' && (
-                                                                                        <span className={`px-1.5 py-0.5 rounded text-[9px] font-bold ${exec.exitReason === 'TP' ? 'bg-green-100 text-green-700' :
-                                                                                            exec.exitReason === 'TIME_OVER' ? 'bg-orange-100 text-orange-700' :
-                                                                                                'bg-red-100 text-red-700'
-                                                                                            }`}>
-                                                                                            {exec.exitReason === 'TIME_OVER' ? 'TIME OVER' : exec.exitReason}
+                                                                                        <span className={`px-1.5 py-0.5 rounded text-[9px] font-bold ${exitReasonBadge(exec.exitReason).cls}`}>
+                                                                                            {exitReasonBadge(exec.exitReason).label}
                                                                                         </span>
                                                                                     )}
                                                                                 </td>

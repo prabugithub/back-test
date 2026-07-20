@@ -125,7 +125,7 @@ interface RowStats {
   pf: number;
 }
 
-function computeStats(result: BatchSimResult): RowStats & { winRate: number; avgWin: number; avgLoss: number; maxDD: number } {
+function computeStats(result: BatchSimResult): RowStats & { winRate: number; avgWin: number; avgLoss: number; maxDD: number; exitCounts: Record<string, number> } {
   const closed = result.trades.filter(t => t.pnl !== undefined);
   const wins = closed.filter(t => (t.pnl ?? 0) > 0);
   const losses = closed.filter(t => (t.pnl ?? 0) <= 0);
@@ -143,7 +143,14 @@ function computeStats(result: BatchSimResult): RowStats & { winRate: number; avg
 
   const avgWin = wins.length ? grossWin / wins.length : 0;
   const avgLoss = losses.length ? grossLoss / losses.length : 0;
-  return { trades: closed.length, pnl: result.totalPnL, pf, winRate, avgWin, avgLoss, maxDD };
+
+  const exitCounts: Record<string, number> = {};
+  for (const t of closed) {
+    const r = t.exitReason ?? 'MANUAL';
+    exitCounts[r] = (exitCounts[r] ?? 0) + 1;
+  }
+
+  return { trades: closed.length, pnl: result.totalPnL, pf, winRate, avgWin, avgLoss, maxDD, exitCounts };
 }
 
 function summarize(label: string, result: BatchSimResult, baseline?: RowStats): RowStats {
@@ -160,6 +167,8 @@ function summarize(label: string, result: BatchSimResult, baseline?: RowStats): 
     const sign = (v: number) => (v > 0 ? `+${v}` : `${v}`);
     line += `  | Δtrades=${sign(dTrades).padStart(4)}  Δpnl=${(dPnl > 0 ? '+' : '') + dPnl.toFixed(0)}  ΔPF=${Number.isNaN(dPf) ? '  n/a' : (dPf > 0 ? '+' : '') + dPf.toFixed(2)}`;
   }
+  const exits = Object.entries(s.exitCounts).map(([r, n]) => `${r}=${n}`).join(' ');
+  if (exits) line += `  | exits: ${exits}`;
   console.log(line);
   return s;
 }

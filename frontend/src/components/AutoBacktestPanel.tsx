@@ -16,6 +16,7 @@ import {
   AUTO_BT_PRESETS,
   REGIME_LABELS,
   getCurrentMarketState,
+  countActiveExitMechanisms,
 } from '../utils/autoBacktestEngine';
 import { useFilterPreviewData, type PreviewFilterKey } from '../hooks/useFilterPreviewData';
 import { FilterPreviewStrip } from './autobacktest-visuals/FilterPreviewStrip';
@@ -160,6 +161,7 @@ export function AutoBacktestPanel({ onClose }: AutoBacktestPanelProps) {
   const [activeRegime, setActiveRegime] = useState<RegimeKey>('uptrend');
   const [activeStep, setActiveStep] = useState<WorkflowStep>('market');
   const [showMetrics, setShowMetrics] = useState(false);
+  const [showPreview, setShowPreview] = useState(false);
   const [selectedConfigId, setSelectedConfigId] = useState('');
   const [isSaveAsOpen, setIsSaveAsOpen] = useState(false);
   const [isDeleteConfirmOpen, setIsDeleteConfirmOpen] = useState(false);
@@ -226,8 +228,11 @@ export function AutoBacktestPanel({ onClose }: AutoBacktestPanelProps) {
 
   const regimes: RegimeKey[] = ['uptrend', 'downtrend', 'range', 'reversal'];
   const confirmationCount = countActiveConfirmationFilters(activeRules);
+  const exitMechanismCount = countActiveExitMechanisms(activeRules);
   const stepsWithBadge: StepDef[] = WORKFLOW_STEPS.map(s =>
-    s.key === 'confirmation' ? { ...s, badge: confirmationCount } : s
+    s.key === 'confirmation' ? { ...s, badge: confirmationCount }
+      : s.key === 'exit' ? { ...s, badge: exitMechanismCount }
+      : s
   );
 
   return createPortal(
@@ -278,9 +283,21 @@ export function AutoBacktestPanel({ onClose }: AutoBacktestPanelProps) {
 
       {/* Main Content */}
       <div className="flex-1 flex flex-col overflow-hidden">
-        {/* Sticky live preview + Strategy Summary — always visible while configuring */}
+        {/* Sticky live preview (collapsed by default) + Strategy Summary — always visible while configuring */}
         <div className="shrink-0 border-b border-slate-200 bg-white px-4 py-2 space-y-1.5">
-          <FilterPreviewStrip bars={previewBars} highlightFilterKey={hoveredFilterKey} height={90} />
+          <button
+            onClick={() => setShowPreview(v => !v)}
+            className="w-full flex items-center justify-between text-[10px] font-semibold text-gray-500 hover:text-gray-700 transition-colors"
+          >
+            <span className="flex items-center gap-1.5 uppercase tracking-wide">
+              <BarChart2 size={11} />
+              Live Preview Chart
+            </span>
+            <span className="text-[10px] text-gray-400">{showPreview ? '▲ Hide' : '▼ Show'}</span>
+          </button>
+          {showPreview && (
+            <FilterPreviewStrip bars={previewBars} highlightFilterKey={hoveredFilterKey} height={90} />
+          )}
           <StrategySummaryBar regime={activeRegime} rules={activeRules} onJumpToStep={setActiveStep} />
         </div>
 

@@ -1,8 +1,8 @@
 // @backtest-only — pure simulation, no store access, no side effects.
 
-import type { Candle, Trade, BacktestPosition } from '../types';
+import type { Candle, Trade, BacktestPosition, ExitReason } from '../types';
 import type { TradeJournal } from '../types';
-import { type AutoBacktestConfig, type AutoSignal, evaluateAutoSignals } from './autoBacktestEngine';
+import { type AutoBacktestConfig, type AutoSignal, type RegimeKey, evaluateAutoSignals, evaluateTrailStop, evaluateAutoExitSignal } from './autoBacktestEngine';
 import { analyzeManualEntry, calculateBarOverlap, averageBarOverlap, calculateBarRanges, averageBarRanges, calculateEfficiencyRatio, calculateBarBreaks, calculateEMASlope, calculateEMAInteraction } from './pivotAnalysis';
 
 interface SimPosition {
@@ -13,6 +13,13 @@ interface SimPosition {
   unrealizedPnL: number;
   stopLoss?: number;
   target?: number;
+  // Exit-engine state (every batch position is auto-entered by construction) —
+  // mirrors the same optional fields on PositionBase for the interactive path.
+  entryRegime?: RegimeKey;
+  entryBarIndex?: number;
+  exitWithTrendSeen?: boolean;
+  exitAgainstBars?: number;
+  slTrailed?: boolean;
 }
 
 export interface BatchSimResult {
@@ -160,6 +167,12 @@ export function runBatchSimulation(
 
     trades.push(trade);
 
+    // Exit-engine stamps: fresh opens and flips take the new signal's regime/bar
+    // and reset the per-trade exit state; same-side adds and partial reduces keep
+    // the opener's stamps so the exit engine keeps managing the original trade.
+    const isFlip = isReducing && newQty !== 0 && Math.sign(newQty) === tradeSign;
+    const opensNewTrade = currentQty === 0 || isFlip;
+
     position = newQty !== 0 ? {
       instrument,
       quantity: newQty,
@@ -168,10 +181,15 @@ export function runBatchSimulation(
       unrealizedPnL: 0,
       stopLoss: newStopLoss,
       target: newTarget,
+      entryRegime: opensNewTrade ? signal.regime : position?.entryRegime,
+      entryBarIndex: opensNewTrade ? candleIndex : position?.entryBarIndex,
+      exitWithTrendSeen: opensNewTrade ? undefined : position?.exitWithTrendSeen,
+      exitAgainstBars: opensNewTrade ? undefined : position?.exitAgainstBars,
+      slTrailed: opensNewTrade ? undefined : position?.slTrailed,
     } : null;
   }
 
-  function exitPosition(candle: Candle, reason: 'SL' | 'TP' | 'TIME_OVER', fillPrice?: number) {
+  function exitPosition(candle: Candle, reason: ExitReason, fillPrice?: number) {
     if (!position) return;
     const exitPrice = fillPrice ?? candle.close;
     const isLong = position.quantity > 0;
@@ -192,6 +210,7 @@ export function runBatchSimulation(
       exitReason: reason,
       slHit: reason === 'SL',
       tpHit: reason === 'TP',
+      slTrailed: position.slTrailed || undefined,
       interval,
     });
     position = null;
@@ -214,6 +233,13 @@ export function runBatchSimulation(
     // to `never`. Re-widen explicitly to the declared type before narrowing.
     const pos = position as SimPosition | null;
     if (pos) {
+      // ── 0. Pivot trailing stop — ratchet the SL before the touch check below
+      //      tests it (uses only pivots confirmed through bar i-1; ratchet only).
+      const trail = evaluateTrailStop(candles, i, pos, config);
+      if (trail) {
+        pos.stopLoss = trail.newStopLoss;
+        pos.slTrailed = true;
+      }
       const isLong = pos.quantity > 0;
       const sl = pos.stopLoss ?? 0;
       const tp = pos.target ?? 0;
@@ -252,7 +278,19 @@ export function runBatchSimulation(
       }
     }
 
-    // ── 2. Auto square-off ──────────────────────────────────────────────────
+    // ── 2. Price-action exit signals (auto exit engine) ─────────────────────
+    // Evaluated on bar close, after the SL/TP touch check, before square-off.
+    // The reversal state must be persisted even when no exit fires, or the
+    // confirm-bars counter would reset every bar.
+    const posForExit = position as SimPosition | null;
+    if (posForExit) {
+      const { exit, state } = evaluateAutoExitSignal(candles, i, posForExit, config);
+      posForExit.exitWithTrendSeen = state.exitWithTrendSeen;
+      posForExit.exitAgainstBars = state.exitAgainstBars;
+      if (exit) exitPosition(candle, exit.reason, candle.close);
+    }
+
+    // ── 3. Auto square-off ──────────────────────────────────────────────────
     if (position && config.autoSquareOff) {
       const candleMin = candleTimeMinutes(candle.timestamp);
       if (candleMin >= parseHHMM(config.squareOffTime)) {
@@ -260,7 +298,7 @@ export function runBatchSimulation(
       }
     }
 
-    // ── 3. Signal check ─────────────────────────────────────────────────────
+    // ── 4. Signal check ─────────────────────────────────────────────────────
     if (!config.enabled) continue;
     if (position !== null && config.skipIfPositionOpen) continue;
 

@@ -11,7 +11,8 @@
     "preview": "vite preview",
     "predeploy": "npm run build",
     "deploy": "gh-pages -d dist",
-    "backtest:eval": "tsx scripts/backtestEval.ts"
+    "backtest:eval": "tsx scripts/backtestEval.ts",
+    "backtest:exit-smoke": "tsx scripts/exitEngineSmoke.ts"
   },
   "dependencies": {
     "@tanstack/react-query": "^5.90.12",

@@ -2,7 +2,7 @@ import { useState, useMemo } from 'react';
 import { X, Trash2, TrendingUp, TrendingDown, DollarSign, Target, Calendar, BarChart3, FileJson, Printer, FileSpreadsheet, Link as LinkIcon, Activity } from 'lucide-react';
 import { getStoredSessions, deleteTradeSession, updateTradeSession, type TradeSession } from '../utils/tradeStorage';
 import { formatCurrency, formatTimestamp } from '../utils/formatters';
-import { groupTradesIntoPositions, calculatePerformanceStats, recalculateTradesPnL } from '../utils/tradeAnalysis';
+import { groupTradesIntoPositions, calculatePerformanceStats, recalculateTradesPnL, exitReasonBadge } from '../utils/tradeAnalysis';
 
 interface TradeReportDialogProps {
     isOpen: boolean;
@@ -463,11 +463,8 @@ export function TradeReportDialog({ isOpen, onClose, onOpenDashboard }: TradeRep
                                                                     {pos.direction}
                                                                 </span>
                                                                 {pos.exitReason && pos.exitReason !== 'MANUAL' && (
-                                                                    <span className={`ml-1 px-1.5 py-0.5 rounded text-[8px] font-bold ${pos.exitReason === 'TP' ? 'bg-green-100 text-green-700' :
-                                                                        pos.exitReason === 'TIME_OVER' ? 'bg-orange-100 text-orange-700' :
-                                                                            'bg-red-100 text-red-700'
-                                                                        }`}>
-                                                                        {pos.exitReason === 'TIME_OVER' ? 'TIME OVER' : `${pos.exitReason} HIT`}
+                                                                    <span className={`ml-1 px-1.5 py-0.5 rounded text-[8px] font-bold ${exitReasonBadge(pos.exitReason).cls}`}>
+                                                                        {exitReasonBadge(pos.exitReason).label}{(pos.exitReason === 'TP' || pos.exitReason === 'SL') ? ' HIT' : ''}
                                                                     </span>
                                                                 )}
                                                             </td>
@@ -592,11 +589,8 @@ export function TradeReportDialog({ isOpen, onClose, onOpenDashboard }: TradeRep
                                                             </td>
                                                             <td className="p-3 text-right">
                                                                 {trade.exitReason && trade.exitReason !== 'MANUAL' && (
-                                                                    <span className={`px-1.5 py-0.5 rounded text-[10px] font-bold ${trade.exitReason === 'TP' ? 'bg-green-100 text-green-700' :
-                                                                        trade.exitReason === 'TIME_OVER' ? 'bg-orange-100 text-orange-700' :
-                                                                            'bg-red-100 text-red-700'
-                                                                        }`}>
-                                                                        {trade.exitReason === 'TIME_OVER' ? 'TIME OVER' : trade.exitReason}
+                                                                    <span className={`px-1.5 py-0.5 rounded text-[10px] font-bold ${exitReasonBadge(trade.exitReason).cls}`}>
+                                                                        {exitReasonBadge(trade.exitReason).label}
                                                                     </span>
                                                                 )}
                                                             </td>

@@ -14,14 +14,16 @@ import {
   getOrderStatus,
 } from './api';
 import type { SessionConfig } from '../stores/sessionStore';
-import type { Position } from '../types';
+import type { Position, ExitReason } from '../types';
 
 type Notify = (msg: string, type: 'info' | 'warning' | 'error' | 'success') => void;
 
 export interface LiveOrderInput {
   type: 'BUY' | 'SELL';
   quantity: number;
-  exitReason?: 'SL' | 'TP' | 'MANUAL' | 'TIME_OVER';
+  // Auto-BT exit reasons never reach live (exit engine is gated off in live mode)
+  // but the type must align with executeTrade's widened union.
+  exitReason?: ExitReason;
   currentPrice: number;
   instrument: string;
   sessionConfig: SessionConfig;

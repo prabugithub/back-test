@@ -274,12 +274,33 @@ Per-regime rules are configured through a 5-section **Market → Entry → Confi
 - **Market section** — regime Enable toggle, Direction (Long/Short/Both), and the HT Structure filter.
 - **Entry section** — Entry Signal mode (Pivot/H-L Signal/Confluence) with H1/H2/L1/L2 toggles and confluence lookback, MA Filter, and the single most-recent Pivot Seq filter.
 - **Confirmation section** — all Quality Setup Filters (ATR Depth, Efficiency Ratio, Bar Overlap, Bar Range, Break Count, Consecutive Breaks, EMA21/EMA50 Slope, EMA20 Gap-Bar/Bias) plus Pivot Sequence History (High/Low Sequence, Pivot Gap). Its accordion header shows a live badge counting how many of these are currently active.
-- **Exit section** — Target RR, plus a read-only shortcut summarizing the session's auto square-off time and SL/TP fill mode with a button that opens Session Settings.
+- **Exit section** — Target RR, the four Price-Action Exit Engine mechanisms (Reversal, Opposite Signal, Pivot Trailing Stop, Leg Decay — see below), plus a read-only shortcut summarizing the session's auto square-off time and SL/TP fill mode with a button that opens Session Settings. Its accordion header shows a live badge counting how many exit mechanisms are active.
 - **Risk section** — Stop-loss method (Pivot/ATR/Fixed) and its amount, plus a read-only shortcut summarizing position-sizing (auto risk-based vs. manual) with a button that opens Session Settings.
 
 Two elements stay pinned above the scrollable accordion regardless of which section is expanded: the **Live Preview Strip** (see below) and a **Strategy Summary** chip bar — a plain-language, read-only recap of the active regime's current rules (direction, entry mode, MA filter, confirmation-filter count, SL method, RR), derived entirely from `RegimeRules` with no new state. Clicking a chip expands the accordion section that owns that setting. A **Run Full Backtest** footer (status + progress bar + the button itself) stays pinned below the scrollable area so it's always reachable without scrolling.
 
 Session-wide settings that apply across all regimes — Trading Window, Quantity/Risk sizing, Auto Square-off, SL/TP Fill Mode, and the Instrumentation Lookbacks — live in a **Session Settings** slide-over drawer (opened from a header button), separate from the per-regime workflow since they aren't scoped to Market/Entry/Confirmation/Exit/Risk. This is a pure UI reorganization: the fields, defaults, and `AutoBacktestConfig` shape are unchanged from before. The Instrumentation Lookbacks card additionally hosts **Leg Min Bars** / **Leg Max Bars** (defaults 5/15) — the bounds for the completed-breakout-leg metric windows described under Entry Instrumentation below.
+
+### Auto-Backtest Price-Action Exit Engine
+
+**Engine:** `evaluateTrailStop` / `evaluateAutoExitSignal` in `autoBacktestEngine.ts` — pure functions called identically by both the interactive step-through (`runAutoTrailStop`/`runAutoExitCheck` in `autoBacktestActions.ts`) and the batch simulator (`batchBacktestSimulator.ts`), so results are identical whether you step through a session or run a full batch backtest.
+
+Al Brooks-style trade management for **auto-entered backtest positions only** — manually entered trades are never touched by any of these mechanisms, only by the existing SL/TP/square-off logic. Every trade closed by this engine is stamped with a distinct `exitReason` shown in Trade History, the Performance Report, and the Entry Metrics Dashboard. Configured per regime in the **Exit** step of the Auto-Backtest Strategy Builder; the regime that opened the trade keeps managing it for its whole life, even if the live market structure later maps to a different regime.
+
+All four mechanisms default to **off** — existing saved configurations and sessions are unaffected until explicitly enabled.
+
+Canonical per-bar evaluation order (identical in both loops): trail stop → SL/TP touch check → signal exits (Reversal → Opposite Signal → Leg Decay) → auto square-off → new entry check.
+
+| Mechanism | Toggle | Trigger | Exit Reason |
+|-----------|--------|---------|--------------|
+| **Reversal Exit** | `exitOnReversal` | The LT market structure (same read as the Trend Reversal flag) reads against the position for `exitReversalConfirmBars` consecutive bars (default 1). `exitReversalRequireWithTrend` (default on) requires structure to have read *with* the trade at least once before the exit can arm — turn off for counter-trend regimes (Range/Reversal), which may never see a with-trend read. | `REVERSAL` |
+| **Opposite Signal Exit** | `exitOnOppSignal` | An opposite Brooks pullback signal fires on the current bar against the position (L1/L2 for a long, H1/H2 for a short) — `exitOppAllow1`/`exitOppAllow2` pick which count (default: 2nd only, the classic Brooks reversal trigger; 3rd+ signals never count). | `OPP_SIGNAL` |
+| **Pivot Trailing Stop** | `exitTrailPivot` | Ratchets the stop-loss behind the 3-bar swing extreme of the most recent **confirmed** same-side pivot (bullish pivot's low cluster for longs, bearish pivot's high cluster for shorts), padded by `exitTrailPivotBufferPoints` (default 2). Only pivots confirmed through the prior bar are used, so a pivot can never move the same bar's own SL touch check — and the stop only ever tightens, never loosens. The actual exit still goes through the normal SL machinery; the closing trade is flagged `slTrailed`. | `SL` (+ `slTrailed`) |
+| **Leg Decay Exit** | `exitLegDecay` | Re-grades the newest **completed** with-trend leg formed *after* entry (never re-judges the entry leg the Confirmation filters already approved) using the same metrics as the Confirmation step's leg-strength filters — Efficiency Ratio, Consecutive Breaks, Break Count, EMA21 Slope, EMA20 Gap-Bar — each with its own `none`/`min`/`max` mode + threshold. Waits at least `exitLegDecayMinBarsInTrade` bars (default 3) before checking; exits once at least `exitLegDecayMinFails` of the enabled checks fail on the same bar (default 1). Windows respect the session's Leg Min/Max Bars. | `LEG_DECAY` |
+
+All three signal-based exits (Reversal, Opposite Signal, Leg Decay) fill at the current bar's **close** and exit immediately — there is no "tighten stop first" option in this version. The Pivot Trailing Stop instead only ever moves the SL; the actual exit fires later through the regular SL touch check (`slTpFillMode` still governs the fill price there).
+
+---
 
 ### Entry Instrumentation & Quality Setup Filters
 
@@ -384,7 +405,7 @@ Describes where the entry candle sits relative to the EMA:
 
 - **Confidence level** (1–5)
 - **Notes** (free text)
-- **Exit reason** — `SL`, `TP`, `MANUAL`, `TIME_OVER`
+- **Exit reason** — `SL`, `TP`, `MANUAL`, `TIME_OVER`, plus `REVERSAL`/`OPP_SIGNAL`/`LEG_DECAY` for auto-backtest trades closed by the Price-Action Exit Engine (see section 6)
 - **R:R Ratio** (auto-calculated from SL/Target)
 
 ---
@@ -794,4 +815,4 @@ Dialogs (open on demand):
 
 ---
 
-**Last Updated:** 2026-07-15 (added CSV export of loaded candles + JSON export of Auto-Backtest config)
+**Last Updated:** 2026-07-17 (added the Auto-Backtest Price-Action Exit Engine — Reversal, Opposite Signal, Pivot Trailing Stop, and Leg Decay exits for auto-entered positions)

@@ -23,6 +23,11 @@ export interface TradeJournal {
   screenshotUrl?: string;
 }
 
+// Why a trade was closed. REVERSAL/OPP_SIGNAL/LEG_DECAY come from the auto-BT
+// exit engine (autoBacktestEngine.ts evaluateAutoExitSignal) and only ever apply
+// to auto-entered backtest positions.
+export type ExitReason = 'SL' | 'TP' | 'MANUAL' | 'TIME_OVER' | 'REVERSAL' | 'OPP_SIGNAL' | 'LEG_DECAY';
+
 // Trade record
 export interface Trade {
   id: string;
@@ -34,7 +39,8 @@ export interface Trade {
   pnl?: number;
   stopLoss?: number;
   target?: number;
-  exitReason?: 'SL' | 'TP' | 'MANUAL' | 'TIME_OVER';
+  exitReason?: ExitReason;
+  slTrailed?: boolean; // SL had been ratcheted by the pivot trail before this exit
   slHit?: boolean;
   tpHit?: boolean;
   slDialogShown?: boolean;
@@ -89,6 +95,16 @@ interface PositionBase {
   trendReversed?: boolean;
   trendReversedPnL?: number;
   withTrendSeen?: boolean;
+  // ── Auto-BT exit engine (all optional — absent on manual positions and old sessions) ──
+  autoEntry?: boolean; // position was OPENED by the auto engine; adds/reduces don't change it
+  // inline literal union (not RegimeKey) to avoid a types→utils import cycle
+  entryRegime?: 'uptrend' | 'downtrend' | 'range' | 'reversal';
+  entryBarIndex?: number; // candle index of the opening bar
+  // exit engine's own reversal state — deliberately separate from withTrendSeen,
+  // which checkTrendReversal owns for instrumentation
+  exitWithTrendSeen?: boolean;
+  exitAgainstBars?: number;
+  slTrailed?: boolean;
 }
 
 // Backtest position: broker fields must never be present

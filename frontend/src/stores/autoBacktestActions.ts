@@ -1,7 +1,7 @@
 // @backtest-only — no live imports allowed.
 
 import type { StoreSet, StoreGet } from './sessionStore';
-import { type AutoBacktestConfig, evaluateAutoSignals } from '../utils/autoBacktestEngine';
+import { type AutoBacktestConfig, evaluateAutoSignals, evaluateTrailStop, evaluateAutoExitSignal } from '../utils/autoBacktestEngine';
 import { useNotificationStore } from './notificationStore';
 import type { TradeJournal } from '../types';
 import { analyzeManualEntry } from '../utils/pivotAnalysis';
@@ -99,7 +99,76 @@ export function createAutoBacktestActions(set: StoreSet, get: StoreGet) {
         undefined,        // priceOverride — use candle close
         'MANUAL',
         journal,
-        signal.entryMetrics
+        signal.entryMetrics,
+        // Stamps the position as auto-entered so the exit engine
+        // (runAutoTrailStop/runAutoExitCheck) manages it.
+        { auto: true, regime: signal.regime, barIndex: index }
+      );
+    },
+
+    // Phase 1 of the auto exit engine — pivot trailing stop. Runs BEFORE
+    // checkSLTPHits in step() so the touch check tests the trailed level.
+    // Auto-entered backtest positions only.
+    runAutoTrailStop: (index: number) => {
+      const state = get();
+      if (state.isLiveMode) return;
+      if (!state.autoBacktestConfig.enabled) return;
+      const position = state.position;
+      if (!position || position.quantity === 0 || !position.autoEntry) return;
+
+      const trail = evaluateTrailStop(state.candles, index, position, state.autoBacktestConfig);
+      if (!trail) return;
+
+      set({
+        position: {
+          ...position,
+          stopLoss: trail.newStopLoss,
+          slTrailed: true,
+          // SL level changed — re-arm the SL trigger (same convention as
+          // updatePositionTarget resetting tpHit/tpDialogShown).
+          slHit: undefined,
+          slDialogShown: undefined,
+        },
+      });
+      useNotificationStore
+        .getState()
+        .notify(`Trailing SL → ${trail.newStopLoss.toFixed(2)} (behind latest pivot)`, 'info');
+    },
+
+    // Phase 2 of the auto exit engine — price-action exit signals evaluated on
+    // bar close (REVERSAL → OPP_SIGNAL → LEG_DECAY). Runs AFTER checkSLTPHits,
+    // before runAutoSquareOff. Exits immediately, no dialog (same precedent as
+    // the autoExitSL path in checkSLTPHits). Auto-entered backtest positions only.
+    runAutoExitCheck: (index: number) => {
+      const state = get();
+      if (state.isLiveMode) return;
+      if (!state.autoBacktestConfig.enabled) return;
+      const position = state.position;
+      if (!position || position.quantity === 0 || !position.autoEntry) return;
+
+      const { exit, state: exitState } = evaluateAutoExitSignal(
+        state.candles, index, position, state.autoBacktestConfig
+      );
+
+      // Persist the per-bar reversal state even when no exit fires — otherwise
+      // the confirm-bars counter would reset every bar.
+      if (exitState.exitWithTrendSeen !== (position.exitWithTrendSeen ?? false)
+        || exitState.exitAgainstBars !== (position.exitAgainstBars ?? 0)) {
+        set({ position: { ...position, ...exitState } });
+      }
+      if (!exit) return;
+
+      const isLong = position.quantity > 0;
+      const label = exit.reason === 'REVERSAL' ? 'Reversal Exit'
+        : exit.reason === 'OPP_SIGNAL' ? 'Opposite-Signal Exit' : 'Leg-Decay Exit';
+      useNotificationStore.getState().notify(`${label}: ${exit.detail}`, 'warning');
+      get().executeTrade(
+        isLong ? 'SELL' : 'BUY',
+        Math.abs(position.quantity),
+        undefined,
+        undefined,
+        undefined,        // fill at current candle close
+        exit.reason
       );
     },
 
