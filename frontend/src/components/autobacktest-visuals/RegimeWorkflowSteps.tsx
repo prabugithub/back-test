@@ -1,5 +1,5 @@
 import type { ReactNode } from 'react';
-import { TrendingUp, TrendingDown, Settings2 } from 'lucide-react';
+import { TrendingUp, TrendingDown, Minus, RefreshCw, Settings2 } from 'lucide-react';
 import { type RegimeRules, type AutoBacktestConfig, generateBinaryPatterns } from '../../utils/autoBacktestEngine';
 import type { FilterPreviewBar, PreviewFilterKey } from '../../hooks/useFilterPreviewData';
 import { CardShell } from './CardShell';
@@ -68,6 +68,15 @@ export interface RegimeStepProps {
   onOpenSessionSettings: () => void;
 }
 
+// Shared diagram for the 5-option structure filters (HT/LT) below.
+function structureDiagram(m: 'any' | 'bull_trend' | 'bear_trend' | 'range' | 'reversal') {
+  if (m === 'any') return null;
+  if (m === 'bull_trend') return <TrendingUp size={22} className="text-green-600" />;
+  if (m === 'bear_trend') return <TrendingDown size={22} className="text-red-600" />;
+  if (m === 'range') return <Minus size={22} className="text-gray-500" />;
+  return <RefreshCw size={22} className="text-amber-600" />;
+}
+
 // ─── Market ─────────────────────────────────────────────────────────────────
 // Regime enable/direction + Higher-Timeframe structure gate — "what market condition am I trading."
 export function MarketStep({ rules, up, meta }: RegimeStepProps) {
@@ -102,19 +111,33 @@ export function MarketStep({ rules, up, meta }: RegimeStepProps) {
         tooltip="Higher-timeframe structure gate. Note: this is actually an EMA60 slope computed on the same base-timeframe candles, not a true resampled higher-timeframe read — treat it as a longer-term trend confirmation, not independent multi-timeframe confluence."
         mode={rules.htStructureFilter}
         offValue="any"
+        gridCols={5}
         modeOptions={[
           { value: 'any', label: 'Any' },
           { value: 'bull_trend', label: 'Bull Trend' },
           { value: 'bear_trend', label: 'Bear Trend' },
+          { value: 'range', label: 'Range' },
+          { value: 'reversal', label: 'Reversal' },
         ]}
         onModeChange={v => up({ htStructureFilter: v as RegimeRules['htStructureFilter'] })}
-        diagram={m =>
-          m === 'any' ? null : m === 'bull_trend' ? (
-            <TrendingUp size={22} className="text-green-600" />
-          ) : (
-            <TrendingDown size={22} className="text-red-600" />
-          )
-        }
+        diagram={structureDiagram}
+      />
+
+      <ModePickerControl
+        label="LT Structure"
+        tooltip="Lower-timeframe structure gate — the same ltMarket read used to pick which regime's rules try first (Market/Entry/Confirmation tabs). This filter enforces it as a hard requirement instead of just an ordering preference, so this rule-set won't fire on a bar whose own structure doesn't actually match."
+        mode={rules.ltStructureFilter ?? 'any'}
+        offValue="any"
+        gridCols={5}
+        modeOptions={[
+          { value: 'any', label: 'Any' },
+          { value: 'bull_trend', label: 'Bull Trend' },
+          { value: 'bear_trend', label: 'Bear Trend' },
+          { value: 'range', label: 'Range' },
+          { value: 'reversal', label: 'Reversal' },
+        ]}
+        onModeChange={v => up({ ltStructureFilter: v as RegimeRules['ltStructureFilter'] })}
+        diagram={structureDiagram}
       />
       {isShort && <p className="text-[10px] text-gray-400">Direction is Short — filter labels elsewhere flip automatically to match.</p>}
     </div>

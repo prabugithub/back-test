@@ -129,7 +129,15 @@ export interface RegimeRules {
   ema20BiasThreshold?: number;
 
   // Higher timeframe structure required for this regime
-  htStructureFilter: 'any' | 'bull_trend' | 'bear_trend';
+  htStructureFilter: 'any' | 'bull_trend' | 'bear_trend' | 'range' | 'reversal';
+
+  // Lower timeframe structure required for this regime — same ltMarket read that
+  // getRegimeKey uses to pick which rule-set tries first, but enforced as a hard
+  // gate here rather than just an ordering preference (evaluateAutoSignals falls
+  // back to trying every enabled regime's rules, not just the matched one, so this
+  // is what lets a rule-set refuse to fire outside its intended structure).
+  // Optional — old saved configs predate this field; treated as 'any' when unset.
+  ltStructureFilter?: 'any' | 'bull_trend' | 'bear_trend' | 'range' | 'reversal';
 
   // Risk
   slMethod: 'pivot' | 'atr' | 'fixed';
@@ -280,6 +288,7 @@ const defaultLongRules: RegimeRules = {
   ltPivotSequence: 'any',
   maFilter: 'above_ema21',
   htStructureFilter: 'bull_trend',
+  ltStructureFilter: 'any',
   // Pre-enabled quality-setup filters — thresholds are scale-invariant (ratios, or
   // sign-only slope) so they're safe defaults across instruments/timeframes.
   barOverlapFilter: 'max',
@@ -648,7 +657,8 @@ export function evaluateAutoSignals(
   for (const regime of regimeOrder) {
     const regimeRules = config[regime];
     if (!regimeRules.enabled) continue;
-    if (!passesHtFilter(regimeRules.htStructureFilter, htMarket)) continue;
+    if (!passesStructureFilter(regimeRules.htStructureFilter, htMarket)) continue;
+    if (!passesStructureFilter(regimeRules.ltStructureFilter, ltMarket)) continue;
 
     // For pullback-continuation entries (H_SIGNAL/CONFLUENCE), the leg-strength filters
     // (ER, Bar Overlap, Break Count, ranges, gap-bar, consecutive breaks) window over the
@@ -990,10 +1000,19 @@ export function passesAtrDepth(rules: RegimeRules, entry: number, ema21: number 
   return true;
 }
 
-export function passesHtFilter(filter: string, htMarket: string): boolean {
-  if (filter === 'any') return true;
-  if (filter === 'bull_trend') return htMarket === 'Bull-Trend';
-  if (filter === 'bear_trend') return htMarket === 'Bear-Trend';
+// Shared LT/HT structure gate — buckets the raw analyzeMarketStructure() string
+// (Bull-Trend/Bull-Trending-range/Bear-Trend/Bear-Trending-range/Bull-Reversal/
+// Bear-Reversal/Range) against one of the 5 filter options. Deliberately stricter
+// than getRegimeKey's uptrend/downtrend bucketing: 'bull_trend'/'bear_trend' here
+// match only the clean trend state — the choppy Trending-range variant falls into
+// 'range' instead.
+export function passesStructureFilter(filter: string | undefined, market: string): boolean {
+  const f = filter ?? 'any';
+  if (f === 'any') return true;
+  if (f === 'bull_trend') return market === 'Bull-Trend';
+  if (f === 'bear_trend') return market === 'Bear-Trend';
+  if (f === 'reversal') return market === 'Bull-Reversal' || market === 'Bear-Reversal';
+  if (f === 'range') return market === 'Range' || market === 'Bull-Trending-range' || market === 'Bear-Trending-range';
   return true;
 }
 
