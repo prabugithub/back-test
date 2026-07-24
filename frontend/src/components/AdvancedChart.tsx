@@ -653,24 +653,15 @@ export function AdvancedChart({
         };
         lastCandleRef.current = newCandle;
 
-        // Capture the user's current scroll position (time-based) before appending the
-        // new bar. series.update() with a new timestamp may trigger LWC auto-scroll if
+        // Capture the user's current scroll position (bar-index based) before appending
+        // the new bar. series.update() with a new timestamp may trigger LWC auto-scroll if
         // the chart is in "real-time following" mode; restore synchronously after to
-        // preserve a manually-positioned viewport.
+        // preserve a manually-positioned viewport. Same pattern as the main candle-data
+        // effect's setData()/wasAtRightEdge restore below.
         const ts = chart ? chart.timeScale() : null;
-        const savedRange = ts ? ts.getVisibleRange() : null;
-
-        // Detect whether the user has manually scrolled away from the natural right edge.
-        // "Natural right edge" = live candle is near the right side with little future space.
-        // "Scrolled away" = live candle is off-screen left, OR user scrolled right to center it.
-        let userScrolledAway = false;
-        if (savedRange && ts) {
-          const visibleSpanSecs = (savedRange.to as number) - (savedRange.from as number);
-          const futureSecsVisible = Math.max(0, (savedRange.to as number) - (closedCandleTime as number));
-          const liveCandleOffScreen = (closedCandleTime as number) > (savedRange.to as number);
-          // More than 20% of the visible window is future (empty) space → user centered the chart
-          userScrolledAway = liveCandleOffScreen || (visibleSpanSecs > 0 && futureSecsVisible / visibleSpanSecs > 0.2);
-        }
+        const savedLogicalRange = ts ? ts.getVisibleLogicalRange() : null;
+        const prevBarCount = lastSetDataCountRef.current;
+        const wasAtRightEdge = !!savedLogicalRange && prevBarCount > 0 && savedLogicalRange.to >= prevBarCount - 1.5;
 
         series.update({
           time: newCandle.time,
@@ -688,9 +679,17 @@ export function AdvancedChart({
           });
         }
 
-        // Restore the user's scroll position synchronously (same pattern as correction timer).
-        if (userScrolledAway && savedRange && ts) {
-          ts.setVisibleRange(savedRange);
+        // Restore the user's scroll position synchronously: shift forward by one bar if
+        // they were following the live edge, otherwise hold the exact prior range.
+        if (ts && savedLogicalRange) {
+          if (wasAtRightEdge) {
+            ts.setVisibleLogicalRange({
+              from: savedLogicalRange.from + 1,
+              to: savedLogicalRange.to + 1,
+            });
+          } else {
+            ts.setVisibleLogicalRange(savedLogicalRange);
+          }
         }
 
         // Persist new candle to session store
@@ -745,7 +744,10 @@ export function AdvancedChart({
 
               // Patch chart — series.update() can't reach non-last bars,
               // so use setData() with visible-range restore to avoid scroll jump.
-              const range = chart.timeScale().getVisibleRange();
+              // Bar-index based (not time-based) to match the tick handler's restore —
+              // this patch never changes bar count, so it's always an exact restore.
+              const patchTs = chart.timeScale();
+              const savedPatchRange = patchTs.getVisibleLogicalRange();
               const latest = useSessionStore.getState().candles;
               series.setData(
                 latest.map(c => ({
@@ -756,7 +758,7 @@ export function AdvancedChart({
                   close: c.close,
                 }))
               );
-              if (range) chart.timeScale().setVisibleRange(range);
+              if (savedPatchRange) patchTs.setVisibleLogicalRange(savedPatchRange);
 
               if (volumeSeries) {
                 volumeSeries.setData(
