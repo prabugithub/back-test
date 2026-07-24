@@ -56,6 +56,18 @@ export interface Trade {
   barRangeAvgAtEntry?: number;      // mean (high-low) over last N bars ending at entry, direction-agnostic
   bullBarRangeAvgAtEntry?: number;  // mean (high-low) of only bull bars (close>open) in the same window
   bearBarRangeAvgAtEntry?: number;  // mean (high-low) of only bear bars (close<open) in the same window
+  // Per-candle body/close/wick quality ratios across the graded window (the completed
+  // breakout leg's own bars for H/L entries, else the configured lookback ending at
+  // entry) — one value per candle, oldest→newest, so a 7-bar leg yields 7-length
+  // arrays (e.g. index 0 = H1/L1, index 1 = H2/L2, ...). *AvgAtEntry is the mean.
+  brrAtEntry?: number[];  // body-to-range ratio per candle: |close-open|/(high-low) — high = trend bar, low = doji/spinning top
+  clvAtEntry?: number[];  // close location value per candle: (close-low)/(high-low) — near 1 = closed near high (bullish), near 0 = bearish
+  uwrAtEntry?: number[];  // upper wick ratio per candle — large value on an up-close bar exposes rejection at highs (fakeout)
+  lwrAtEntry?: number[];  // lower wick ratio per candle — large value on a down-close bar exposes rejection at lows (fakeout)
+  brrAvgAtEntry?: number;
+  clvAvgAtEntry?: number;
+  uwrAvgAtEntry?: number;
+  lwrAvgAtEntry?: number;
   efficiencyRatioAtEntry?: number; // Kaufman ER over last N bars ending at entry — net displacement / total path, bounded [0,1]; near 1 = efficient trend, near 0 = chop
   highBreakCountAtEntry?: number; // count of bars whose high broke the immediately preceding bar's high, within the window
   lowBreakCountAtEntry?: number;  // count of bars whose low broke the immediately preceding bar's low, within the same window

@@ -67,6 +67,10 @@ export function createSharedActions(set: StoreSet, get: StoreGet) {
     setCrosshairPosition: (pos: SessionStore['crosshairPosition']) =>
       set({ crosshairPosition: pos }),
 
+    scrollToTime: (timestamp: number | null) => set({ scrollToTimestamp: timestamp }),
+
+    highlightCandle: (timestamp: number | null) => set({ highlightTimestamp: timestamp }),
+
     checkSLTPHits: (index: number, currentPrice?: number) => {
       const { candles, position } = get();
       if (!position || (!position.stopLoss && !position.target)) return;
@@ -366,6 +370,14 @@ export function createSharedActions(set: StoreSet, get: StoreGet) {
       const pivotHighSeq = entryMetricsOverride?.pivotHighSeq ?? fallbackMetrics?.pivotHighSeq ?? [];
       const pivotLowSeq = entryMetricsOverride?.pivotLowSeq ?? fallbackMetrics?.pivotLowSeq ?? [];
       const pivotGapAvgBarsAtEntry = entryMetricsOverride?.pivotGapAvgBars ?? fallbackMetrics?.pivotGapAvgBars;
+      const brrSeries = entryMetricsOverride?.brrSeries ?? fallbackMetrics?.brrSeries;
+      const clvSeries = entryMetricsOverride?.clvSeries ?? fallbackMetrics?.clvSeries;
+      const uwrSeries = entryMetricsOverride?.uwrSeries ?? fallbackMetrics?.uwrSeries;
+      const lwrSeries = entryMetricsOverride?.lwrSeries ?? fallbackMetrics?.lwrSeries;
+      const brrAvgAtEntry = entryMetricsOverride?.brrAvg ?? fallbackMetrics?.brrAvg;
+      const clvAvgAtEntry = entryMetricsOverride?.clvAvg ?? fallbackMetrics?.clvAvg;
+      const uwrAvgAtEntry = entryMetricsOverride?.uwrAvg ?? fallbackMetrics?.uwrAvg;
+      const lwrAvgAtEntry = entryMetricsOverride?.lwrAvg ?? fallbackMetrics?.lwrAvg;
       const isInitialWith =
         (type === 'BUY' && ltMarket.startsWith('Bull')) ||
         (type === 'SELL' && ltMarket.startsWith('Bear'));
@@ -433,6 +445,14 @@ export function createSharedActions(set: StoreSet, get: StoreGet) {
         pivotHighSeqAtEntry: !isReducing ? (pivotHighSeq.length ? pivotHighSeq.join('-') : undefined) : undefined,
         pivotLowSeqAtEntry: !isReducing ? (pivotLowSeq.length ? pivotLowSeq.join('-') : undefined) : undefined,
         pivotGapAvgBarsAtEntry: !isReducing ? pivotGapAvgBarsAtEntry : undefined,
+        brrAtEntry: !isReducing ? brrSeries : undefined,
+        clvAtEntry: !isReducing ? clvSeries : undefined,
+        uwrAtEntry: !isReducing ? uwrSeries : undefined,
+        lwrAtEntry: !isReducing ? lwrSeries : undefined,
+        brrAvgAtEntry: !isReducing ? brrAvgAtEntry : undefined,
+        clvAvgAtEntry: !isReducing ? clvAvgAtEntry : undefined,
+        uwrAvgAtEntry: !isReducing ? uwrAvgAtEntry : undefined,
+        lwrAvgAtEntry: !isReducing ? lwrAvgAtEntry : undefined,
         // Leg fields: from the auto-signal's entryMetrics, or the direction-matched
         // completed leg for manual entries. undefined means the entry was graded at
         // currentIndex windows (PIVOT mode, or no completed leg yet).

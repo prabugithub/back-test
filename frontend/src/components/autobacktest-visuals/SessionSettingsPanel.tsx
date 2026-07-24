@@ -147,6 +147,14 @@ export function SessionSettingsPanel({ config, onChange, isOpen, onClose }: Sess
                 />
               </div>
               <div className="flex items-center justify-between gap-1">
+                <span className="text-[10px] text-gray-500" title="Bars looked back for BRR/CLV/wick-ratio (bar quality) instrumentation on trade records when no leg window applies">Bar Quality</span>
+                <input
+                  type="number" min={5} max={50} value={config.barQualityLookback}
+                  onChange={e => onChange({ barQualityLookback: Number(e.target.value) })}
+                  className="w-12 px-1.5 py-1 text-xs border rounded text-center"
+                />
+              </div>
+              <div className="flex items-center justify-between gap-1">
                 <span className="text-[10px] text-gray-500" title="Bars looked back for Kaufman Efficiency Ratio instrumentation on trade records">Efficiency</span>
                 <input
                   type="number" min={3} max={30} value={config.efficiencyRatioLookback}

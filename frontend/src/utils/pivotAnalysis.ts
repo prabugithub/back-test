@@ -254,6 +254,64 @@ export function averageBarRanges(samples: BarRangeSample[]): {
     };
 }
 
+export interface BarQualitySample {
+    brr: number; // body-to-range ratio: |close-open| / (high-low) — high = trend bar, low = doji/spinning top
+    clv: number; // close location value: (close-low) / (high-low) — near 1 = closed near high (bullish), near 0 = closed near low (bearish)
+    uwr: number; // upper wick ratio: (high-max(open,close)) / (high-low) — large UWR on an up-close bar exposes rejection at highs (fakeout)
+    lwr: number; // lower wick ratio: (min(open,close)-low) / (high-low) — large LWR on a down-close bar exposes rejection at lows (fakeout)
+}
+
+function barQualityOf(c: Candle): BarQualitySample {
+    const range = c.high - c.low;
+    if (range <= 0) return { brr: 0, clv: 0, uwr: 0, lwr: 0 };
+    const body = Math.abs(c.close - c.open);
+    const upperWick = c.high - Math.max(c.open, c.close);
+    const lowerWick = Math.min(c.open, c.close) - c.low;
+    return {
+        brr: body / range,
+        clv: (c.close - c.low) / range,
+        uwr: upperWick / range,
+        lwr: lowerWick / range,
+    };
+}
+
+/**
+ * Per-bar body/close/wick quality ratios (BRR, CLV, UWR, LWR — see BarQualitySample)
+ * for the `lookback` bars ending at `currentIndex`. One sample per candle, oldest→
+ * newest, so callers can read the bar-by-bar sequence across a leg (e.g. H1, H2, ...
+ * for a 7-bar bull leg) rather than only a collapsed average. Zero-range bars
+ * (high === low) yield all-zero ratios rather than NaN/Infinity. No previous-bar
+ * comparison needed (unlike calculateBarOverlap), so the window may start at index 0.
+ */
+export function calculateBarQuality(candles: Candle[], currentIndex: number, lookback: number = 20): BarQualitySample[] {
+    const samples: BarQualitySample[] = [];
+    const start = Math.max(0, currentIndex - lookback + 1);
+    for (let i = start; i <= currentIndex; i++) {
+        samples.push(barQualityOf(candles[i]));
+    }
+    return samples;
+}
+
+/**
+ * Mean BRR/CLV/UWR/LWR from calculateBarQuality samples. Undefined when the
+ * window is empty — mirrors averageBarRanges' empty-input convention.
+ */
+export function averageBarQuality(samples: BarQualitySample[]): {
+    brrAvg?: number;
+    clvAvg?: number;
+    uwrAvg?: number;
+    lwrAvg?: number;
+} {
+    if (samples.length === 0) return {};
+    const mean = (xs: number[]) => xs.reduce((sum, x) => sum + x, 0) / xs.length;
+    return {
+        brrAvg: mean(samples.map(s => s.brr)),
+        clvAvg: mean(samples.map(s => s.clv)),
+        uwrAvg: mean(samples.map(s => s.uwr)),
+        lwrAvg: mean(samples.map(s => s.lwr)),
+    };
+}
+
 /**
  * Kaufman Efficiency Ratio: net price displacement over the lookback window
  * divided by the total bar-to-bar distance traveled within it. Bounded in

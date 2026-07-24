@@ -16,7 +16,8 @@ export function TradeHistoryDialog({ isOpen, onClose, onOpenDashboard }: TradeHi
     const deleteTrade = useSessionStore((s) => s.deleteTrade);
     const deleteTrades = useSessionStore((s) => s.deleteTrades);
     const candles = useSessionStore((s) => s.candles);
-    const setCurrentIndex = useSessionStore((s) => s.setCurrentIndex);
+    const scrollToTime = useSessionStore((s) => s.scrollToTime);
+    const highlightCandle = useSessionStore((s) => s.highlightCandle);
     const dialogRef = useRef<HTMLDivElement>(null);
     const [expandedPosId, setExpandedPosId] = useState<string | null>(null);
 
@@ -116,24 +117,33 @@ export function TradeHistoryDialog({ isOpen, onClose, onOpenDashboard }: TradeHi
 
     const handleJumpToTrade = (e: React.MouseEvent, timestamp: number) => {
         e.stopPropagation();
+        // pos.entryTime / exec.timestamp come out of groupTradesIntoPositions already
+        // normalized to milliseconds (tradeAnalysis.ts's normalizeTs), but candle
+        // timestamps are Unix seconds (lightweight-charts UTCTimestamp) — convert back
+        // before comparing, or every lookup below silently falls through to the last candle.
+        const targetTs = timestamp > 1e11 ? Math.floor(timestamp / 1000) : timestamp;
         // The trade timestamp might be slightly ahead or behind candle timestamps due to formatting
         // We find the candle that is closest to this timestamp (at or before)
-        const index = candles.findIndex(c => c.timestamp === timestamp);
+        const index = candles.findIndex(c => c.timestamp === targetTs);
         if (index !== -1) {
-            setCurrentIndex(index);
+            // Pan the chart to this candle without touching currentIndex — jumping to an
+            // entry must not rewind playback and hide every candle revealed after it.
+            scrollToTime(candles[index].timestamp);
+            highlightCandle(candles[index].timestamp);
             onClose(); // Close dialog to show the chart
         } else {
             // Find the closest candle if exact match not found
             let closestIndex = -1;
             for (let i = 0; i < candles.length; i++) {
-                if (candles[i].timestamp <= timestamp) {
+                if (candles[i].timestamp <= targetTs) {
                     closestIndex = i;
                 } else {
                     break;
                 }
             }
             if (closestIndex !== -1) {
-                setCurrentIndex(closestIndex);
+                scrollToTime(candles[closestIndex].timestamp);
+                highlightCandle(candles[closestIndex].timestamp);
                 onClose();
             }
         }

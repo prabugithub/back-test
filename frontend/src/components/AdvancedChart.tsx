@@ -88,6 +88,8 @@ export function AdvancedChart({
   const secondaryCandles = useSessionStore((s) => s.secondaryCandles);
   const isLiveMode = useSessionStore((s) => s.isLiveMode);
   const sessionConfig = useSessionStore((s) => s.sessionConfig);
+  const scrollToTimestamp = useSessionStore((s) => s.scrollToTimestamp);
+  const highlightTimestamp = useSessionStore((s) => s.highlightTimestamp);
 
   const visibleCandles = useMemo(() => {
     // In live mode, show all candles (don't slice by currentIndex)
@@ -255,7 +257,50 @@ export function AdvancedChart({
         ctx.restore();
       }
     }
-  }, [chart, series, visibleCandles, activeIndicators, showMarkers, showPivotRR, memoizedPivots, isSecondary, secondaryTimeframe, chartId]);
+
+    // 3. Highlight the candle jumped to from Trade History's "Jump to entry" eye icon
+    if (!isSecondary && highlightTimestamp !== null) {
+      const target = visibleCandles.find((c) => c.timestamp === highlightTimestamp);
+      if (target) {
+        const timeScale = chart.timeScale();
+        const x = timeScale.timeToCoordinate(target.timestamp as any);
+        const highY = series.priceToCoordinate(target.high);
+        if (x !== null) {
+          const barSpacing = (timeScale.options() as any).barSpacing || 6;
+          const halfWidth = barSpacing / 2 + 3;
+
+          ctx.save();
+          ctx.fillStyle = 'rgba(255, 193, 7, 0.18)';
+          ctx.fillRect(x - halfWidth, 0, halfWidth * 2, ctx.canvas.height);
+          ctx.strokeStyle = '#FFC107';
+          ctx.lineWidth = 1.5;
+          ctx.setLineDash([]);
+          ctx.beginPath();
+          ctx.moveTo(x - halfWidth, 0);
+          ctx.lineTo(x - halfWidth, ctx.canvas.height);
+          ctx.moveTo(x + halfWidth, 0);
+          ctx.lineTo(x + halfWidth, ctx.canvas.height);
+          ctx.stroke();
+
+          if (highY !== null) {
+            const arrowTipY = highY - 8;
+            ctx.fillStyle = '#B45309';
+            ctx.beginPath();
+            ctx.moveTo(x, arrowTipY);
+            ctx.lineTo(x - 6, arrowTipY - 10);
+            ctx.lineTo(x + 6, arrowTipY - 10);
+            ctx.closePath();
+            ctx.fill();
+
+            ctx.font = 'bold 11px Inter, sans-serif';
+            ctx.textAlign = 'center';
+            ctx.fillText('JUMPED HERE', x, arrowTipY - 14);
+          }
+          ctx.restore();
+        }
+      }
+    }
+  }, [chart, series, visibleCandles, activeIndicators, showMarkers, showPivotRR, memoizedPivots, isSecondary, secondaryTimeframe, chartId, highlightTimestamp]);
 
   const {
     clearDrawings,
@@ -547,6 +592,37 @@ export function AdvancedChart({
     }
   }, [visibleCandles, series, volumeSeries, chart, isLiveMode]);
 
+  // Pan to a specific candle on external request (e.g. "Jump to entry" in TradeHistoryDialog)
+  // without changing currentIndex — the requested candle is already part of visibleCandles
+  // since it's in the past; this only recenters the viewport, it never rewinds playback.
+  useEffect(() => {
+    if (isSecondary || !chart || scrollToTimestamp === null) return;
+
+    const idx = visibleCandles.findIndex((c) => c.timestamp === scrollToTimestamp);
+    if (idx !== -1) {
+      const timeScale = chart.timeScale();
+      const currentRange = timeScale.getVisibleLogicalRange();
+      const width = currentRange ? currentRange.to - currentRange.from : 50;
+      timeScale.setVisibleLogicalRange({
+        from: idx - width / 2,
+        to: idx + width / 2,
+      });
+    }
+    // Clear the request so jumping to the same candle again later still triggers this effect
+    useSessionStore.getState().scrollToTime(null);
+  }, [scrollToTimestamp, isSecondary, chart, visibleCandles]);
+
+  // Auto-clear the "jumped to" highlight a few seconds after it renders, so it reads as a
+  // flash rather than a permanent marking. Re-jumping to the same candle re-arms the timer
+  // via TradeHistoryDialog calling highlightCandle() again (store update fires even with an
+  // unchanged value's re-set, since it's a fresh click).
+  useEffect(() => {
+    if (isSecondary || highlightTimestamp === null) return;
+    const timer = setTimeout(() => {
+      useSessionStore.getState().highlightCandle(null);
+    }, 3500);
+    return () => clearTimeout(timer);
+  }, [highlightTimestamp, isSecondary]);
 
   const lastSetDataCountRef = useRef(0);
   const lastSetDataTimeRef = useRef(0);

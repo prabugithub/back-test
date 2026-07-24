@@ -62,6 +62,15 @@ export interface SessionStore {
   secondaryCandles: Candle[];
   crosshairPosition: { time: number | null; price: number | null; sourceChartId: 'primary' | 'secondary' | null };
 
+  // Set to a candle timestamp to pan the chart's view to it (e.g. "jump to entry" from
+  // TradeHistoryDialog) without touching `currentIndex`/playback state. AdvancedChart
+  // clears it back to null once the pan has been applied.
+  scrollToTimestamp: number | null;
+
+  // Set alongside `scrollToTimestamp` to visually flag the jumped-to candle (amber band +
+  // arrow). AdvancedChart auto-clears it back to null a few seconds after rendering it.
+  highlightTimestamp: number | null;
+
   // Set to true when addLiveCandle() updates the last candle price (same timestamp),
   // false when a genuinely new candle is appended. Lets AdvancedChart skip expensive
   // indicator / marker rebuilds on price-only ticks.
@@ -114,6 +123,8 @@ export interface SessionStore {
   setTargetRR: (rr: number) => void;
   setAutoExitTarget: (auto: boolean) => void;
   setCrosshairPosition: (pos: { time: number | null; price: number | null; sourceChartId: 'primary' | 'secondary' | null }) => void;
+  scrollToTime: (timestamp: number | null) => void;
+  highlightCandle: (timestamp: number | null) => void;
   checkSLTPHits: (index: number, currentPrice?: number) => void;
   executeTrade: (type: 'BUY' | 'SELL', quantity: number, stopLoss?: number, target?: number, priceOverride?: number, exitReason?: ExitReason, journal?: TradeJournal, entryMetricsOverride?: EntryMetricsSnapshot, autoMeta?: { auto: true; regime: RegimeKey; barIndex: number }) => void;
   checkTrendReversal: (index: number, currentPrice?: number) => void;
@@ -190,6 +201,8 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
   secondaryTimeframe: '60',
   secondaryCandles: [],
   crosshairPosition: { time: null, price: null, sourceChartId: null },
+  scrollToTimestamp: null,
+  highlightTimestamp: null,
   activeChartId: 'primary',
   sharedActiveTool: 'none',
   primaryIndicators: ['ema21', 'pivotPoints', 'alBrooks'],
