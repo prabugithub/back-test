@@ -1,7 +1,7 @@
 import { useMemo, useState, useEffect } from 'react';
 import { createPortal } from 'react-dom';
 import {
-  ArrowLeft, Zap, TrendingUp, TrendingDown, Minus, RefreshCw, BarChart2, Save, Trash2, FolderOpen,
+  Zap, TrendingUp, TrendingDown, Minus, RefreshCw, BarChart2, Save, Trash2, FolderOpen,
   Settings2, Compass, LogIn, ShieldCheck, LogOut, ShieldAlert, Download,
 } from 'lucide-react';
 import { useSessionStore } from '../stores/sessionStore';
@@ -29,9 +29,13 @@ import {
   MarketStep, EntryStep, ConfirmationStep, ExitStep, RiskStep,
   type RegimeStepProps, type WorkflowStep, type StepDef,
 } from './autobacktest-visuals/RegimeWorkflowSteps';
+import { PageNavTabs, type ActivePage } from './PageNavTabs';
 
 interface AutoBacktestPanelProps {
-  onClose: () => void;
+  onNavigate: (page: ActivePage) => void;
+  /** Renders into a portal on document.body, so a hiding wrapper around <AutoBacktestPanel/>
+   * in the caller's tree has no effect — visibility must be controlled via this prop instead. */
+  hidden?: boolean;
 }
 
 // ─── Regime tab icons & colors ────────────────────────────────────────────────
@@ -137,7 +141,7 @@ function RegimeEditor({
 
 // ─── Main panel ───────────────────────────────────────────────────────────────
 
-export function AutoBacktestPanel({ onClose }: AutoBacktestPanelProps) {
+export function AutoBacktestPanel({ onNavigate, hidden }: AutoBacktestPanelProps) {
   const config = useSessionStore(s => s.autoBacktestConfig);
   const lastSignalReason = useSessionStore(s => s.lastAutoSignalReason);
   const setAutoBacktestConfig = useSessionStore(s => s.setAutoBacktestConfig);
@@ -236,22 +240,19 @@ export function AutoBacktestPanel({ onClose }: AutoBacktestPanelProps) {
   );
 
   return createPortal(
-    <div className="fixed inset-0 z-[110] bg-slate-50 flex flex-col overflow-hidden font-sans">
+    <div
+      className="fixed inset-0 z-[110] bg-slate-50 flex flex-col overflow-hidden font-sans"
+      style={{ display: hidden ? 'none' : undefined }}
+    >
       {/* Header */}
       <div className="flex items-center justify-between px-6 py-4 bg-white border-b border-slate-200 shrink-0">
         <div className="flex items-center gap-4">
-          <button
-            onClick={onClose}
-            className="flex items-center gap-2 text-sm font-semibold text-slate-500 hover:text-slate-800 transition-colors"
-          >
-            <ArrowLeft size={18} />
-            Back to Chart
-          </button>
-          <div className="w-px h-6 bg-slate-200" />
-          <div className="bg-indigo-600 p-2 rounded-xl text-white shadow-lg shadow-indigo-200">
+          <PageNavTabs active="backtest" onNavigate={onNavigate} />
+          <div className="w-px h-6 bg-slate-200 hidden lg:block" />
+          <div className="bg-indigo-600 p-2 rounded-xl text-white shadow-lg shadow-indigo-200 hidden lg:block">
             <Zap size={20} />
           </div>
-          <div>
+          <div className="hidden lg:block">
             <h2 className="text-xl font-bold text-slate-800 tracking-tight">Auto Backtesting Engine</h2>
             <p className="text-slate-500 text-xs font-medium">Configure regime rules and run instant batch backtests</p>
           </div>

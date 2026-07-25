@@ -1,12 +1,12 @@
 import { useEffect, useMemo, useState } from 'react';
 import {
-  ArrowLeft, TrendingUp, TrendingDown, Activity, Target,
+  TrendingUp, TrendingDown, Activity, Target,
   BarChart3, Filter, Download as DownloadIcon,
   Layers, ArrowUpRight, ArrowDownRight, Info,
   Search, ArrowUpDown, ChevronRight, ChevronDown, Link as LinkIcon,
   Loader2
 } from 'lucide-react';
-import { 
+import {
   AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer,
   BarChart, Bar, Cell, PieChart as RePieChart, Pie, Legend
 } from 'recharts';
@@ -16,18 +16,19 @@ import { formatCurrency, formatTimestamp } from '../utils/formatters';
 import { OptionBacktestModal } from './OptionBacktestModal';
 import { ShieldCheck } from 'lucide-react';
 import { EntryMetricsDashboardFromPositions } from './EntryMetricsDashboard';
+import { PageNavTabs, type ActivePage } from './PageNavTabs';
 
 interface PerformanceDashboardProps {
-    onBack: () => void;
+    onNavigate: (page: ActivePage) => void;
     liveInstrument?: string;
 }
 
 const MARKET_STRUCTURES = [
-    'Bull-Trend', 'Range', 'Bear-Trend', 'Bear-Reversal', 
+    'Bull-Trend', 'Range', 'Bear-Trend', 'Bear-Reversal',
     'Bull-Reversal', 'Bear-Trending-range', 'Bull-Trending-range'
 ];
 
-export function PerformanceDashboard({ onBack, liveInstrument }: PerformanceDashboardProps) {
+export function PerformanceDashboard({ onNavigate, liveInstrument }: PerformanceDashboardProps) {
     const [snapshots, setSnapshots] = useState<SessionState[]>([]);
     const [loadingSnapshots, setLoadingSnapshots] = useState(false);
     const [selectedSnapshotIds, setSelectedSnapshotIds] = useState<Set<string> | null>(null); // null = all
@@ -251,18 +252,12 @@ export function PerformanceDashboard({ onBack, liveInstrument }: PerformanceDash
             {/* Header */}
             <div className="flex items-center justify-between px-6 py-4 bg-white border-b border-slate-200 shrink-0">
                 <div className="flex items-center gap-4">
-                    <button
-                        onClick={onBack}
-                        className="flex items-center gap-2 text-sm font-semibold text-slate-500 hover:text-slate-800 transition-colors"
-                    >
-                        <ArrowLeft size={18} />
-                        Back to Chart
-                    </button>
-                    <div className="w-px h-6 bg-slate-200" />
-                    <div className="bg-blue-600 p-2 rounded-xl text-white shadow-lg shadow-blue-200">
+                    <PageNavTabs active="dashboard" onNavigate={onNavigate} />
+                    <div className="w-px h-6 bg-slate-200 hidden lg:block" />
+                    <div className="bg-blue-600 p-2 rounded-xl text-white shadow-lg shadow-blue-200 hidden lg:block">
                         <Activity size={20} />
                     </div>
-                    <div>
+                    <div className="hidden lg:block">
                         <h2 className="text-xl font-bold text-slate-800 tracking-tight">Performance Analytics</h2>
                         <p className="text-slate-500 text-xs font-medium">Detailed insights into your backtesting strategy</p>
                     </div>

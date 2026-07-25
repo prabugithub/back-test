@@ -267,7 +267,7 @@ Trades are fully simulated — no real money involved.
 
 ### Auto-Backtest Strategy Builder Workflow
 
-**Component:** `AutoBacktestPanel` (full-screen panel, opened from the Playback toolbar)
+**Component:** `AutoBacktestPanel` (full-screen panel, portals to `document.body`). Reachable from the Playback toolbar's Zap button, or directly from any other full-page view via its header's [PageNavTabs](#quick-reference--ui-layout) — see the cross-page navigation note in the Quick Reference section below. Because it's a `createPortal`, App.tsx controls its visibility with a `hidden` prop on the component itself (not a wrapping CSS class) — a wrapping `display:none` div has no effect on portaled content.
 
 Per-regime rules are configured through a 5-section **Market → Entry → Confirmation → Exit → Risk** workflow, rendered as a **single-open accordion**: each section is a collapsible `AccordionSection` header (icon + label + optional badge + chevron) stacked beneath the regime tabs (Uptrend/Downtrend/Range/Reversal), and expanding one section auto-collapses whichever other section was open — only one section's content is ever mounted at a time. Switching regime tabs collapses back to Market-only for orientation; a `WorkflowStep` value (`activeStep`) is local UI state only — it is never persisted to `RegimeRules`/`AutoBacktestConfig`, so it doesn't affect saved configs or presets.
 
@@ -432,7 +432,11 @@ Live summary always visible during a session.
 
 **Component:** `TradeHistoryDialog`
 
-Full log of every trade executed in the session.
+Full log of every trade executed in the session, grouped into positions.
+
+### Layout
+
+Renders as a **full-page view** (`absolute inset-0 z-[105]`, same pattern as the [Performance Analytics Dashboard](#14-performance-analytics-dashboard)) rather than a floating modal — no backdrop, no drag-to-move, no click-outside-to-close. Its header carries the [PageNavTabs](#quick-reference--ui-layout) switcher (replacing the old "Back to Chart"/X-close and the standalone "Dashboard" button — Chart and Dashboard are just other tabs now). Opened from `PositionOverlay`'s detail button or `PlaybackControls`' history trigger (`onOpenHistory`/`onOpenDetail` → `navigateTo('tradeLog')` in `App.tsx`). Kept mounted (hidden via CSS, not unmounted) once opened, so scroll position and expanded position rows survive navigating to another page and back — see the state-persistence note in the Quick Reference section below.
 
 ### Columns
 
@@ -552,11 +556,11 @@ Cross-session analytics dashboard. Aggregates trades across multiple saved snaps
 
 ### Opening
 
-Click the chart icon in the top toolbar (App.tsx) or via any trigger that sets `isPerformanceDashboardOpen = true`.
+Reachable from the chart icon in the top toolbar, `TradeHistoryDialog`'s or `AutoBacktestPanel`'s [PageNavTabs](#quick-reference--ui-layout), or any trigger that calls `navigateTo('dashboard')` in `App.tsx`.
 
 ### Data loading
 
-On open, the dashboard calls `listSnapshots()` from `firebaseSessionService.ts`, which fetches all documents in the Firestore `sessions` collection with the `snapshot_session_*` prefix. A loading spinner is shown while fetching.
+On first open, the dashboard calls `listSnapshots()` from `firebaseSessionService.ts`, which fetches all documents in the Firestore `sessions` collection with the `snapshot_session_*` prefix. A loading spinner is shown while fetching. Since the component stays mounted (hidden via CSS) after that first open, snapshots are **not** re-fetched on subsequent visits — filters, the selected sub-tab (Dashboard/Entry Analytics/Detailed Log), and the Detailed Log search box all survive navigating away and back too.
 
 > **Important:** Only **saved snapshots** are included. The current in-memory session is excluded to prevent double-counting. To include your latest trades, save a snapshot first.
 
@@ -804,16 +808,28 @@ The dropdown lists every saved configuration by name, marking the currently acti
 └────────────────┴────────────────────────────────────┘
 ```
 
-Dialogs (open on demand):
-- Trade History
+Full-page overlays (open on demand, `absolute inset-0`, stacked by z-index):
+- Trade History (`z-[105]`)
+- Performance Analytics Dashboard (`z-[110]`, cross-session, snapshot-based)
+- Auto-Backtest Panel (`z-[110]`, portals to `document.body`)
+
+### Cross-page navigation (`PageNavTabs`)
+
+**Component:** `PageNavTabs.tsx` — a small pill-button switcher (Chart / Trade Log / Backtest / Dashboard) rendered in the header of every full-page view **and** in the chart page's bottom controls bar, so any of the four pages is reachable directly from any other — not just back to the chart.
+
+- **State:** `App.tsx` owns a single `activePage: ActivePage` plus a `visitedPages: Set<ActivePage>` (`'chart'` always included). `navigateTo(page)` sets both.
+- **Mount-once, hide-don't-unmount:** a page's component only mounts the first time it's visited (`visitedPages.has(page)`), then stays mounted — visibility toggles via a wrapping `style={{ display: activePage === page ? undefined : 'none' }}` instead of conditional `&&` rendering. This means **scroll position, expanded rows, search text, filter selections, and the active sub-tab are preserved** when navigating away and back, instead of resetting on every open (e.g. Trade History's expanded position row, the Performance Dashboard's Detailed Log search box and Dashboard/Entry Analytics/Detailed Log sub-tab, snapshot data already fetched from Firestore).
+- **Exception — portaled components:** `AutoBacktestPanel` renders via `createPortal(..., document.body)`, so a hiding wrapper `<div>` around it in `App.tsx`'s tree has **no effect** — its own root element must carry the hide/show logic. It takes a `hidden?: boolean` prop for this; don't try to hide a portaled component from the caller's side.
+- **Check when adding a new full-page view:** give it an `ActivePage` entry, an `onNavigate` prop, embed `<PageNavTabs active="yourPage" onNavigate={onNavigate} />` in its header, and mount it in `App.tsx` following the same `visitedPages.has(...)` + hidden-style pattern (or the `hidden` prop pattern if it's portal-based).
+
+Dialogs (open on demand, floating modal):
 - Trade Journal
 - Trade Exit Confirmation
 - Performance Report (current session)
-- Performance Analytics Dashboard (cross-session, snapshot-based)
 - Options Backtest (Dhan API)
 - Backup History
 - Screenshot Save
 
 ---
 
-**Last Updated:** 2026-07-17 (added the Auto-Backtest Price-Action Exit Engine — Reversal, Opposite Signal, Pivot Trailing Stop, and Leg Decay exits for auto-entered positions)
+**Last Updated:** 2026-07-25 (Trade History converted from a floating modal to a full-page view; added `PageNavTabs` cross-page navigation and mount-once/hide-don't-unmount state persistence across Chart/Trade Log/Backtest/Dashboard)

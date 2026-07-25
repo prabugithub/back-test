@@ -10,7 +10,7 @@ import type { DrawingTool, Indicator } from './components/ChartToolbar';
 import { TradeHistoryDialog } from './components/TradeHistoryDialog';
 import { PositionOverlay } from './components/PositionOverlay';
 import { useSessionStore } from './stores/sessionStore';
-import { useState, useCallback } from 'react';
+import { useCallback, useState } from 'react';
 import { NotificationToast } from './components/NotificationToast';
 import { TradeExitDialog } from './components/TradeExitDialog';
 import { TradeJournalDialog } from './components/TradeJournalDialog';
@@ -19,13 +19,24 @@ import { PromptDialog } from './components/PromptDialog';
 import { TimeframeSwitcher } from './components/TimeframeSwitcher';
 import { Save, FilePlus, RotateCcw } from 'lucide-react';
 import { PerformanceDashboard } from './components/PerformanceDashboard';
+import { AutoBacktestPanel } from './components/AutoBacktestPanel';
+import { PageNavTabs, type ActivePage } from './components/PageNavTabs';
 
 const queryClient = new QueryClient();
 
 function App() {
   const candles = useSessionStore((s: any) => s.candles);
-  const [isTradeHistoryOpen, setIsTradeHistoryOpen] = useState(false);
-  const [isPerformanceDashboardOpen, setIsPerformanceDashboardOpen] = useState(false);
+
+  // Which full-page view is showing (chart / trade log / backtest / dashboard) and which of
+  // them have been opened at least once. Pages stay mounted (hidden via CSS) after their first
+  // visit instead of unmounting, so scroll position, filters, expanded rows, etc. survive
+  // switching away and back.
+  const [activePage, setActivePage] = useState<ActivePage>('chart');
+  const [visitedPages, setVisitedPages] = useState<Set<ActivePage>>(new Set(['chart']));
+  const navigateTo = useCallback((page: ActivePage) => {
+    setActivePage(page);
+    setVisitedPages(prev => (prev.has(page) ? prev : new Set(prev).add(page)));
+  }, []);
 
   const instrument = useSessionStore((s: any) => s.instrument);
   const [isBackupHistoryOpen, setIsBackupHistoryOpen] = useState(false);
@@ -127,7 +138,7 @@ function App() {
                     onRegisterCallbacks={handleRegisterCallbacks}
                   />
                   {!showSecondaryChart && (
-                    <PositionOverlay onOpenDetail={() => setIsTradeHistoryOpen(true)} />
+                    <PositionOverlay onOpenDetail={() => navigateTo('tradeLog')} />
                   )}
                 </div>
 
@@ -137,30 +148,36 @@ function App() {
                       isSecondary
                       onRegisterCallbacks={handleRegisterCallbacks}
                     />
-                    <PositionOverlay onOpenDetail={() => setIsTradeHistoryOpen(true)} />
+                    <PositionOverlay onOpenDetail={() => navigateTo('tradeLog')} />
                   </div>
                 )}
               </div>
 
-               {isTradeHistoryOpen && (
-                <TradeHistoryDialog
-                  isOpen={isTradeHistoryOpen}
-                  onClose={() => setIsTradeHistoryOpen(false)}
-                  onOpenDashboard={() => setIsPerformanceDashboardOpen(true)}
-                />
+              {/* Full-page views — mounted once visited, hidden (not unmounted) when inactive
+                  so their internal state (scroll, filters, expanded rows) survives navigation. */}
+              {visitedPages.has('tradeLog') && (
+                <div style={{ display: activePage === 'tradeLog' ? undefined : 'none' }}>
+                  <TradeHistoryDialog isOpen={true} onNavigate={navigateTo} />
+                </div>
               )}
-              {isPerformanceDashboardOpen && (
-                <PerformanceDashboard
-                  onBack={() => setIsPerformanceDashboardOpen(false)}
-                  liveInstrument={instrument}
-                />
+              {visitedPages.has('dashboard') && (
+                <div style={{ display: activePage === 'dashboard' ? undefined : 'none' }}>
+                  <PerformanceDashboard onNavigate={navigateTo} liveInstrument={instrument} />
+                </div>
+              )}
+              {visitedPages.has('backtest') && (
+                // Portals to document.body — visibility is controlled via the `hidden` prop,
+                // not a wrapping div (a hiding wrapper here would have no effect on portaled content).
+                <AutoBacktestPanel onNavigate={navigateTo} hidden={activePage !== 'backtest'} />
               )}
               {/* Controls Bar */}
               <div className="flex-none p-1 bg-white border-b z-10 flex flex-nowrap gap-2 items-center">
+                <PageNavTabs active={activePage} onNavigate={navigateTo} />
                 <div className="flex-1 min-w-0">
-                  <PlaybackControls 
-                    onOpenHistory={() => setIsTradeHistoryOpen(true)} 
-                    onOpenDashboard={() => setIsPerformanceDashboardOpen(true)}
+                  <PlaybackControls
+                    onOpenHistory={() => navigateTo('tradeLog')}
+                    onOpenDashboard={() => navigateTo('dashboard')}
+                    onOpenBacktest={() => navigateTo('backtest')}
                   />
                 </div>
                 <TimeframeSwitcher />

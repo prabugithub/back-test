@@ -1,16 +1,16 @@
-import { useRef, useEffect, useMemo, useState } from 'react';
-import { X, ChevronRight, ChevronDown, FileJson, Printer, FileSpreadsheet, Trash2, Link as LinkIcon, Eye, Activity } from 'lucide-react';
+import { useMemo, useState } from 'react';
+import { ChevronRight, ChevronDown, ClipboardList, FileJson, Printer, FileSpreadsheet, Trash2, Link as LinkIcon, Eye } from 'lucide-react';
 import { useSessionStore } from '../stores/sessionStore';
 import { formatCurrency, formatTimestamp } from '../utils/formatters';
 import { groupTradesIntoPositions, calculatePerformanceStats, exitReasonBadge } from '../utils/tradeAnalysis';
+import { PageNavTabs, type ActivePage } from './PageNavTabs';
 
 interface TradeHistoryDialogProps {
     isOpen: boolean;
-    onClose: () => void;
-    onOpenDashboard?: () => void;
+    onNavigate: (page: ActivePage) => void;
 }
 
-export function TradeHistoryDialog({ isOpen, onClose, onOpenDashboard }: TradeHistoryDialogProps) {
+export function TradeHistoryDialog({ isOpen, onNavigate }: TradeHistoryDialogProps) {
     const trades = useSessionStore((s) => s.trades);
     const instrument = useSessionStore((s) => s.instrument);
     const deleteTrade = useSessionStore((s) => s.deleteTrade);
@@ -18,14 +18,7 @@ export function TradeHistoryDialog({ isOpen, onClose, onOpenDashboard }: TradeHi
     const candles = useSessionStore((s) => s.candles);
     const scrollToTime = useSessionStore((s) => s.scrollToTime);
     const highlightCandle = useSessionStore((s) => s.highlightCandle);
-    const dialogRef = useRef<HTMLDivElement>(null);
     const [expandedPosId, setExpandedPosId] = useState<string | null>(null);
-
-    // Drag state
-    const [offset, setOffset] = useState<{ x: number, y: number } | null>(null);
-    const isDragging = useRef(false);
-    const dragStart = useRef({ x: 0, y: 0 });
-    const startOffset = useRef({ x: 0, y: 0 });
 
     // Group trades and calculate stats
     const positions = useMemo(() => groupTradesIntoPositions(trades), [trades]);
@@ -130,7 +123,7 @@ export function TradeHistoryDialog({ isOpen, onClose, onOpenDashboard }: TradeHi
             // entry must not rewind playback and hide every candle revealed after it.
             scrollToTime(candles[index].timestamp);
             highlightCandle(candles[index].timestamp);
-            onClose(); // Close dialog to show the chart
+            onNavigate('chart'); // Switch to the chart page to show it
         } else {
             // Find the closest candle if exact match not found
             let closestIndex = -1;
@@ -144,7 +137,7 @@ export function TradeHistoryDialog({ isOpen, onClose, onOpenDashboard }: TradeHi
             if (closestIndex !== -1) {
                 scrollToTime(candles[closestIndex].timestamp);
                 highlightCandle(candles[closestIndex].timestamp);
-                onClose();
+                onNavigate('chart');
             }
         }
     };
@@ -157,145 +150,53 @@ export function TradeHistoryDialog({ isOpen, onClose, onOpenDashboard }: TradeHi
         }
     };
 
-    const handleMouseDown = (e: React.MouseEvent) => {
-        // Only allow dragging from the header
-        if ((e.target as HTMLElement).closest('.dialog-header')) {
-            isDragging.current = true;
-            dragStart.current = { x: e.clientX, y: e.clientY };
-
-            const rect = dialogRef.current?.getBoundingClientRect();
-            if (rect) {
-                if (!offset) {
-                    startOffset.current = { x: rect.left, y: rect.top };
-                    setOffset({ x: rect.left, y: rect.top });
-                } else {
-                    startOffset.current = { x: offset.x, y: offset.y };
-                }
-            }
-        }
-    };
-
-    useEffect(() => {
-        const handleMouseMove = (e: MouseEvent) => {
-            if (!isDragging.current) return;
-
-            const dx = e.clientX - dragStart.current.x;
-            const dy = e.clientY - dragStart.current.y;
-
-            setOffset({
-                x: startOffset.current.x + dx,
-                y: startOffset.current.y + dy
-            });
-        };
-
-        const handleMouseUp = () => {
-            isDragging.current = false;
-        };
-
-        window.addEventListener('mousemove', handleMouseMove);
-        window.addEventListener('mouseup', handleMouseUp);
-
-        return () => {
-            window.removeEventListener('mousemove', handleMouseMove);
-            window.removeEventListener('mouseup', handleMouseUp);
-        };
-    }, []);
-
-    useEffect(() => {
-        function handleClickOutside(event: MouseEvent) {
-            if (dialogRef.current && !dialogRef.current.contains(event.target as Node)) {
-                onClose();
-            }
-        }
-        if (isOpen) {
-            document.addEventListener('mousedown', handleClickOutside);
-        }
-        return () => {
-            document.removeEventListener('mousedown', handleClickOutside);
-        };
-    }, [isOpen, onClose]);
-
     if (!isOpen) return null;
 
-    // Style object: use offset if dragged, otherwise centered
-    const dialogStyle: React.CSSProperties = offset ? {
-        left: `${offset.x}px`,
-        top: `${offset.y}px`,
-        position: 'fixed' as const,
-        margin: 0,
-        width: '95%',
-        maxWidth: '1200px',
-        height: '90vh',
-        maxHeight: '90vh'
-    } : {
-        width: '95%',
-        maxWidth: '1200px',
-        height: '90vh',
-        maxHeight: '90vh'
-    };
-
     return (
-        <div className="fixed inset-0 z-[2000] flex items-center justify-center bg-black bg-opacity-60">
-            <div
-                ref={dialogRef}
-                onMouseDown={handleMouseDown}
-                className="bg-white rounded-lg shadow-2xl flex flex-col overflow-hidden border-2 border-gray-300"
-                style={dialogStyle}
-            >
-                {/* Header */}
-                <div className="dialog-header flex items-center justify-between px-4 py-3 border-b-2 border-gray-200 cursor-move select-none bg-gradient-to-r from-blue-50 to-indigo-50">
-                    <div className="flex items-center gap-4">
-                        <div className="flex items-center gap-2">
-                            <div className="w-2 h-2 rounded-full bg-blue-500"></div>
-                            <h2 className="text-lg font-bold text-gray-800">Trade Analysis</h2>
-                        </div>
-                        <div className="h-6 w-px bg-gray-300 mx-2 hidden md:block"></div>
-                        <div className="flex gap-2" onMouseDown={(e) => e.stopPropagation()}>
-                            <button
-                                onClick={handleExportCSV}
-                                className="flex items-center gap-1.5 px-2.5 py-1 bg-green-50 text-green-700 border border-green-200 text-xs font-semibold rounded hover:bg-green-100 transition-colors"
-                                title="Export as CSV"
-                            >
-                                <FileSpreadsheet size={14} />
-                                CSV
-                            </button>
-                            <button
-                                onClick={handleExportJSON}
-                                className="flex items-center gap-1.5 px-2.5 py-1 bg-gray-50 text-gray-700 border border-gray-200 text-xs font-semibold rounded hover:bg-gray-100 transition-colors"
-                                title="Export as JSON"
-                            >
-                                <FileJson size={14} />
-                                JSON
-                            </button>
-                            <button
-                                onClick={handlePrint}
-                                className="flex items-center gap-1.5 px-2.5 py-1 bg-white text-gray-700 border border-gray-200 text-xs font-semibold rounded hover:bg-gray-50 transition-colors"
-                                title="Print Report"
-                            >
-                                <Printer size={14} />
-                                Print
-                            </button>
-                            <button
-                                onClick={onOpenDashboard}
-                                className="flex items-center gap-1.5 px-3 py-1 bg-purple-600 text-white border border-purple-700 text-xs font-bold rounded shadow-sm hover:bg-purple-700 transition-colors"
-                                title="Load Performance Dashboard"
-                            >
-                                <Activity size={14} />
-                                Dashboard
-                            </button>
-                        </div>
+        <div className="absolute inset-0 z-[105] bg-slate-50 flex flex-col overflow-hidden font-sans">
+            {/* Header */}
+            <div className="flex items-center justify-between px-6 py-4 bg-white border-b border-slate-200 shrink-0">
+                <div className="flex items-center gap-4">
+                    <PageNavTabs active="tradeLog" onNavigate={onNavigate} />
+                    <div className="w-px h-6 bg-slate-200 hidden md:block" />
+                    <div className="bg-blue-600 p-2 rounded-xl text-white shadow-lg shadow-blue-200 hidden md:block">
+                        <ClipboardList size={20} />
                     </div>
+                    <div className="hidden md:block">
+                        <h2 className="text-xl font-bold text-slate-800 tracking-tight">Trade Log &amp; Analysis</h2>
+                        <p className="text-slate-500 text-xs font-medium">Positions and executions for the current session</p>
+                    </div>
+                </div>
+                <div className="flex gap-2">
                     <button
-                        onClick={onClose}
-                        className="p-1.5 hover:bg-red-100 rounded-md text-gray-600 hover:text-red-600 transition-colors"
-                        onMouseDown={(e) => e.stopPropagation()}
+                        onClick={handleExportCSV}
+                        className="flex items-center gap-1.5 px-2.5 py-1.5 bg-green-50 text-green-700 border border-green-200 text-xs font-semibold rounded-lg hover:bg-green-100 transition-colors"
+                        title="Export as CSV"
                     >
-                        <X size={20} />
+                        <FileSpreadsheet size={14} />
+                        CSV
+                    </button>
+                    <button
+                        onClick={handleExportJSON}
+                        className="flex items-center gap-1.5 px-2.5 py-1.5 bg-slate-50 text-slate-700 border border-slate-200 text-xs font-semibold rounded-lg hover:bg-slate-100 transition-colors"
+                        title="Export as JSON"
+                    >
+                        <FileJson size={14} />
+                        JSON
+                    </button>
+                    <button
+                        onClick={handlePrint}
+                        className="flex items-center gap-1.5 px-2.5 py-1.5 bg-white text-slate-700 border border-slate-200 text-xs font-semibold rounded-lg hover:bg-slate-50 transition-colors"
+                        title="Print Report"
+                    >
+                        <Printer size={14} />
+                        Print
                     </button>
                 </div>
+            </div>
 
-                {/* content */}
-                <div className="flex-1 flex flex-col overflow-hidden bg-gray-50 p-6">
+            {/* content */}
+            <div className="flex-1 flex flex-col overflow-auto p-6">
 
                     {/* Stats Summary Cards */}
                     <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-6">
@@ -608,6 +509,7 @@ export function TradeHistoryDialog({ isOpen, onClose, onOpenDashboard }: TradeHi
 
                 </div>
             </div>
-        </div>
     );
 }
+
+
