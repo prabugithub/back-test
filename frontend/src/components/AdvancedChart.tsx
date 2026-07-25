@@ -20,6 +20,10 @@ import { TextInputDialog } from './TextInputDialog';
 import { uploadScreenshot, fetchCandles } from '../services/api';
 import { useNotificationStore } from '../stores/notificationStore';
 import { ScreenshotSaveDialog } from './ScreenshotSaveDialog';
+import type { Trade } from '../types';
+import { formatCurrency } from '../utils/formatters';
+import { exitReasonBadge } from '../utils/tradeAnalysis';
+import { X } from 'lucide-react';
 
 export interface ChartCallbacks {
   clearDrawings?: () => void;
@@ -73,6 +77,7 @@ export function AdvancedChart({
   const [pendingTextPoint, setPendingTextPoint] = useState<Point | null>(null);
   const [pendingCalloutPoints, setPendingCalloutPoints] = useState<{ p1: Point, p2: Point } | null>(null);
   const [isUploadingScreenshot, setIsUploadingScreenshot] = useState(false);
+  const [execPopup, setExecPopup] = useState<{ x: number; y: number; trades: Trade[] } | null>(null);
 
   const candles = useSessionStore((s) => s.candles);
   const currentIndex = useSessionStore((s) => s.currentIndex);
@@ -109,6 +114,7 @@ export function AdvancedChart({
 
   const isFirstLoadRef = useRef(true);
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
+  const execPopupRef = useRef<HTMLDivElement | null>(null);
 
   // Perf: skip indicator/marker rebuilds when only the live price updated (no new candle)
   const lastIndicatorCandleCountRef = useRef(0);
@@ -623,6 +629,48 @@ export function AdvancedChart({
     }, 3500);
     return () => clearTimeout(timer);
   }, [highlightTimestamp, isSecondary]);
+
+  // Click a candle that has a trade execution on it to see its journal details in a popup.
+  // Only wired on the primary chart (trades are recorded on the primary timeframe) and only
+  // when no drawing tool is active, so it never steals clicks meant for placing a drawing.
+  useEffect(() => {
+    if (!chart || isSecondary) return;
+    const handleClick = (param: any) => {
+      if (activeTool !== 'none') return;
+      if (!param.time || !param.point) {
+        setExecPopup(null);
+        return;
+      }
+      const clickedTrades = useSessionStore.getState().trades.filter((t) => t.timestamp === param.time);
+      if (clickedTrades.length === 0) {
+        setExecPopup(null);
+        return;
+      }
+      setExecPopup({ x: param.point.x, y: param.point.y, trades: clickedTrades });
+    };
+    chart.subscribeClick(handleClick);
+    return () => chart.unsubscribeClick(handleClick);
+  }, [chart, isSecondary, activeTool]);
+
+  // Close the execution popup once playback moves — it refers to a specific candle click,
+  // not a persistent state, so stepping/jumping should not leave it stranded on screen.
+  useEffect(() => {
+    setExecPopup(null);
+  }, [currentIndex]);
+
+  // Dismiss on any click outside the popup that isn't on the chart itself — chart clicks
+  // are already handled by the subscribeClick handler above (which re-targets or clears it).
+  useEffect(() => {
+    if (!execPopup) return;
+    const handleOutside = (e: MouseEvent) => {
+      const target = e.target as Node;
+      if (execPopupRef.current?.contains(target)) return;
+      if (chartContainerRef.current?.contains(target)) return;
+      setExecPopup(null);
+    };
+    document.addEventListener('mousedown', handleOutside);
+    return () => document.removeEventListener('mousedown', handleOutside);
+  }, [execPopup]);
 
   const lastSetDataCountRef = useRef(0);
   const lastSetDataTimeRef = useRef(0);
@@ -1340,6 +1388,48 @@ export function AdvancedChart({
           <div className="absolute top-2 left-1/2 -translate-x-1/2 bg-blue-600 text-white rounded-full px-6 py-1.5 shadow-xl text-sm font-medium animate-in slide-in-from-top-4 flex items-center gap-4" style={{ zIndex: 200 }}>
             <span>Drawing: <span className="capitalize">{activeTool}</span></span>
             <span className="text-[10px] bg-blue-500 px-2 py-0.5 rounded uppercase">Right-Click to Exit</span>
+          </div>
+        )}
+        {execPopup && (
+          <div
+            ref={execPopupRef}
+            className="absolute bg-white border border-gray-200 rounded-lg shadow-xl text-xs w-[26rem] max-h-[28rem] overflow-y-auto"
+            style={{
+              left: Math.min(execPopup.x + 12, (chartContainerRef.current?.clientWidth ?? 800) - 440),
+              top: Math.min(execPopup.y + 12, (chartContainerRef.current?.clientHeight ?? 500) - 400),
+              zIndex: 300,
+            }}
+          >
+            <div className="flex items-center justify-between px-3 py-2 border-b bg-gray-50 sticky top-0">
+              <span className="font-bold text-gray-700">
+                Trade Record{execPopup.trades.length > 1 ? `s (${execPopup.trades.length})` : ''}
+              </span>
+              <button onClick={() => setExecPopup(null)} className="text-gray-400 hover:text-gray-700">
+                <X size={14} />
+              </button>
+            </div>
+            <div className="divide-y divide-gray-100">
+              {execPopup.trades.map((t) => (
+                <div key={t.id} className="p-3">
+                  <div className="flex items-center justify-between mb-1.5">
+                    <span className={`font-bold ${t.type === 'BUY' ? 'text-green-600' : 'text-red-600'}`}>
+                      {t.type}{t.optionType ? ` ${t.optionType}` : ''} @ {formatCurrency(t.price)}
+                    </span>
+                    {t.exitReason && t.exitReason !== 'MANUAL' && (
+                      <span className={`px-1.5 py-0.5 rounded text-[9px] font-bold ${exitReasonBadge(t.exitReason).cls}`}>
+                        {exitReasonBadge(t.exitReason).label}
+                      </span>
+                    )}
+                  </div>
+                  {/* Raw object dump — full trade record (journal + every *AtEntry instrumentation
+                      field) so values like brrAtEntry/clvAtEntry/uwrAtEntry/lwrAtEntry can be
+                      eyeballed directly, the same way you'd inspect an object in the console. */}
+                  <pre className="bg-gray-50 border border-gray-100 rounded p-2 text-[10px] leading-snug text-gray-700 whitespace-pre-wrap break-words">
+                    {JSON.stringify(t, null, 2)}
+                  </pre>
+                </div>
+              ))}
+            </div>
           </div>
         )}
       </div>

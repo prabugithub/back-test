@@ -279,6 +279,7 @@ sessionConfig
 - SL/TP lines drawn from `position.stopLoss` and `position.target`
 - Safe to modify without store impact analysis (visual changes only)
 - Theoretical 1:1, 1:2, 1:3 RR lines shown based on pivot — **not** the actual position TP
+- **Execution details popup** — primary chart only, wired via `chart.subscribeClick`. A click that lands on a bar with `time` matching one or more `trades[].timestamp` (exact match — raw `trades` timestamps are Unix seconds, same unit as candles, unlike the ms-normalized `pos.entryTime`/`exec.timestamp` copies `groupTradesIntoPositions` produces for display) opens a card at the click point for every matching execution. Body is a raw `JSON.stringify(trade, null, 2)` dump (not a curated field list) so every `Trade` field — including all `*AtEntry` instrumentation arrays (`brrAtEntry`/`clvAtEntry`/`uwrAtEntry`/`lwrAtEntry`, etc.) — is directly inspectable, console-object-style. Gated on `activeTool === 'none'` so it never steals a click meant for placing a drawing. Local `useState`, not store state — closes on: playback `currentIndex` changing, a `mousedown` outside both the popup and the chart container, or an in-chart click that doesn't land on a trade bar.
 
 ---
 

@@ -75,6 +75,7 @@ Load historical candlestick data to backtest against.
 - Click and drag to pan
 - Chart auto-scales to visible candles
 - Responsive to container resize
+- **Click a candle with a trade on it** (no drawing tool active) to open a popup showing the complete raw trade record — a pretty-printed object dump (like inspecting an object in the browser console), so every field is visible at once, including the instrumentation values (`brrAtEntry`, `clvAtEntry`, `uwrAtEntry`, `lwrAtEntry`, and every other `*AtEntry` metric — see section 6's "Entry Instrumentation & Quality Setup Filters" for what they mean) alongside the journal (LT/HT market, entry position, LLHH pivot, align flags, notes, screenshot link). Closes on outside click or when playback advances. Reached automatically after using Trade History's "Jump to entry" (see section 10) since that also highlights the candle.
 
 ---
 
@@ -454,7 +455,7 @@ Renders as a **full-page view** (`absolute inset-0 z-[105]`, same pattern as the
 
 - **Edit trade** — modify price, quantity, or notes
 - **Delete trade** — remove and recalculate all subsequent P&Ls
-- **Jump to candle** — click a trade to pan the chart to that candle; only recenters the viewport, does not rewind playback (`currentIndex` is untouched, so no already-revealed candles are hidden). The candle also flashes an amber highlight band + "JUMPED HERE" arrow for ~3.5s so it's visually obvious which one was navigated to
+- **Jump to candle** — click a trade to pan the chart to that candle; only recenters the viewport, does not rewind playback (`currentIndex` is untouched, so no already-revealed candles are hidden). The candle also flashes an amber highlight band + "JUMPED HERE" arrow for ~3.5s so it's visually obvious which one was navigated to. Click the highlighted candle itself to open the same execution-details popup described in section 2 (Chart Rendering → Interaction)
 - **Sort** by any column
 - **P&L recalculation** propagates correctly through all subsequent trades when one is edited
 
