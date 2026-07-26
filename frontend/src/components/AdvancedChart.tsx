@@ -687,12 +687,16 @@ export function AdvancedChart({
   }, [highlightTimestamp, isSecondary]);
 
   // Click a candle that has a trade execution on it to see its journal details in a popup.
-  // Only wired on the primary chart (trades are recorded on the primary timeframe) and only
-  // when no drawing tool is active, so it never steals clicks meant for placing a drawing.
+  // Only wired on the primary chart (trades are recorded on the primary timeframe). It also
+  // stays active in 'select' mode — the idle "inspect/select existing drawings" mode you land
+  // in after Escape or a right-click (both set 'select'), which shows no banner — so trade
+  // inspection isn't silently disabled by those very common actions. Only *placement* drawing
+  // tools suppress it, so it never steals a click meant for drawing; a click that selects an
+  // existing drawing is already consumed by the drawings mousedown-capture handler.
   useEffect(() => {
     if (!chart || isSecondary) return;
     const handleClick = (param: any) => {
-      if (activeTool !== 'none') return;
+      if (activeTool !== 'none' && activeTool !== 'select') return;
       if (!param.time || !param.point) {
         setExecPopup(null);
         return;
