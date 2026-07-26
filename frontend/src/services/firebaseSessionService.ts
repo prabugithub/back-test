@@ -54,6 +54,19 @@ export const sanitizeData = (data: any): any => {
     return cleaned;
 };
 
+// legSequenceAtEntry carries a per-candle brr/clv/uwr/lwr array per segment — analysis/
+// export detail that is intentionally NOT persisted (keeps trade docs small, well under
+// Firestore's 1MB/doc limit). We store the per-segment averages + structure only; the full
+// arrays live in-memory during a backtest and are recoverable via the JSON export.
+const stripLegSequenceArrays = (trades: Trade[] = []): Trade[] =>
+    trades.map(t => {
+        if (!t.legSequenceAtEntry) return t;
+        return {
+            ...t,
+            legSequenceAtEntry: t.legSequenceAtEntry.map(({ brr, clv, uwr, lwr, ...rest }) => rest),
+        };
+    });
+
 export const saveSession = async (state: SessionState) => {
     try {
         const sessionRef = doc(db, 'sessions', CONSTANT_SESSION_ID);
@@ -88,6 +101,7 @@ export const saveSession = async (state: SessionState) => {
         // 2. Save new state to primary slot
         const dataToSave = sanitizeData({
             ...state,
+            trades: stripLegSequenceArrays(state.trades),
             lastUpdated: Date.now()
         });
 
@@ -108,6 +122,7 @@ export const saveSnapshot = async (state: SessionState, snapshotName: string) =>
 
         const dataToSave = sanitizeData({
             ...state,
+            trades: stripLegSequenceArrays(state.trades),
             name: snapshotName,
             archivedAt: Date.now(),
             isSnapshot: true

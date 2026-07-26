@@ -4,6 +4,7 @@ import type { Candle, Trade, BacktestPosition, ExitReason } from '../types';
 import type { TradeJournal } from '../types';
 import { type AutoBacktestConfig, type AutoSignal, type RegimeKey, evaluateAutoSignals, evaluateTrailStop, evaluateAutoExitSignal } from './autoBacktestEngine';
 import { analyzeManualEntry, calculateBarOverlap, averageBarOverlap, calculateBarRanges, averageBarRanges, calculateBarQuality, averageBarQuality, calculateEfficiencyRatio, calculateBarBreaks, calculateEMASlope, calculateEMAInteraction } from './pivotAnalysis';
+import { buildLegSequence } from './legSequence';
 
 interface SimPosition {
   instrument: string;
@@ -173,6 +174,15 @@ export function runBatchSimulation(
       trade.legBarCountAtEntry = entryMetrics?.legBarCount;
       trade.maxConsecutiveHighBreaksAtEntry = entryMetrics?.maxConsecutiveHighBreaks;
       trade.maxConsecutiveLowBreaksAtEntry = entryMetrics?.maxConsecutiveLowBreaks;
+      // Recent-price-action context: last N Al Brooks impulse legs + the pullbacks
+      // between them, contiguous back from the entry bar (same H/L machinery, no pivots).
+      const legSequence = buildLegSequence(
+        candles,
+        candleIndex,
+        config.legSequenceCount ?? 10,
+        config.legSequenceDetail ?? 'full'
+      );
+      if (legSequence.length) trade.legSequenceAtEntry = legSequence;
     }
 
     trades.push(trade);

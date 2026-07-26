@@ -255,6 +255,11 @@ export interface AutoBacktestConfig {
   legMinBarCount?: number; // legs shorter than this block auto entries when a leg-strength filter is active (default 5)
   legMaxBarCount?: number; // longer legs are trimmed to their most recent this-many bars (default 15)
 
+  // Leg-sequence context instrumentation — the last N Al Brooks impulse legs plus the
+  // pullback candles between them, captured on each trade entry (legSequenceAtEntry)
+  legSequenceCount?: number;            // number of impulse legs to keep back from entry (default 10)
+  legSequenceDetail?: 'full' | 'avg';   // 'full' keeps per-candle brr/clv/uwr/lwr arrays (in-memory/export); 'avg' keeps only averages (default 'full')
+
   // Per-regime rule sets
   uptrend: RegimeRules;   // Bull-Trend, Bull-Trending-range
   downtrend: RegimeRules; // Bear-Trend, Bear-Trending-range
@@ -364,6 +369,8 @@ export const defaultAutoBacktestConfig: AutoBacktestConfig = {
   consecutiveBreakLookback: 10,
   legMinBarCount: 5,
   legMaxBarCount: 15,
+  legSequenceCount: 10,
+  legSequenceDetail: 'full',
   uptrend: { ...defaultLongRules, enabled: true },
   downtrend: { ...defaultShortRules, enabled: true },
   range: { ...defaultRangeRules, enabled: false },

@@ -28,6 +28,37 @@ export interface TradeJournal {
 // to auto-entered backtest positions.
 export type ExitReason = 'SL' | 'TP' | 'MANUAL' | 'TIME_OVER' | 'REVERSAL' | 'OPP_SIGNAL' | 'LEG_DECAY';
 
+// One segment of the recent-price-action leg sequence captured at entry — either a
+// completed Al Brooks impulse leg or the pullback (retrace) between two legs. Segments
+// are contiguous, so every candle from the oldest tracked leg up to the entry bar sits
+// in exactly one segment.
+export interface LegSegment {
+  kind: 'leg' | 'pullback';        // impulse leg vs the retrace between legs
+  direction: 'bull' | 'bear';      // leg = its impulse direction; pullback = counter direction (the leg it retraces)
+  startIndex: number;              // inclusive first candle index
+  endIndex: number;                // inclusive last candle index
+  startTime: number;               // timestamp of the startIndex candle — robust chart mapping (index-alignment-free)
+  endTime: number;                 // timestamp of the endIndex candle
+  barCount: number;                // endIndex - startIndex + 1
+  startPrice: number;              // open of the startIndex candle
+  endPrice: number;                // close of the endIndex candle
+  high: number;                    // highest high across the segment's candles
+  low: number;                     // lowest low across the segment's candles
+  movePct: number;                 // signed % move across the segment ((endPrice-startPrice)/startPrice*100)
+  brrAvg: number;                  // mean body-to-range ratio over the segment's candles
+  clvAvg: number;                  // mean close-location value
+  uwrAvg: number;                  // mean upper-wick ratio
+  lwrAvg: number;                  // mean lower-wick ratio
+  highBreakCount: number;          // bars whose high broke the prior bar's high, within the segment
+  lowBreakCount: number;           // bars whose low broke the prior bar's low, within the segment
+  // Per-candle quality series (oldest→newest), present only in 'full' detail mode —
+  // stripped before Firestore persistence, retained in exports.
+  brr?: number[];
+  clv?: number[];
+  uwr?: number[];
+  lwr?: number[];
+}
+
 // Trade record
 export interface Trade {
   id: string;
@@ -85,6 +116,12 @@ export interface Trade {
   legBarCountAtEntry?: number;    // bars in the frozen leg, inclusive of both ends
   maxConsecutiveHighBreaksAtEntry?: number; // longest run of bars each breaking prior high without breaking prior low, within the leg/window
   maxConsecutiveLowBreaksAtEntry?: number;  // mirror: prior-low breaks without prior-high breaks
+  // Recent-price-action context: the last up-to-N Al Brooks impulse legs plus the
+  // pullback candles between them, contiguous back from the entry bar, newest→oldest
+  // (index 0 = closest to entry, walking back in time). Per-candle arrays are present
+  // only in 'full' detail mode and are stripped before Firestore persistence (averages
+  // retained). See LegSegment.
+  legSequenceAtEntry?: LegSegment[];
   interval?: string;
   liveOptionToken?: string;
   optionType?: 'CE' | 'PE';

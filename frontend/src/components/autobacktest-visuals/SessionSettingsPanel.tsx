@@ -218,6 +218,25 @@ export function SessionSettingsPanel({ config, onChange, isOpen, onClose }: Sess
                   className="w-12 px-1.5 py-1 text-xs border rounded text-center"
                 />
               </div>
+              <div className="flex items-center justify-between gap-1">
+                <span className="text-[10px] text-gray-500" title="Number of recent Al Brooks impulse legs (plus the pullbacks between them) captured as market-context on each trade entry (legSequenceAtEntry)">Leg Seq N</span>
+                <input
+                  type="number" min={1} max={20} value={config.legSequenceCount ?? 10}
+                  onChange={e => onChange({ legSequenceCount: Number(e.target.value) })}
+                  className="w-12 px-1.5 py-1 text-xs border rounded text-center"
+                />
+              </div>
+            </div>
+            <div className="flex items-center justify-between gap-2 mt-2">
+              <span className="text-[10px] text-gray-500" title="Full keeps per-candle BRR/CLV/UWR/LWR arrays for every leg/pullback (in-memory + export); Averages keeps only the per-segment averages (also what is persisted to the cloud session)">Leg Seq Detail</span>
+              <select
+                value={config.legSequenceDetail ?? 'full'}
+                onChange={e => onChange({ legSequenceDetail: e.target.value as AutoBacktestConfig['legSequenceDetail'] })}
+                className="flex-1 max-w-[9rem] px-2 py-1 text-xs border rounded-lg"
+              >
+                <option value="full">Full (per-candle)</option>
+                <option value="avg">Averages only</option>
+              </select>
             </div>
           </CardShell>
         </div>

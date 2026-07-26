@@ -305,6 +305,14 @@ export interface AlBrooksLegsByBar {
   bear: (AlBrooksLeg | null)[];
 }
 
+/** A completed breakout leg tagged with its impulse direction, recorded in the order
+ *  legs freeze. Unlike AlBrooksLegsByBar (per-bar latest of each side), this is the
+ *  full chronological history — the raw material for building a contiguous leg+pullback
+ *  sequence. */
+export interface CompletedLeg extends AlBrooksLeg {
+  direction: 'bull' | 'bear';
+}
+
 export interface AlBrooksMarker {
   time: number;
   signal: AlBrooksSignal;
@@ -358,15 +366,24 @@ export function calculateAlBrooksLegs(candles: Candle[]): AlBrooksLegsByBar {
   return runAlBrooks(candles, false, 1.0).legs;
 }
 
+/** Chronological history of every completed leg (both sides), in the order they froze.
+ *  See CompletedLeg. Depth filter is irrelevant to leg tracking, so no params. */
+export function calculateAlBrooksLegHistory(candles: Candle[]): CompletedLeg[] {
+  return runAlBrooks(candles, false, 1.0).legHistory;
+}
+
 function runAlBrooks(
   candles: Candle[],
   usePullbackDepth: boolean,
   atrDepthMultiplier: number
-): { markers: AlBrooksMarker[]; legs: AlBrooksLegsByBar } {
+): { markers: AlBrooksMarker[]; legs: AlBrooksLegsByBar; legHistory: CompletedLeg[] } {
   const result: AlBrooksMarker[] = [];
   const bullLegs: (AlBrooksLeg | null)[] = new Array(candles?.length ?? 0).fill(null);
   const bearLegs: (AlBrooksLeg | null)[] = new Array(candles?.length ?? 0).fill(null);
-  const done = { markers: result, legs: { bull: bullLegs, bear: bearLegs } };
+  // Chronological log of completed legs (pushed as each freezes below). Purely
+  // observational — never read back into the signal state machine.
+  const legHistory: CompletedLeg[] = [];
+  const done = { markers: result, legs: { bull: bullLegs, bear: bearLegs }, legHistory };
 
   if (!candles || candles.length < 22) return done;
 
@@ -456,6 +473,7 @@ function runAlBrooks(
     if (lowBreak) {
       if (hActiveStart !== null) {
         hCompletedLeg = { startIndex: hActiveStart, endIndex: hActiveMaxHighBar };
+        legHistory.push({ direction: 'bull', ...hCompletedLeg });
         hActiveStart = null;
       }
       hCandidateStart = null;
@@ -463,6 +481,7 @@ function runAlBrooks(
     if (highBreak) {
       if (lActiveStart !== null) {
         lCompletedLeg = { startIndex: lActiveStart, endIndex: lActiveMinLowBar };
+        legHistory.push({ direction: 'bear', ...lCompletedLeg });
         lActiveStart = null;
       }
       lCandidateStart = null;

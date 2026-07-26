@@ -247,6 +247,19 @@ export function PerformanceDashboard({ onNavigate, liveInstrument }: Performance
         a.click();
     };
 
+    // Full-fidelity JSON export — includes the nested legSequenceAtEntry (with per-candle
+    // brr/clv/uwr/lwr arrays) that the flat CSV can't represent and that Firestore doesn't
+    // persist. This is the canonical way to get the complete leg-sequence context off-app.
+    const handleExportJSON = () => {
+        if (filteredPositions.length === 0) return;
+        const blob = new Blob([JSON.stringify(filteredPositions, null, 2)], { type: 'application/json' });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = `trade-analysis-export-${new Date().toISOString().split('T')[0]}.json`;
+        a.click();
+    };
+
     return (
         <div className="absolute inset-0 z-[110] bg-slate-50 flex flex-col overflow-hidden font-sans">
             {/* Header */}
@@ -396,12 +409,20 @@ export function PerformanceDashboard({ onNavigate, liveInstrument }: Performance
                                 <ShieldCheck size={18} />
                                 Option Backtest (Dhan)
                             </button>
-                            <button 
+                            <button
                                 onClick={handleExportCSV}
                                 className="w-full flex items-center justify-center gap-2 bg-slate-800 text-white rounded-xl py-3 text-sm font-bold shadow-lg shadow-slate-200 hover:bg-slate-900 transition-all cursor-pointer"
                             >
                                 <DownloadIcon size={18} />
                                 Export Filtered Data
+                            </button>
+                            <button
+                                onClick={handleExportJSON}
+                                title="Full-fidelity JSON including the leg-sequence context (per-candle BRR/CLV/UWR/LWR arrays) not present in the CSV"
+                                className="w-full flex items-center justify-center gap-2 bg-slate-100 text-slate-700 border border-slate-300 rounded-xl py-3 text-sm font-bold hover:bg-slate-200 transition-all cursor-pointer"
+                            >
+                                <DownloadIcon size={18} />
+                                Export JSON (full detail)
                             </button>
                         </div>
                     </div>

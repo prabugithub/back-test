@@ -20,7 +20,7 @@ import { TextInputDialog } from './TextInputDialog';
 import { uploadScreenshot, fetchCandles } from '../services/api';
 import { useNotificationStore } from '../stores/notificationStore';
 import { ScreenshotSaveDialog } from './ScreenshotSaveDialog';
-import type { Trade } from '../types';
+import type { Trade, LegSegment } from '../types';
 import { formatCurrency } from '../utils/formatters';
 import { exitReasonBadge } from '../utils/tradeAnalysis';
 import { X } from 'lucide-react';
@@ -78,6 +78,9 @@ export function AdvancedChart({
   const [pendingCalloutPoints, setPendingCalloutPoints] = useState<{ p1: Point, p2: Point } | null>(null);
   const [isUploadingScreenshot, setIsUploadingScreenshot] = useState(false);
   const [execPopup, setExecPopup] = useState<{ x: number; y: number; trades: Trade[] } | null>(null);
+  // A leg/pullback segment the user clicked in the Trade Record popup's Leg Sequence strip —
+  // highlighted on the chart (canvas band over its candles) and expanded to its tracked values.
+  const [selectedSegment, setSelectedSegment] = useState<LegSegment | null>(null);
 
   const candles = useSessionStore((s) => s.candles);
   const currentIndex = useSessionStore((s) => s.currentIndex);
@@ -306,7 +309,40 @@ export function AdvancedChart({
         }
       }
     }
-  }, [chart, series, visibleCandles, activeIndicators, showMarkers, showPivotRR, memoizedPivots, isSecondary, secondaryTimeframe, chartId, highlightTimestamp]);
+
+    // 4. Highlight the leg/pullback segment clicked in the Trade Record popup — a translucent
+    //    band across the segment's candles so its tracked values can be read against the bars.
+    if (!isSecondary && selectedSegment) {
+      const timeScale = chart.timeScale();
+      const x1 = timeScale.timeToCoordinate(selectedSegment.startTime as any);
+      const x2 = timeScale.timeToCoordinate(selectedSegment.endTime as any);
+      if (x1 !== null && x2 !== null) {
+        const barSpacing = (timeScale.options() as any).barSpacing || 6;
+        const pad = barSpacing / 2 + 1;
+        const left = Math.min(x1, x2) - pad;
+        const right = Math.max(x1, x2) + pad;
+        const bull = selectedSegment.direction === 'bull';
+        const stroke = bull ? '#16a34a' : '#dc2626';
+        const fill = bull ? 'rgba(22,163,74,0.12)' : 'rgba(220,38,38,0.12)';
+
+        ctx.save();
+        ctx.fillStyle = fill;
+        ctx.fillRect(left, 0, right - left, ctx.canvas.height);
+        ctx.strokeStyle = stroke;
+        ctx.lineWidth = 1.5;
+        ctx.setLineDash(selectedSegment.kind === 'pullback' ? [5, 3] : []);
+        ctx.strokeRect(left, 0, right - left, ctx.canvas.height);
+
+        ctx.setLineDash([]);
+        ctx.fillStyle = stroke;
+        ctx.font = 'bold 10px Inter, sans-serif';
+        ctx.textAlign = 'center';
+        const label = `${selectedSegment.kind === 'pullback' ? 'PULLBACK' : 'LEG'} ${bull ? '▲' : '▼'} ${selectedSegment.barCount}b`;
+        ctx.fillText(label, (left + right) / 2, 14);
+        ctx.restore();
+      }
+    }
+  }, [chart, series, visibleCandles, activeIndicators, showMarkers, showPivotRR, memoizedPivots, isSecondary, secondaryTimeframe, chartId, highlightTimestamp, selectedSegment]);
 
   const {
     clearDrawings,
@@ -331,6 +367,26 @@ export function AdvancedChart({
     onCustomRender: handleCustomRender,
     isSecondary,
   });
+
+  // Redraw the canvas overlay and pan the selected Leg Sequence segment into view.
+  useEffect(() => {
+    if (isSecondary || !chart) return;
+    scheduleRender();
+    if (!selectedSegment) return;
+    const ts = chart.timeScale();
+    const fromIdx = visibleCandles.findIndex((c) => c.timestamp === selectedSegment.startTime);
+    const toIdx = visibleCandles.findIndex((c) => c.timestamp === selectedSegment.endTime);
+    if (fromIdx === -1 || toIdx === -1) return;
+    const lo = Math.min(fromIdx, toIdx);
+    const hi = Math.max(fromIdx, toIdx);
+    const cur = ts.getVisibleLogicalRange();
+    // Only recenter when the segment isn't already comfortably in view.
+    if (!cur || lo < cur.from + 1 || hi > cur.to - 1) {
+      const width = cur ? cur.to - cur.from : 60;
+      const pad = Math.max((width - (hi - lo + 1)) / 2, 3);
+      ts.setVisibleLogicalRange({ from: lo - pad, to: hi + pad });
+    }
+  }, [selectedSegment, chart, isSecondary, visibleCandles, scheduleRender]);
 
   const handleTextSubmit = (text: string) => {
     if (pendingCalloutPoints) {
@@ -656,6 +712,7 @@ export function AdvancedChart({
   // not a persistent state, so stepping/jumping should not leave it stranded on screen.
   useEffect(() => {
     setExecPopup(null);
+    setSelectedSegment(null);
   }, [currentIndex]);
 
   // Dismiss on any click outside the popup that isn't on the chart itself — chart clicks
@@ -1404,7 +1461,7 @@ export function AdvancedChart({
               <span className="font-bold text-gray-700">
                 Trade Record{execPopup.trades.length > 1 ? `s (${execPopup.trades.length})` : ''}
               </span>
-              <button onClick={() => setExecPopup(null)} className="text-gray-400 hover:text-gray-700">
+              <button onClick={() => { setExecPopup(null); setSelectedSegment(null); }} className="text-gray-400 hover:text-gray-700">
                 <X size={14} />
               </button>
             </div>
@@ -1421,6 +1478,97 @@ export function AdvancedChart({
                       </span>
                     )}
                   </div>
+                  {/* Recent-price-action context: the last N Al Brooks impulse legs + the
+                      pullbacks between them (newest→oldest, left→right — leftmost is closest
+                      to entry). Leg = solid chip, pullback = dashed; green = bull move, red =
+                      bear move. Click a chip to highlight its candles on the chart and expand
+                      its tracked values. */}
+                  {t.legSequenceAtEntry && t.legSequenceAtEntry.length > 0 && (
+                    <div className="mb-2">
+                      <div className="text-[9px] font-semibold text-gray-400 uppercase tracking-wider mb-1">
+                        Leg Sequence ({t.legSequenceAtEntry.length}) · click a segment to locate it on the chart
+                      </div>
+                      <div className="flex gap-1 overflow-x-auto pb-1">
+                        {t.legSequenceAtEntry.map((seg, i) => {
+                          const bull = seg.direction === 'bull';
+                          const isSel = selectedSegment != null
+                            && selectedSegment.startTime === seg.startTime
+                            && selectedSegment.endTime === seg.endTime
+                            && selectedSegment.kind === seg.kind;
+                          return (
+                            <button
+                              key={i}
+                              onClick={() => setSelectedSegment(isSel ? null : seg)}
+                              title={`${seg.kind} ${seg.direction} · bars ${seg.startIndex}–${seg.endIndex} (${seg.barCount}) · move ${seg.movePct.toFixed(2)}% · H ${seg.high.toFixed(2)} L ${seg.low.toFixed(2)} · BRR ${seg.brrAvg.toFixed(2)} CLV ${seg.clvAvg.toFixed(2)} UWR ${seg.uwrAvg.toFixed(2)} LWR ${seg.lwrAvg.toFixed(2)} · H/L breaks ${seg.highBreakCount}/${seg.lowBreakCount}`}
+                              className={`shrink-0 rounded px-1.5 py-1 text-[9px] leading-tight text-center min-w-[3rem] cursor-pointer transition-all ${
+                                bull ? 'text-green-700' : 'text-red-700'
+                              } ${
+                                seg.kind === 'leg'
+                                  ? bull ? 'bg-green-50 border border-green-300' : 'bg-red-50 border border-red-300'
+                                  : bull ? 'bg-green-50/40 border border-dashed border-green-300' : 'bg-red-50/40 border border-dashed border-red-300'
+                              } ${isSel ? 'ring-2 ring-offset-1 ' + (bull ? 'ring-green-500' : 'ring-red-500') : 'hover:brightness-95'}`}
+                            >
+                              <div className="font-bold">{bull ? '▲' : '▼'} {seg.kind === 'pullback' ? 'pb' : 'leg'}</div>
+                              <div>{seg.barCount}b</div>
+                              <div>{seg.movePct >= 0 ? '+' : ''}{seg.movePct.toFixed(1)}%</div>
+                            </button>
+                          );
+                        })}
+                      </div>
+                      {/* Detail of the clicked segment — values aligned with the highlighted candles. */}
+                      {selectedSegment && t.legSequenceAtEntry.some(s => s === selectedSegment) && (() => {
+                        const s = selectedSegment;
+                        const bull = s.direction === 'bull';
+                        const fmt = (v?: number, d = 2) => (v === undefined || Number.isNaN(v) ? '—' : v.toFixed(d));
+                        return (
+                          <div className={`mt-1 rounded border p-2 text-[10px] ${bull ? 'border-green-300 bg-green-50/50' : 'border-red-300 bg-red-50/50'}`}>
+                            <div className="flex items-center justify-between mb-1">
+                              <span className={`font-bold ${bull ? 'text-green-700' : 'text-red-700'}`}>
+                                {s.kind === 'pullback' ? 'Pullback' : 'Leg'} · {s.direction} · bars {s.startIndex}–{s.endIndex} ({s.barCount})
+                              </span>
+                              <button onClick={() => setSelectedSegment(null)} className="text-gray-400 hover:text-gray-700"><X size={11} /></button>
+                            </div>
+                            <div className="grid grid-cols-2 gap-x-3 gap-y-0.5 text-gray-600">
+                              <span>Move: <b>{s.movePct >= 0 ? '+' : ''}{fmt(s.movePct)}%</b></span>
+                              <span>Price: {fmt(s.startPrice)} → {fmt(s.endPrice)}</span>
+                              <span>High: <b>{fmt(s.high)}</b> · Low: <b>{fmt(s.low)}</b></span>
+                              <span>Range: <b>{fmt(s.high - s.low)}</b></span>
+                              <span>H/L breaks: <b>{s.highBreakCount}/{s.lowBreakCount}</b></span>
+                              <span>Avg BRR {fmt(s.brrAvg)} · CLV {fmt(s.clvAvg)}</span>
+                              <span>Avg UWR {fmt(s.uwrAvg)} · LWR {fmt(s.lwrAvg)}</span>
+                            </div>
+                            {s.brr && s.brr.length > 0 && (
+                              <div className="mt-1.5 max-h-40 overflow-y-auto">
+                                <table className="w-full text-[9px] tabular-nums">
+                                  <thead className="text-gray-400 sticky top-0 bg-inherit">
+                                    <tr className="text-left">
+                                      <th className="pr-2 font-semibold">Bar</th>
+                                      <th className="pr-2 font-semibold">BRR</th>
+                                      <th className="pr-2 font-semibold">CLV</th>
+                                      <th className="pr-2 font-semibold">UWR</th>
+                                      <th className="font-semibold">LWR</th>
+                                    </tr>
+                                  </thead>
+                                  <tbody className="text-gray-700">
+                                    {s.brr.map((_, k) => (
+                                      <tr key={k} className="border-t border-gray-100">
+                                        <td className="pr-2 text-gray-400">{s.startIndex + k}</td>
+                                        <td className="pr-2">{fmt(s.brr?.[k])}</td>
+                                        <td className="pr-2">{fmt(s.clv?.[k])}</td>
+                                        <td className="pr-2">{fmt(s.uwr?.[k])}</td>
+                                        <td>{fmt(s.lwr?.[k])}</td>
+                                      </tr>
+                                    ))}
+                                  </tbody>
+                                </table>
+                              </div>
+                            )}
+                            {!s.brr && <div className="mt-1 text-[9px] text-gray-400 italic">Per-candle detail not stored for this trade (averages-only mode / restored session).</div>}
+                          </div>
+                        );
+                      })()}
+                    </div>
+                  )}
                   {/* Raw object dump — full trade record (journal + every *AtEntry instrumentation
                       field) so values like brrAtEntry/clvAtEntry/uwrAtEntry/lwrAtEntry can be
                       eyeballed directly, the same way you'd inspect an object in the console. */}

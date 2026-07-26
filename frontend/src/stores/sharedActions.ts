@@ -22,6 +22,7 @@ import {
 import type { Trade, Position, TradeJournal, ExitReason } from '../types';
 import type { SessionStore, SessionConfig, StoreSet, StoreGet } from './sessionStore';
 import { computeEntryMetrics, type EntryMetricsSnapshot, type RegimeKey } from '../utils/autoBacktestEngine';
+import { buildLegSequence } from '../utils/legSequence';
 
 const generateTradeId = () =>
   `${Date.now()}-${Math.random().toString(36).substring(2, 11)}`;
@@ -354,6 +355,16 @@ export function createSharedActions(set: StoreSet, get: StoreGet) {
       const fallbackMetrics = !isReducing
         ? computeEntryMetrics(candles, currentIndex, autoBacktestConfig, legAtEntry)
         : null;
+      // Recent-price-action context: the last N Al Brooks impulse legs + the pullbacks
+      // between them, contiguous back from the entry bar. Same H/L machinery, no pivots.
+      const legSequenceAtEntry = !isReducing
+        ? buildLegSequence(
+            visibleCandlesForEntry,
+            currentIndex,
+            autoBacktestConfig.legSequenceCount ?? 10,
+            autoBacktestConfig.legSequenceDetail ?? 'full'
+          )
+        : null;
       const barOverlapAvgAtEntry = entryMetricsOverride?.barOverlapAvg ?? fallbackMetrics?.barOverlapAvg;
       const barRangeAvg = entryMetricsOverride?.barRangeAvg ?? fallbackMetrics?.barRangeAvg;
       const bullBarRangeAvg = entryMetricsOverride?.bullBarRangeAvg ?? fallbackMetrics?.bullBarRangeAvg;
@@ -461,6 +472,7 @@ export function createSharedActions(set: StoreSet, get: StoreGet) {
         legBarCountAtEntry: !isReducing ? (entryMetricsOverride?.legBarCount ?? fallbackMetrics?.legBarCount) : undefined,
         maxConsecutiveHighBreaksAtEntry: !isReducing ? (entryMetricsOverride?.maxConsecutiveHighBreaks ?? fallbackMetrics?.maxConsecutiveHighBreaks) : undefined,
         maxConsecutiveLowBreaksAtEntry: !isReducing ? (entryMetricsOverride?.maxConsecutiveLowBreaks ?? fallbackMetrics?.maxConsecutiveLowBreaks) : undefined,
+        legSequenceAtEntry: !isReducing ? (legSequenceAtEntry && legSequenceAtEntry.length ? legSequenceAtEntry : undefined) : undefined,
         interval: sessionConfig?.interval || '5',
       };
 
