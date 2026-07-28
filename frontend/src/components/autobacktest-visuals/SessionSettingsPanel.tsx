@@ -1,5 +1,5 @@
 import { X, Settings2 } from 'lucide-react';
-import type { AutoBacktestConfig } from '../../utils/autoBacktestEngine';
+import { MULTI_TRADE_DEFAULT_CAP, type AutoBacktestConfig } from '../../utils/autoBacktestEngine';
 import { CardShell } from './CardShell';
 
 interface SessionSettingsPanelProps {
@@ -38,6 +38,41 @@ export function SessionSettingsPanel({ config, onChange, isOpen, onClose }: Sess
         </div>
 
         <div className="p-4 flex flex-col gap-3">
+          <CardShell title="Position Management">
+            <label className="flex items-center gap-1.5 cursor-pointer select-none mb-1.5">
+              <input
+                type="checkbox"
+                checked={config.skipIfPositionOpen}
+                onChange={e => onChange({ skipIfPositionOpen: e.target.checked })}
+                className="w-3.5 h-3.5"
+              />
+              <span className="text-xs text-gray-600 font-medium">Skip signal if a position is open</span>
+            </label>
+            {config.skipIfPositionOpen ? (
+              <span className="text-[10px] text-gray-400">
+                One position at a time — new signals are ignored until it closes.
+              </span>
+            ) : (
+              <>
+                <div className="flex items-center justify-between gap-2">
+                  <span className="text-[10px] text-gray-500" title="Hard cap on independent trades running at the same time. 0 = unlimited.">
+                    Max concurrent trades
+                  </span>
+                  <input
+                    type="number" min={0} value={config.maxOpenPositions ?? MULTI_TRADE_DEFAULT_CAP}
+                    onChange={e => onChange({ maxOpenPositions: Number(e.target.value) })}
+                    className="w-16 px-1.5 py-1 text-xs border rounded text-center"
+                    title="0 = unlimited"
+                  />
+                </div>
+                <span className="text-[10px] text-amber-600 mt-1 block">
+                  Every signal opens its own trade with its own SL/TP — longs and shorts can run
+                  at the same time. Manual trading is disabled in this mode.
+                </span>
+              </>
+            )}
+          </CardShell>
+
           <CardShell title="Trading Window (IST)">
             <div className="flex items-center gap-2">
               <input

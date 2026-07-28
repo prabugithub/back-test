@@ -56,8 +56,66 @@ export interface TradePerformanceSummary {
     expectancy: number;
 }
 
-export function groupTradesIntoPositions(trades: Trade[]): GroupedPosition[] {
+/**
+ * Trades opened in multi-trade mode carry a `positionId` pairing each exit fill with
+ * the exact entry fill it closes. They run concurrently and interleave, so the
+ * sequential net-quantity walk below cannot reconstruct them — it would read a
+ * second entry as "scaling in" and an opposite-side entry as a flip. Group those
+ * by id instead, and leave every other trade to the original walk.
+ */
+function groupTradesByPositionId(trades: Trade[]): GroupedPosition[] {
+    const byId = new Map<string, Trade[]>();
+    for (const trade of trades) {
+        const id = trade.positionId!;
+        const bucket = byId.get(id);
+        if (bucket) bucket.push(trade);
+        else byId.set(id, [trade]);
+    }
+
     const positions: GroupedPosition[] = [];
+    for (const [id, fills] of byId) {
+        const [entry, ...rest] = fills;
+        if (!entry) continue;
+        const direction = entry.type === 'BUY' ? 'LONG' : 'SHORT';
+        // At most one exit — an independent trade is always closed in full.
+        const exit = rest.find(t => t.type !== entry.type);
+
+        const pos: GroupedPosition = {
+            id: `pos-${id}`,
+            direction,
+            status: exit ? 'CLOSED' : 'OPEN',
+            instrument: entry.instrument,
+            entryTime: entry.timestamp,
+            avgEntryPrice: entry.price,
+            totalQuantity: entry.quantity,
+            remainingQuantity: exit ? 0 : entry.quantity,
+            realizedPnL: exit?.pnl ?? 0,
+            target: entry.target,
+            stopLoss: entry.stopLoss,
+            slHit: exit?.slHit ?? entry.slHit,
+            tpHit: exit?.tpHit ?? entry.tpHit,
+            hitFirst: exit?.hitFirst ?? entry.hitFirst,
+            trendReversed: exit?.trendReversed ?? entry.trendReversed,
+            trendReversedPnL: exit?.trendReversedPnL ?? entry.trendReversedPnL,
+            executions: fills,
+        };
+        if (exit) {
+            pos.exitTime = exit.timestamp;
+            pos.avgExitPrice = exit.price;
+            pos.exitReason = exit.exitReason;
+        }
+        positions.push(pos);
+    }
+    return positions;
+}
+
+export function groupTradesIntoPositions(allTrades: Trade[]): GroupedPosition[] {
+    // Split first: independent trades are grouped by id, everything else keeps the
+    // original sequential walk untouched. A session can legitimately contain both.
+    const trades = allTrades.filter(t => !t.positionId);
+    const independent = allTrades.filter(t => t.positionId);
+
+    const positions: GroupedPosition[] = independent.length ? groupTradesByPositionId(independent) : [];
     let currentPos: GroupedPosition | null = null;
     let runningQty = 0; // Tracks the net signed quantity (+ for Long, - for Short)
 
@@ -233,7 +291,7 @@ export function groupTradesIntoPositions(trades: Trade[]): GroupedPosition[] {
     const normalizeTs = (ts: number) => ts > 1e11 ? ts : ts * 1000;
 
     // Calculate durations and refine details
-    return positions.map(p => {
+    const refined = positions.map(p => {
         // Normalize position boundaries
         p.entryTime = normalizeTs(p.entryTime);
         if (p.exitTime) {
@@ -250,7 +308,14 @@ export function groupTradesIntoPositions(trades: Trade[]): GroupedPosition[] {
             p.durationMinutes = (p.exitTime - p.entryTime) / (1000 * 60);
         }
         return p;
-    }).reverse(); // Most recent first
+    });
+
+    // The walk pushes in close order, so reversing it yields most-recent-first.
+    // Once id-grouped positions are mixed in, that ordering no longer holds —
+    // sort explicitly, but only then, so legacy sessions keep their exact order.
+    return independent.length
+        ? refined.sort((a, b) => b.entryTime - a.entryTime)
+        : refined.reverse();
 }
 
 export function calculatePerformanceStats(positions: GroupedPosition[]): TradePerformanceSummary {
@@ -341,7 +406,28 @@ export function recalculateTradesPnL(trades: Trade[]): { processedTrades: Trade[
     let currentAvgPrice = 0;
     let realizedPnL = 0;
 
+    // Independent trades (multi-trade mode) never blend, so the running-average
+    // walk below does not apply to them — each exit's P&L is settled against its
+    // own entry via positionId. They still contribute to the totals.
+    const independentEntries = new Map<string, Trade>();
+    for (const t of trades) {
+        if (t.positionId && !independentEntries.has(t.positionId)) independentEntries.set(t.positionId, t);
+    }
+
     const processedTrades = trades.map(t => {
+        if (t.positionId) {
+            const entry = independentEntries.get(t.positionId)!;
+            if (t === entry) {
+                currentQty += t.type === 'BUY' ? t.quantity : -t.quantity;
+                return { ...t, pnl: undefined };
+            }
+            const pnlPerShare = entry.type === 'BUY' ? t.price - entry.price : entry.price - t.price;
+            const pnl = pnlPerShare * t.quantity;
+            realizedPnL += pnl;
+            currentQty += t.type === 'BUY' ? t.quantity : -t.quantity;
+            return { ...t, pnl };
+        }
+
         const tradeQty = t.quantity;
         const tradePrice = t.price;
         const tradeSign = t.type === 'BUY' ? 1 : -1;

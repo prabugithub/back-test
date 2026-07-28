@@ -294,7 +294,10 @@ export function InstrumentSelector() {
         // loadCandles (called inside handleFetch) does NOT reset drawings or indicators, so
         // applying uiSettings here in the same tick ensures a single React render cycle sees
         // both the new candle data and the restored UI state.
-        restoreSessionState(data.trades, data.position, data.currentIndex, data.uiSettings);
+        restoreSessionState(data.trades, data.position, data.currentIndex, data.uiSettings, {
+          openPositions: data.openPositions,
+          multiRealizedPnL: data.multiRealizedPnL,
+        });
       } else {
         setError("No saved session found.");
       }

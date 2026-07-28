@@ -11,18 +11,19 @@ import {
   type SessionState,
 } from '../services/firebaseSessionService';
 import { useNotificationStore } from './notificationStore';
-import { calculatePivotPoints, calculateATR, calculateEMA, calculateAlBrooksLegs } from '../utils/indicators';
-import { analyzeMarketStructure, calculateBarOverlap } from '../utils/pivotAnalysis';
+import { calculatePivotPoints } from '../utils/indicators';
+import { analyzeMarketStructure } from '../utils/pivotAnalysis';
+import { buildEntryInstrumentation } from '../utils/entryInstrumentation';
+import { buildNetPositionMirror, rebuildOpenPositionsFromTrades } from '../utils/netPosition';
 import {
   executeLiveOrder,
   registerMonitorIfNeeded,
   syncTargetWithMonitor,
   pollOrderFillStatus,
 } from '../services/liveExecutionService';
-import type { Trade, Position, TradeJournal, ExitReason } from '../types';
+import type { Trade, Position, OpenPosition, TradeJournal, ExitReason } from '../types';
 import type { SessionStore, SessionConfig, StoreSet, StoreGet } from './sessionStore';
-import { computeEntryMetrics, type EntryMetricsSnapshot, type RegimeKey } from '../utils/autoBacktestEngine';
-import { buildLegSequence } from '../utils/legSequence';
+import { isMultiTradeMode, type EntryMetricsSnapshot, type RegimeKey } from '../utils/autoBacktestEngine';
 
 const generateTradeId = () =>
   `${Date.now()}-${Math.random().toString(36).substring(2, 11)}`;
@@ -51,8 +52,12 @@ export function createSharedActions(set: StoreSet, get: StoreGet) {
 
     setTargetRR: (rr: number) => {
       set({ targetRR: rr });
-      const { position, manualLevels } = get();
+      const state = get();
+      const { position, manualLevels } = state;
       if (manualLevels) return;
+      // Multi-trade mode: each trade carries the target its own signal computed;
+      // there is no single position to re-derive from the new RR.
+      if (isMultiTradeMode(state)) return;
       if (position && position.stopLoss && position.stopLoss > 0 && position.averagePrice) {
         const isLong = position.quantity > 0;
         const slDist = Math.abs(position.averagePrice - position.stopLoss);
@@ -73,7 +78,11 @@ export function createSharedActions(set: StoreSet, get: StoreGet) {
     highlightCandle: (timestamp: number | null) => set({ highlightTimestamp: timestamp }),
 
     checkSLTPHits: (index: number, currentPrice?: number) => {
-      const { candles, position } = get();
+      const state = get();
+      const { candles, position } = state;
+      // Multi-trade mode: runMultiPositionCycle owns SL/TP per trade. `position`
+      // is a derived mirror here — exiting it would flatten every open trade.
+      if (isMultiTradeMode(state)) return;
       if (!position || (!position.stopLoss && !position.target)) return;
       // Entry order not yet confirmed filled — exits must not fire on a phantom position
       if ((position as any).pendingOrderId) return;
@@ -332,66 +341,21 @@ export function createSharedActions(set: StoreSet, get: StoreGet) {
       const isSameSide = (currentQty > 0 && newQty > 0) || (currentQty < 0 && newQty < 0);
       const isFlip = isReducing && !isSameSide && newQty !== 0;
 
-      const visibleCandlesForEntry = candles.slice(0, currentIndex + 1);
-      const pivotsForEntry = calculatePivotPoints(visibleCandlesForEntry);
-      const { ltMarket } = analyzeMarketStructure(visibleCandlesForEntry, pivotsForEntry);
-
-      const atrSeries = calculateATR(visibleCandlesForEntry, 14);
-      const emaSeries = calculateEMA(visibleCandlesForEntry, 21);
-      const atrVal = atrSeries[atrSeries.length - 1]?.value ?? 0;
-      const emaVal = emaSeries[emaSeries.length - 1]?.value ?? 0;
-      const atrDepthAtEntry = atrVal > 0 ? Math.abs(currentPrice - emaVal) / atrVal : 0;
-      const barOverlapAtEntry = calculateBarOverlap(candles, currentIndex, autoBacktestConfig.barOverlapLookback ?? 8);
-      // Manual/fallback instrumentation — the same computeEntryMetrics the auto engine
-      // uses, graded over the completed breakout leg matching the trade's direction
-      // (BUY → bull leg, SELL → bear leg) when one exists. A short leg still records
-      // (manual entries are never blocked — legBarCountAtEntry shows it was under Leg
-      // Min Bars); no completed leg yet → entry-bar windows, leg fields undefined.
-      // Reducing trades stamp no entry metrics, so skip the work.
-      const legsAtEntry = !isReducing ? calculateAlBrooksLegs(visibleCandlesForEntry) : null;
-      const legAtEntry = legsAtEntry
-        ? (type === 'BUY' ? legsAtEntry.bull[currentIndex] : legsAtEntry.bear[currentIndex])
+      // Entry-condition instrumentation. Reducing trades stamp none of it, so skip
+      // the (expensive) work and derive only the with-trend flag they still need.
+      const instrumentation = !isReducing
+        ? buildEntryInstrumentation(candles, currentIndex, type, currentPrice, autoBacktestConfig, entryMetricsOverride)
         : null;
-      const fallbackMetrics = !isReducing
-        ? computeEntryMetrics(candles, currentIndex, autoBacktestConfig, legAtEntry)
-        : null;
-      // Recent-price-action context: the last N Al Brooks impulse legs + the pullbacks
-      // between them, contiguous back from the entry bar. Same H/L machinery, no pivots.
-      const legSequenceAtEntry = !isReducing
-        ? buildLegSequence(
-            visibleCandlesForEntry,
-            currentIndex,
-            autoBacktestConfig.legSequenceCount ?? 10,
-            autoBacktestConfig.legSequenceDetail ?? 'full'
-          )
-        : null;
-      const barOverlapAvgAtEntry = entryMetricsOverride?.barOverlapAvg ?? fallbackMetrics?.barOverlapAvg;
-      const barRangeAvg = entryMetricsOverride?.barRangeAvg ?? fallbackMetrics?.barRangeAvg;
-      const bullBarRangeAvg = entryMetricsOverride?.bullBarRangeAvg ?? fallbackMetrics?.bullBarRangeAvg;
-      const bearBarRangeAvg = entryMetricsOverride?.bearBarRangeAvg ?? fallbackMetrics?.bearBarRangeAvg;
-      const efficiencyRatioAtEntry = entryMetricsOverride?.efficiencyRatio ?? fallbackMetrics?.efficiencyRatio;
-      const highBreakCount = entryMetricsOverride?.highBreakCount ?? fallbackMetrics?.highBreakCount;
-      const lowBreakCount = entryMetricsOverride?.lowBreakCount ?? fallbackMetrics?.lowBreakCount;
-      const barsCompared = entryMetricsOverride?.barBreakWindow ?? fallbackMetrics?.barBreakWindow;
-      const ema21SlopeAtEntry = entryMetricsOverride?.ema21Slope ?? fallbackMetrics?.ema21Slope;
-      const ema50SlopeAtEntry = entryMetricsOverride?.ema50Slope ?? fallbackMetrics?.ema50Slope;
-      const gapBarRatio = entryMetricsOverride?.ema20GapBarRatio ?? fallbackMetrics?.ema20GapBarRatio;
-      const closeAboveRatio = entryMetricsOverride?.ema20CloseAboveRatio ?? fallbackMetrics?.ema20CloseAboveRatio;
-      const emaInteractionWindow = entryMetricsOverride?.ema20InteractionWindow ?? fallbackMetrics?.ema20InteractionWindow;
-      const pivotHighSeq = entryMetricsOverride?.pivotHighSeq ?? fallbackMetrics?.pivotHighSeq ?? [];
-      const pivotLowSeq = entryMetricsOverride?.pivotLowSeq ?? fallbackMetrics?.pivotLowSeq ?? [];
-      const pivotGapAvgBarsAtEntry = entryMetricsOverride?.pivotGapAvgBars ?? fallbackMetrics?.pivotGapAvgBars;
-      const brrSeries = entryMetricsOverride?.brrSeries ?? fallbackMetrics?.brrSeries;
-      const clvSeries = entryMetricsOverride?.clvSeries ?? fallbackMetrics?.clvSeries;
-      const uwrSeries = entryMetricsOverride?.uwrSeries ?? fallbackMetrics?.uwrSeries;
-      const lwrSeries = entryMetricsOverride?.lwrSeries ?? fallbackMetrics?.lwrSeries;
-      const brrAvgAtEntry = entryMetricsOverride?.brrAvg ?? fallbackMetrics?.brrAvg;
-      const clvAvgAtEntry = entryMetricsOverride?.clvAvg ?? fallbackMetrics?.clvAvg;
-      const uwrAvgAtEntry = entryMetricsOverride?.uwrAvg ?? fallbackMetrics?.uwrAvg;
-      const lwrAvgAtEntry = entryMetricsOverride?.lwrAvg ?? fallbackMetrics?.lwrAvg;
-      const isInitialWith =
-        (type === 'BUY' && ltMarket.startsWith('Bull')) ||
-        (type === 'SELL' && ltMarket.startsWith('Bear'));
+      let isInitialWith: boolean;
+      if (instrumentation) {
+        isInitialWith = instrumentation.isInitialWith;
+      } else {
+        const visibleCandlesForEntry = candles.slice(0, currentIndex + 1);
+        const { ltMarket } = analyzeMarketStructure(visibleCandlesForEntry, calculatePivotPoints(visibleCandlesForEntry));
+        isInitialWith =
+          (type === 'BUY' && ltMarket.startsWith('Bull')) ||
+          (type === 'SELL' && ltMarket.startsWith('Bear'));
+      }
 
       let tradeStopLoss = stopLoss;
       let tradeTarget = target;
@@ -438,41 +402,8 @@ export function createSharedActions(set: StoreSet, get: StoreGet) {
         withTrendSeen: isSameSide ? position?.withTrendSeen || isInitialWith : isInitialWith,
         slTrailed: isReducing ? position?.slTrailed || undefined : undefined,
         journal: journal || undefined,
-        atrDepthAtEntry: !isReducing ? atrDepthAtEntry : undefined,
-        barOverlapAtEntry: !isReducing ? barOverlapAtEntry : undefined,
-        barOverlapAvgAtEntry: !isReducing ? barOverlapAvgAtEntry : undefined,
-        barRangeAvgAtEntry: !isReducing ? barRangeAvg : undefined,
-        bullBarRangeAvgAtEntry: !isReducing ? bullBarRangeAvg : undefined,
-        bearBarRangeAvgAtEntry: !isReducing ? bearBarRangeAvg : undefined,
-        efficiencyRatioAtEntry: !isReducing ? efficiencyRatioAtEntry : undefined,
-        highBreakCountAtEntry: !isReducing ? highBreakCount : undefined,
-        lowBreakCountAtEntry: !isReducing ? lowBreakCount : undefined,
-        barBreakWindowAtEntry: !isReducing ? barsCompared : undefined,
-        ema21SlopeAtEntry: !isReducing ? ema21SlopeAtEntry : undefined,
-        ema50SlopeAtEntry: !isReducing ? ema50SlopeAtEntry : undefined,
-        ema20GapBarRatioAtEntry: !isReducing ? gapBarRatio : undefined,
-        ema20CloseAboveRatioAtEntry: !isReducing ? closeAboveRatio : undefined,
-        ema20InteractionWindowAtEntry: !isReducing ? emaInteractionWindow : undefined,
-        pivotHighSeqAtEntry: !isReducing ? (pivotHighSeq.length ? pivotHighSeq.join('-') : undefined) : undefined,
-        pivotLowSeqAtEntry: !isReducing ? (pivotLowSeq.length ? pivotLowSeq.join('-') : undefined) : undefined,
-        pivotGapAvgBarsAtEntry: !isReducing ? pivotGapAvgBarsAtEntry : undefined,
-        brrAtEntry: !isReducing ? brrSeries : undefined,
-        clvAtEntry: !isReducing ? clvSeries : undefined,
-        uwrAtEntry: !isReducing ? uwrSeries : undefined,
-        lwrAtEntry: !isReducing ? lwrSeries : undefined,
-        brrAvgAtEntry: !isReducing ? brrAvgAtEntry : undefined,
-        clvAvgAtEntry: !isReducing ? clvAvgAtEntry : undefined,
-        uwrAvgAtEntry: !isReducing ? uwrAvgAtEntry : undefined,
-        lwrAvgAtEntry: !isReducing ? lwrAvgAtEntry : undefined,
-        // Leg fields: from the auto-signal's entryMetrics, or the direction-matched
-        // completed leg for manual entries. undefined means the entry was graded at
-        // currentIndex windows (PIVOT mode, or no completed leg yet).
-        legStartIndexAtEntry: !isReducing ? (entryMetricsOverride?.legStartIndex ?? fallbackMetrics?.legStartIndex) : undefined,
-        legEndIndexAtEntry: !isReducing ? (entryMetricsOverride?.legEndIndex ?? fallbackMetrics?.legEndIndex) : undefined,
-        legBarCountAtEntry: !isReducing ? (entryMetricsOverride?.legBarCount ?? fallbackMetrics?.legBarCount) : undefined,
-        maxConsecutiveHighBreaksAtEntry: !isReducing ? (entryMetricsOverride?.maxConsecutiveHighBreaks ?? fallbackMetrics?.maxConsecutiveHighBreaks) : undefined,
-        maxConsecutiveLowBreaksAtEntry: !isReducing ? (entryMetricsOverride?.maxConsecutiveLowBreaks ?? fallbackMetrics?.maxConsecutiveLowBreaks) : undefined,
-        legSequenceAtEntry: !isReducing ? (legSequenceAtEntry && legSequenceAtEntry.length ? legSequenceAtEntry : undefined) : undefined,
+        // Every `*AtEntry` field — present only on non-reducing fills.
+        ...(instrumentation?.fields ?? {}),
         interval: sessionConfig?.interval || '5',
       };
 
@@ -591,7 +522,11 @@ export function createSharedActions(set: StoreSet, get: StoreGet) {
     },
 
     checkTrendReversal: (index: number, currentPrice?: number) => {
-      const { candles, position, trades } = get();
+      const state = get();
+      const { candles, position, trades } = state;
+      // Writes trendReversed onto `position`, which is a rebuilt-every-bar mirror
+      // in multi-trade mode — the flag would never survive to be read.
+      if (isMultiTradeMode(state)) return;
       if (!position || position.quantity === 0 || position.trendReversed) return;
 
       const visibleCandles = candles.slice(0, index + 1);
@@ -631,30 +566,46 @@ export function createSharedActions(set: StoreSet, get: StoreGet) {
       }
     },
 
-    deleteTrade: (tradeId: string) => {
-      const { trades, instrument } = get();
-      const newTrades = trades.filter((t) => t.id !== tradeId);
-      if (newTrades.length === 0) { set({ trades: [], position: null }); return; }
+    // Rebuilds every position-shaped bit of state from a mutated trade log.
+    // Shared by deleteTrade/deleteTrades so the two cannot drift.
+    applyTradeLogMutation: (newTrades: Trade[]) => {
+      const { instrument } = get();
+      if (newTrades.length === 0) {
+        set({ trades: [], position: null, openPositions: [], multiRealizedPnL: 0 });
+        return;
+      }
       const { processedTrades, finalQty, finalAvgPrice, totalRealizedPnL } = recalculateTradesPnL(newTrades);
+
+      // Independent trades don't blend, so a net qty/avg-price pair cannot describe
+      // them — reconstruct the open ones from the log and rebuild the mirror.
+      if (processedTrades.some(t => t.positionId)) {
+        const { openPositions, multiRealizedPnL } = rebuildOpenPositionsFromTrades(processedTrades, instrument);
+        const { candles, currentIndex } = get();
+        set({
+          trades: processedTrades,
+          openPositions,
+          multiRealizedPnL,
+          position: buildNetPositionMirror(openPositions, multiRealizedPnL, instrument, candles[currentIndex]?.close),
+        });
+        return;
+      }
+
       set({
         trades: processedTrades,
+        openPositions: [],
+        multiRealizedPnL: 0,
         position: finalQty !== 0
           ? { instrument, quantity: finalQty, averagePrice: finalAvgPrice, realizedPnL: totalRealizedPnL, unrealizedPnL: 0, stopLoss: undefined, target: undefined, slHit: false, tpHit: false }
           : null,
       });
     },
 
+    deleteTrade: (tradeId: string) => {
+      get().applyTradeLogMutation(get().trades.filter((t) => t.id !== tradeId));
+    },
+
     deleteTrades: (tradeIds: string[]) => {
-      const { trades, instrument } = get();
-      const newTrades = trades.filter((t) => !tradeIds.includes(t.id));
-      if (newTrades.length === 0) { set({ trades: [], position: null }); return; }
-      const { processedTrades, finalQty, finalAvgPrice, totalRealizedPnL } = recalculateTradesPnL(newTrades);
-      set({
-        trades: processedTrades,
-        position: finalQty !== 0
-          ? { instrument, quantity: finalQty, averagePrice: finalAvgPrice, realizedPnL: totalRealizedPnL, unrealizedPnL: 0, stopLoss: undefined, target: undefined, slHit: false, tpHit: false }
-          : null,
-      });
+      get().applyTradeLogMutation(get().trades.filter((t) => !tradeIds.includes(t.id)));
     },
 
     saveCurrentSession: () => {
@@ -667,7 +618,7 @@ export function createSharedActions(set: StoreSet, get: StoreGet) {
 
     saveRemoteSession: async () => {
       const {
-        instrument, trades, position, currentIndex, sessionConfig,
+        instrument, trades, position, openPositions, multiRealizedPnL, currentIndex, sessionConfig,
         drawings, secondaryDrawings, primaryIndicators, secondaryIndicators, secondaryTimeframe,
         showSecondaryChart, tradeQuantity, riskPerTrade, targetRR, autoExitTarget, useAtrForSignals, showPivotRR,
         autoBacktestConfig,
@@ -691,6 +642,8 @@ export function createSharedActions(set: StoreSet, get: StoreGet) {
         currentIndex,
         trades: sanitizedTrades,
         position,
+        openPositions,
+        multiRealizedPnL,
         uiSettings: { drawings, secondaryDrawings, primaryIndicators, secondaryIndicators, secondaryTimeframe, showSecondaryChart, tradeQuantity, riskPerTrade, targetRR, autoExitTarget, useAtrForSignals, showPivotRR, autoBacktestConfig },
       };
       set({ isLoading: true });
@@ -718,7 +671,18 @@ export function createSharedActions(set: StoreSet, get: StoreGet) {
           toDate: state.toDate,
           dataSource: (state as any).dataSource || 'local',
         };
-        return { config, data: { trades: state.trades, position: state.position, currentIndex: state.currentIndex, uiSettings: state.uiSettings } };
+        return {
+          config,
+          data: {
+            trades: state.trades,
+            position: state.position,
+            currentIndex: state.currentIndex,
+            uiSettings: state.uiSettings,
+            // Absent on sessions saved before multi-trade mode existed.
+            openPositions: state.openPositions ?? [],
+            multiRealizedPnL: state.multiRealizedPnL ?? 0,
+          },
+        };
       } catch (error) {
         console.error(error);
         return null;
@@ -727,11 +691,26 @@ export function createSharedActions(set: StoreSet, get: StoreGet) {
       }
     },
 
-    restoreSessionState: (trades: Trade[], position: Position | null, currentIndex: number, uiSettings?: any) => {
+    restoreSessionState: (
+      trades: Trade[],
+      position: Position | null,
+      currentIndex: number,
+      uiSettings?: any,
+      multi?: { openPositions?: OpenPosition[]; multiRealizedPnL?: number }
+    ) => {
       const extraState = uiSettings?.autoBacktestConfig
         ? { autoExitSL: uiSettings.autoBacktestConfig.enabled }
         : {};
-      set((state) => ({ ...state, trades, position, currentIndex, ...(uiSettings || {}), ...extraState }));
+      set((state) => ({
+        ...state,
+        trades,
+        position,
+        currentIndex,
+        openPositions: multi?.openPositions ?? [],
+        multiRealizedPnL: multi?.multiRealizedPnL ?? 0,
+        ...(uiSettings || {}),
+        ...extraState,
+      }));
       // Re-register backend monitor if restoring a filled live position (covers page-refresh path).
       // Skip if pendingOrderId is set — fill not yet confirmed, monitor will be registered in onFilled.
       if (position && (position as any).liveOptionToken && !(position as any).pendingOrderId && get().isLiveMode) {
@@ -745,7 +724,13 @@ export function createSharedActions(set: StoreSet, get: StoreGet) {
       try {
         const state = await restoreBackup(historyId);
         if (state) {
-          set({ trades: state.trades, position: state.position, currentIndex: state.currentIndex });
+          set({
+            trades: state.trades,
+            position: state.position,
+            currentIndex: state.currentIndex,
+            openPositions: state.openPositions ?? [],
+            multiRealizedPnL: state.multiRealizedPnL ?? 0,
+          });
           if (state.uiSettings) set((s) => ({ ...s, ...state.uiSettings }));
           useNotificationStore.getState().notify('Session version restored successfully!', 'success');
         }
@@ -762,7 +747,7 @@ export function createSharedActions(set: StoreSet, get: StoreGet) {
 
     saveRemoteSnapshot: async (name: string) => {
       const {
-        instrument, trades, position, currentIndex, sessionConfig,
+        instrument, trades, position, openPositions, multiRealizedPnL, currentIndex, sessionConfig,
         drawings, secondaryDrawings, primaryIndicators, secondaryIndicators, secondaryTimeframe,
         showSecondaryChart, tradeQuantity, riskPerTrade, targetRR, autoExitTarget, useAtrForSignals, showPivotRR,
         autoBacktestConfig,
@@ -781,6 +766,8 @@ export function createSharedActions(set: StoreSet, get: StoreGet) {
         currentIndex,
         trades,
         position,
+        openPositions,
+        multiRealizedPnL,
         uiSettings: { drawings, secondaryDrawings, primaryIndicators, secondaryIndicators, secondaryTimeframe, showSecondaryChart, tradeQuantity, riskPerTrade, targetRR, autoExitTarget, useAtrForSignals, showPivotRR, autoBacktestConfig },
       };
       set({ isLoading: true });
@@ -821,15 +808,27 @@ export function createSharedActions(set: StoreSet, get: StoreGet) {
     },
 
     getUnrealizedPnL: () => {
-      const { position, candles, currentIndex, isLiveMode } = get();
-      if (!position || position.quantity === 0) return 0;
+      const state = get();
+      const { position, candles, currentIndex, isLiveMode } = state;
+      if (!position) return 0;
+      // Multi-trade mode: the mirror already sums the per-trade unrealized P&L.
+      // Recomputing off the net average would report 0 for an equal-sized
+      // long+short pair even though both trades are live.
+      if (isMultiTradeMode(state) && state.openPositions.length > 0) return position.unrealizedPnL || 0;
+      if (position.quantity === 0) return 0;
       if (isLiveMode) return position.unrealizedPnL || 0;
       const currentCandle = candles[currentIndex];
       if (!currentCandle) return 0;
       return (currentCandle.close - position.averagePrice) * position.quantity;
     },
 
-    getRealizedPnL: () => get().position?.realizedPnL || 0,
+    getRealizedPnL: () => {
+      const state = get();
+      // The mirror is rebuilt from scratch on every mutation, so realized P&L
+      // from already-closed trades lives in its own field in multi-trade mode.
+      if (isMultiTradeMode(state)) return state.multiRealizedPnL;
+      return state.position?.realizedPnL || 0;
+    },
 
     toggleMarkers: (chartId?: 'primary' | 'secondary') => {
       const id = chartId || get().activeChartId;
@@ -842,8 +841,18 @@ export function createSharedActions(set: StoreSet, get: StoreGet) {
     setManualLevels: (manualLevels: SessionStore['manualLevels']) => set({ manualLevels }),
 
     updatePositionTarget: async (newTarget: number) => {
-      const { position, isLiveMode } = get();
+      const state = get();
+      const { position, isLiveMode } = state;
       if (!position) return;
+      // The mirror is rebuilt on every mutation, so an edit here would be silently
+      // discarded. Targets are per-trade in multi-trade mode.
+      if (isMultiTradeMode(state)) {
+        useNotificationStore.getState().notify(
+          'Target is set per trade while "Skip if open" is unchecked — exit the trade from the position panel instead.',
+          'info'
+        );
+        return;
+      }
       const isLong = position.quantity > 0;
       if (isLong && newTarget <= position.averagePrice) {
         useNotificationStore.getState().notify('Target must be above entry price for a LONG position', 'warning');

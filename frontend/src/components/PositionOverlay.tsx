@@ -1,20 +1,25 @@
 import { useState, useRef, useEffect } from 'react';
 import { useSessionStore } from '../stores/sessionStore';
 import { formatCurrency } from '../utils/formatters';
-import { AlertCircle, X, Pencil, Check } from 'lucide-react';
+import { AlertCircle, X, Pencil, Check, ChevronDown, ChevronUp } from 'lucide-react';
 
 
 export function PositionOverlay({ onOpenDetail }: { onOpenDetail?: () => void }) {
     const position = useSessionStore((s) => s.position);
+    const openPositions = useSessionStore((s) => s.openPositions);
     const candles = useSessionStore((s) => s.candles);
     const currentIndex = useSessionStore((s) => s.currentIndex);
     const initiateTrade = useSessionStore((s) => s.initiateTrade);
     const getUnrealizedPnL = useSessionStore((s) => s.getUnrealizedPnL);
     const updatePositionTarget = useSessionStore((s) => s.updatePositionTarget);
+    const closeIndependentPosition = useSessionStore((s) => s.closeIndependentPosition);
 
     // State for dragging
     // We use offset to store the X/Y translation from the top-right corner or absolute position
     const [offset, setOffset] = useState<{ x: number, y: number } | null>(null);
+
+    // Multi-trade mode: per-trade rows, collapsed by default
+    const [expanded, setExpanded] = useState(true);
 
     // State for inline target editing
     const [editingTarget, setEditingTarget] = useState(false);
@@ -96,7 +101,10 @@ export function PositionOverlay({ onOpenDetail }: { onOpenDetail?: () => void })
         setEditingTarget(false);
     };
 
-    if (!position || position.quantity === 0) return null;
+    const isMulti = openPositions.length > 0;
+    // In multi-trade mode the net quantity can legitimately be 0 while several
+    // trades are open (an equal-sized long and short), so gate on the trade list.
+    if (!position || (!isMulti && position.quantity === 0)) return null;
 
     const currentCandle = candles[currentIndex];
     if (!currentCandle) return null;
@@ -126,6 +134,91 @@ export function PositionOverlay({ onOpenDetail }: { onOpenDetail?: () => void })
 
     const hasSL = position.stopLoss && position.stopLoss > 0;
     const hasTP = position.target && position.target > 0;
+
+    // ── Multi-trade mode ────────────────────────────────────────────────────────
+    // Each trade is managed independently, so the panel lists them rather than
+    // pretending there is a single position with one SL/TP to edit.
+    if (isMulti) {
+        const price = currentCandle.close;
+        return (
+            <div
+                className="bg-white border-2 border-gray-400 shadow-2xl rounded-lg p-3 z-[150] min-w-[320px] cursor-move select-none"
+                onMouseDown={handleMouseDown}
+                style={style}
+            >
+                <div className="flex justify-between items-center mb-2 border-b-2 border-gray-200 pb-2">
+                    <span className="text-xs font-bold px-2 py-1 rounded bg-indigo-600 text-white">
+                        NET {position.quantity > 0 ? '+' : ''}{position.quantity}
+                    </span>
+                    <button
+                        onClick={(e) => { e.stopPropagation(); setExpanded(v => !v); }}
+                        onMouseDown={(e) => e.stopPropagation()}
+                        className="text-xs text-gray-700 font-bold flex items-center gap-1 hover:text-indigo-700"
+                        title={expanded ? 'Collapse trade list' : 'Expand trade list'}
+                    >
+                        {openPositions.length} trade{openPositions.length > 1 ? 's' : ''}
+                        {expanded ? <ChevronUp size={13} /> : <ChevronDown size={13} />}
+                    </button>
+                </div>
+
+                <div className="flex justify-between text-xs mb-1">
+                    <span className="text-gray-600 font-medium">Avg Price:</span>
+                    <span className="font-bold text-gray-900">{formatCurrency(position.averagePrice)}</span>
+                </div>
+                <div className="flex justify-between text-sm items-end mb-2">
+                    <div>
+                        <span className="font-semibold text-gray-600 block text-[10px] leading-tight mb-0.5">Unrealized P&L</span>
+                        <span className={`font-bold text-base ${isProfit ? 'text-green-600' : 'text-red-600'}`}>
+                            {formatCurrency(unrealizedPnL)}
+                        </span>
+                    </div>
+                    {onOpenDetail && (
+                        <button
+                            onClick={(e) => { e.stopPropagation(); onOpenDetail(); }}
+                            className="text-[10px] px-2 py-1 bg-blue-500 text-white rounded hover:bg-blue-600 font-semibold"
+                        >
+                            Analysis
+                        </button>
+                    )}
+                </div>
+
+                {expanded && (
+                    <div className="border-t border-gray-200 pt-2 flex flex-col gap-1">
+                        {openPositions.map((p) => {
+                            const long = p.quantity > 0;
+                            const pnl = (price - p.averagePrice) * p.quantity;
+                            return (
+                                <div key={p.id} className="flex items-center gap-2 text-[11px] font-mono">
+                                    <span className={`px-1 rounded font-bold ${long ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-700'}`}>
+                                        {long ? 'L' : 'S'}
+                                    </span>
+                                    <span className="w-10 text-right text-gray-700">{Math.abs(p.quantity)}</span>
+                                    <span className="w-16 text-right text-gray-900">@{p.averagePrice.toFixed(2)}</span>
+                                    <span className="w-16 text-right text-red-600" title="Stop Loss">
+                                        {p.stopLoss ? p.stopLoss.toFixed(2) : '—'}
+                                    </span>
+                                    <span className="w-16 text-right text-green-600" title="Target">
+                                        {p.target ? p.target.toFixed(2) : '—'}
+                                    </span>
+                                    <span className={`w-20 text-right font-bold ${pnl >= 0 ? 'text-green-600' : 'text-red-600'}`}>
+                                        {formatCurrency(pnl)}
+                                    </span>
+                                    <button
+                                        onClick={(e) => { e.stopPropagation(); closeIndependentPosition(p.id, 'MANUAL'); }}
+                                        onMouseDown={(e) => e.stopPropagation()}
+                                        className="text-red-600 hover:text-red-800"
+                                        title="Exit this trade only"
+                                    >
+                                        <X size={12} />
+                                    </button>
+                                </div>
+                            );
+                        })}
+                    </div>
+                )}
+            </div>
+        );
+    }
 
     return (
         <div

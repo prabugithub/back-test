@@ -68,6 +68,11 @@ export interface Trade {
   quantity: number;
   instrument: string;
   pnl?: number;
+  // Ties an exit fill to the exact entry fill it closes. Present only on trades
+  // opened in multi-trade mode (auto-BT with "Skip if open" unchecked), where
+  // several independent trades run concurrently and the sequential net-quantity
+  // walk in groupTradesIntoPositions cannot pair them up. Absent everywhere else.
+  positionId?: string;
   stopLoss?: number;
   target?: number;
   exitReason?: ExitReason;
@@ -178,6 +183,16 @@ export interface LivePosition extends PositionBase {
 
 // Position is the union used throughout the app (store, components, etc.)
 export type Position = BacktestPosition | LivePosition;
+
+// One independently-managed backtest trade. Used only in multi-trade mode
+// (auto-BT with "Skip if open" unchecked): each entry signal opens its own
+// OpenPosition with its own SL/TP and exits on its own, never blending with
+// the others. `store.position` is a derived net mirror of these — see
+// syncNetPositionMirror in sharedActions.ts. Backtest-only by construction.
+export interface OpenPosition extends BacktestPosition {
+  id: string;              // also stamped onto this trade's entry + exit fills as Trade.positionId
+  entryTimestamp: number;  // candle timestamp of the opening bar (seconds, same unit as Candle)
+}
 
 // API request/response types
 export interface GetCandlesParams {

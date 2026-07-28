@@ -28,7 +28,9 @@ Keep this updated whenever the architecture changes (new component, store action
 
 | Field | Read by | Written by | Risk |
 |-------|---------|-----------|------|
-| `position` | PositionOverlay, SessionStats, PlaybackControls, checkSLTPHits, AdvancedChart, runAutoTrailStop, runAutoExitCheck | executeTrade, initiateTrade, updatePositionTarget, updatePositionSL, resetSession, runAutoTrailStop | HIGH — now also carries `autoEntry`/`entryRegime`/`entryBarIndex`/`exitWithTrendSeen`/`exitAgainstBars`/`slTrailed` (auto exit engine state; all optional, absent on manual positions) |
+| `position` | PositionOverlay, SessionStats, TradingPanel, TradeJournalDialog, TradeExitDialog, checkSLTPHits, runAutoTrailStop, runAutoExitCheck | executeTrade, updatePositionTarget, resetSession, runAutoTrailStop, syncNetPositionMirror | HIGH — carries `autoEntry`/`entryRegime`/`entryBarIndex`/`exitWithTrendSeen`/`exitAgainstBars`/`slTrailed` (auto exit engine state; all optional, absent on manual positions). **In multi-trade mode this is a DERIVED net mirror of `openPositions`, rebuilt on every mutation — never trade against it there** |
+| `openPositions` | PositionOverlay (per-trade rows), runMultiPositionCycle, getUnrealizedPnL, persistence | openIndependentPosition, closeIndependentPosition, setAutoBacktestConfig (mode transitions), applyTradeLogMutation, runBatchAutoBacktest, restoreSessionState | HIGH — `[]` outside multi-trade mode, which is exactly what keeps the legacy single-position path unchanged. Only ever mutated through the actions listed; each entry is one independent trade with its own SL/TP |
+| `multiRealizedPnL` | getRealizedPnL, syncNetPositionMirror, persistence | closeIndependentPosition, applyTradeLogMutation, mode transitions | MEDIUM — the mirror is rebuilt from scratch each time, so realized P&L of already-closed independent trades has to live outside it |
 | `targetRR` | PlaybackControls (trade entry calc), setTargetRR | setTargetRR (Trade Settings input) | HIGH — now also recalculates position.target |
 | `autoExitTarget` | checkSLTPHits (read at check-time) | setAutoExitTarget (Trade Settings checkbox) | HIGH |
 | `manualLevels` | handleExecuteTrade in PlaybackControls, setTargetRR (guard) | useChartDrawings RR tool, clearManualLevels | HIGH — guards TP recalculation |
@@ -210,9 +212,10 @@ All Dhan broker API calls live here. Called only from `sharedActions.ts` execute
 
 ## PositionOverlay.tsx
 
-- **Reads:** `position.stopLoss`, `position.target`, `position.averagePrice`, `position.quantity`
-- **Writes (via store):** `updatePositionTarget`, `updatePositionSL`
-- Inline edit of SL/TP → calls store actions → triggers live sync if applicable
+- **Reads:** `position.stopLoss`, `position.target`, `position.averagePrice`, `position.quantity`, `openPositions`
+- **Writes (via store):** `updatePositionTarget`, `initiateTrade` (full exit), `closeIndependentPosition` (per-trade exit)
+- Inline edit of **Target only** — SL is render-only here (there is no `updatePositionSL` action anywhere in `frontend/src`)
+- **Multi-trade mode** (`openPositions.length > 0`): renders a different panel — NET summary + expandable per-trade rows with individual exit buttons. The normal-mode guard `position.quantity === 0 → render nothing` is deliberately bypassed there, because an equal-sized long and short net to zero while both trades are genuinely open.
 - **Known gap:** no flag distinguishing "user manually set TP" vs "RR-calculated TP" — changing RR overwrites manual edits
 
 ---
@@ -247,14 +250,21 @@ All Dhan broker API calls live here. Called only from `sharedActions.ts` execute
 
 ### What is persisted
 ```
-uiSettings: { drawings, primaryIndicators, secondaryIndicators, secondaryTimeframe,
-               showSecondaryChart, tradeQuantity, riskPerTrade, targetRR, autoExitTarget,
-               useAtrForSignals, showPivotRR }
+uiSettings: { drawings, secondaryDrawings, primaryIndicators, secondaryIndicators,
+               secondaryTimeframe, showSecondaryChart, tradeQuantity, riskPerTrade,
+               targetRR, autoExitTarget, useAtrForSignals, showPivotRR,
+               autoBacktestConfig }
 position: { ...full position object including stopLoss, target }
+openPositions: [ ...independent trades, multi-trade mode only ]   // optional
+multiRealizedPnL: number                                          // optional
 trades: [ ...all trades ]
-candles + currentIndex
-sessionConfig
+currentIndex
+securityId / exchangeSegment / dataSource / instrumentType   // sessionConfig, flattened
 ```
+
+`openPositions`/`multiRealizedPnL` are absent on sessions saved before multi-trade mode existed; every restore path defaults them to `[]` / `0`, which lands straight on the single-position path. `sanitizeData` strips `undefined`, so no transform is needed for either.
+
+**Candles are NOT persisted** — `SessionState` has no `candles` field; they are re-fetched/re-resampled on load.
 
 **Known gap:** `targetRR` (in uiSettings) and `position.target` are persisted separately — restoring an old snapshot can produce a mismatch.
 
@@ -275,8 +285,7 @@ sessionConfig
 
 ## AdvancedChart.tsx
 
-- **Read-only** from a store perspective — renders candles, indicators, SL/TP lines, markers
-- SL/TP lines drawn from `position.stopLoss` and `position.target`
+- **Read-only** from a store perspective — renders candles, indicators, markers. It does **not** read `position` at all; markers come from `trades[]`, so independent trades render automatically with no chart change
 - Safe to modify without store impact analysis (visual changes only)
 - Theoretical 1:1, 1:2, 1:3 RR lines shown based on pivot — **not** the actual position TP
 - **Execution details popup** — primary chart only, wired via `chart.subscribeClick`. A click that lands on a bar with `time` matching one or more `trades[].timestamp` (exact match — raw `trades` timestamps are Unix seconds, same unit as candles, unlike the ms-normalized `pos.entryTime`/`exec.timestamp` copies `groupTradesIntoPositions` produces for display) opens a card at the click point for every matching execution. Body is a raw `JSON.stringify(trade, null, 2)` dump (not a curated field list) so every `Trade` field — including all `*AtEntry` instrumentation arrays (`brrAtEntry`/`clvAtEntry`/`uwrAtEntry`/`lwrAtEntry`, etc.) — is directly inspectable, console-object-style. Gated on `activeTool === 'none'` so it never steals a click meant for placing a drawing. Local `useState`, not store state — closes on: playback `currentIndex` changing, a `mousedown` outside both the popup and the chart container, or an in-chart click that doesn't land on a trade bar.
@@ -317,13 +326,33 @@ To avoid computing any metric twice per signal, `evaluateAutoSignals` computes *
 
 ### `AutoBacktestConfig` / `RegimeRules` shape (`autoBacktestEngine.ts`)
 
-Global config (`AutoBacktestConfig`): `enabled`, `skipIfPositionOpen`, `tradeStartTime`/`tradeEndTime`, `useAutoQty` (default **`true`**)/`riskPerTrade`/`minQuantity` (risk-based position sizing — already fully wired in both `batchBacktestSimulator.ts` and `autoBacktestActions.ts`'s `runAutoBacktestCheck`, identical formula: `qty = floor(riskPerTrade / |entry - sl|)`, skip if `< minQuantity`), `autoSquareOff`/`squareOffTime`, `slTpFillMode` (see `checkSLTPHits` entry above), and the 7 instrumentation lookback fields (see above). Per-regime (`RegimeRules`, one each for `uptrend`/`downtrend`/`range`/`reversal`): `enabled`, `direction`, `entryMode` (`PIVOT`/`H_SIGNAL`/`CONFLUENCE`), `allowH1/H2/L1/L2`, `confluenceLookback`, `ltPivotSequence`, `maFilter`, `atrDepthFilter?`/`atrDepthThreshold?`, `efficiencyRatioFilter?`/`efficiencyRatioThreshold?`, the 7 new quality-setup filter/threshold pairs listed above, `htStructureFilter`, `ltStructureFilter?`, `slMethod`/`slAtrMultiplier`/`slFixedPoints`, `targetRR`. `AUTO_BT_PRESETS`' `applyPreset` (`AutoBacktestPanel.tsx`) explicitly re-applies the *current* session's `useAutoQty`/`riskPerTrade`/`minQuantity` after spreading a preset — so the `useAutoQty` default only affects brand-new sessions, never an existing session's or preset's choice.
+Global config (`AutoBacktestConfig`): `enabled`, `skipIfPositionOpen`, `maxOpenPositions?` (multi-trade cap, default **5**, `0` = unlimited — always read as `?? MULTI_TRADE_DEFAULT_CAP`, saved configs get no backfill), `tradeStartTime`/`tradeEndTime`, `useAutoQty` (default **`true`**)/`riskPerTrade`/`minQuantity` (risk-based position sizing — already fully wired in both `batchBacktestSimulator.ts` and `autoBacktestActions.ts`'s `runAutoBacktestCheck`, identical formula: `qty = floor(riskPerTrade / |entry - sl|)`, skip if `< minQuantity`), `autoSquareOff`/`squareOffTime`, `slTpFillMode` (see `checkSLTPHits` entry above), and the 7 instrumentation lookback fields (see above). Per-regime (`RegimeRules`, one each for `uptrend`/`downtrend`/`range`/`reversal`): `enabled`, `direction`, `entryMode` (`PIVOT`/`H_SIGNAL`/`CONFLUENCE`), `allowH1/H2/L1/L2`, `confluenceLookback`, `ltPivotSequence`, `maFilter`, `atrDepthFilter?`/`atrDepthThreshold?`, `efficiencyRatioFilter?`/`efficiencyRatioThreshold?`, the 7 new quality-setup filter/threshold pairs listed above, `htStructureFilter`, `ltStructureFilter?`, `slMethod`/`slAtrMultiplier`/`slFixedPoints`, `targetRR`. `AUTO_BT_PRESETS`' `applyPreset` (`AutoBacktestPanel.tsx`) explicitly re-applies the *current* session's `useAutoQty`/`riskPerTrade`/`minQuantity` after spreading a preset — so the `useAutoQty` default only affects brand-new sessions, never an existing session's or preset's choice.
 
 **Quality-setup filter defaults live in 3 places that can drift out of sync:** `defaultLongRules`/`defaultShortRules` (set `barOverlapFilter: 'max'` @0.4, `barRangeFilter: 'dominance'` @1.0, `ema21SlopeFilter`/`ema50SlopeFilter: 'min'` @0 — scale-invariant so safe as defaults across instruments/timeframes; `barBreakFilter`/`ema20GapBarFilter`/`ema20BiasFilter` stay `'none'`), `defaultRangeRules` (explicitly resets all 4 to `'none'` despite spreading `...defaultLongRules` — Range/Reversal regimes are chop-tolerant by design and must not inherit the trend-quality gates), and `AUTO_BT_PRESETS['Trend Follow'].uptrend/downtrend` (these are hand-written object literals, **not** spread from `defaultLongRules`/`defaultShortRules`, so the new filter defaults had to be duplicated there explicitly — `Range Trader`/`All Regimes` presets don't have this problem since their `uptrend`/`downtrend`/`range` entries do spread the `default*Rules` objects). **If you change a default threshold, check all 3 places, especially the `Trend Follow` preset literal — it's easy to update `defaultLongRules` and forget the preset silently didn't inherit it.**
 
 **Important — `htMarket` is not independent higher-timeframe confirmation.** `analyzeMarketStructure()` in `pivotAnalysis.ts` derives `htMarket` from a longer-lookback EMA(60) slope computed on the *same* base-timeframe `candles` array as `ltMarket` — there is no real HTF resampling. In sustained trends it structurally tends to mirror `ltMarket`. Don't assume `RegimeRules.htStructureFilter` is providing genuine independent confirmation without checking `analyzeMarketStructure`'s actual computation first.
 
 **`htMarket` gained a real Reversal branch (LT Structure filter addition).** `analyzeMarketStructure()`'s HT block now mirrors the LT block's pattern exactly — `Bull-Reversal`/`Bear-Reversal` when the weaker-slope + `hasHL`/`hasLH`-without-`hasHH`/`hasLL` pivot-label condition is met (previously HT could only ever read `Bull-Trend`/`Bear-Trend`/`Range`, no Reversal case existed). This changes what every HT badge display (`ChartToolbar.tsx`, `AutoBacktestPanel.tsx`, `EntryMetricsDashboard.tsx`, `PerformanceDashboard.tsx`, `TradeHistoryDialog.tsx`, `TradeReportDialog.tsx`) can show, not just the filter — they all read the same `htMarket` string. **`RegimeRules` also gained `ltStructureFilter?`** (optional, defaults `'any'`, mirrors `htStructureFilter` but gates on `ltMarket` instead) — both are now widened to 5 options (`any`/`bull_trend`/`bear_trend`/`range`/`reversal`) and checked via the shared `passesStructureFilter(filter, market)` (replaced the old HT-only `passesHtFilter`). `bull_trend`/`bear_trend` in this filter match the **clean** trend state only — `Bull-Trending-range`/`Bear-Trending-range` bucket under `range` here, unlike `getRegimeKey`'s uptrend/downtrend bucketing (deliberately different, filter-specific semantics — do not unify the two).
+
+### Multi-trade mode — independent concurrent trades (`skipIfPositionOpen: false`)
+
+**Single gate:** `isMultiTradeMode({ isLiveMode, autoBacktestConfig })` in `autoBacktestEngine.ts` — `!isLiveMode && enabled && skipIfPositionOpen === false`. Every behavioural difference hangs off this one predicate, so with "Skip if open" checked (the default) or in live mode, **not a single code path changes**. Verified: batch trade logs are byte-identical to pre-change output in single-position mode.
+
+**State:** `openPositions: OpenPosition[]` + `multiRealizedPnL` (`sessionStore.ts`). `OpenPosition = BacktestPosition & { id, entryTimestamp }`. `position` becomes a derived net mirror, rebuilt by `buildNetPositionMirror` (`utils/netPosition.ts`) after every mutation: net qty, |qty|-weighted avg price, summed unrealized, `realizedPnL = multiRealizedPnL`, and `stopLoss`/`target` **only when exactly one trade is open** (a blended level would be meaningless).
+
+**Actions** (`autoBacktestActions.ts`): `openIndependentPosition` / `closeIndependentPosition` / `runMultiPositionCycle(index, { slTpOnly? })`. The cycle applies the canonical per-bar order (trail → SL/TP → signal exits → square-off) to each open trade in turn, reusing `evaluateTrailStop`/`evaluateAutoExitSignal` unchanged — both already take a position-shaped argument. It snapshots the id list up front so a trade opened later in the same bar isn't managed by it.
+
+**Guarded off in multi-trade mode** (they all operate on the mirror and would flatten everything or be silently discarded): `checkSLTPHits`, `checkTrendReversal`, `setTargetRR`, `updatePositionTarget` (`sharedActions.ts`); `runAutoTrailStop`, `runAutoExitCheck`, `runAutoSquareOff` (`autoBacktestActions.ts`); `initiateTrade` (`backtestActions.ts` — manual trading is disabled, with `TradingPanel` greying its own buttons).
+
+**Trade linkage:** `Trade.positionId?` pairs an exit fill with the exact entry fill it closes. `groupTradesIntoPositions` splits the log first — fills **with** a `positionId` group by id, everything else keeps the original sequential net-quantity walk verbatim — so mixed sessions work and legacy sessions are untouched. Ordering falls back to explicit `entryTime` sort only when id-grouped positions are present. `recalculateTradesPnL` settles each independent exit against its own entry. **Every downstream consumer (`TradeHistoryDialog`, `PerformanceDashboard`, `TradeReportDialog`, `EntryMetricsDashboard`, `OptionBacktestModal`) needed zero changes because of this.**
+
+**Batch parity:** `batchBacktestSimulator.ts` holds `openPositions: SimPosition[]` (≤1 element in single-position mode, which preserves the old blend math exactly) and shares one `evaluateBarForPosition` closure between both modes, so the interactive and batch loops cannot drift. `BatchSimResult` gained `finalPositions` + `finalRealizedPnL`; `finalPosition` is now the mirror in multi mode.
+
+**Mode transitions** (`setAutoBacktestConfig`): entering adopts an open single position as trade #1; leaving collapses a single trade back, or — with more than one open — closes them all at the current bar's close as `MANUAL` rows plus a notification. Never silent.
+
+**Shared entry instrumentation:** `utils/entryInstrumentation.ts`'s `buildEntryInstrumentation` is the ~30 `*AtEntry` fields lifted verbatim out of `executeTrade`, now called by both `executeTrade` and `openIndependentPosition` so they cannot drift. (`batchBacktestSimulator` keeps its own documented fallback block — deliberately not merged, since its lookback-window fallbacks differ and unifying them would change existing batch instrumentation output.)
+
+**Check when changing:** anything reading `position` must tolerate it being derived (and netting to zero while trades are open); anything writing `position` must go through `syncNetPositionMirror` or it will be overwritten on the next mutation; any new per-bar exit mechanism must be added to **both** `runMultiPositionCycle` and the single-position sequence in `step('forward')`.
 
 ### Visual filter-configuration layer (`components/autobacktest-visuals/`, `hooks/useFilterPreviewData.ts`)
 

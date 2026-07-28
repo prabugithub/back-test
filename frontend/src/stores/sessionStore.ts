@@ -1,12 +1,12 @@
 import { create } from 'zustand';
-import type { Candle, Trade, Position, TradeJournal, Drawing, ExitReason } from '../types';
+import type { Candle, Trade, Position, OpenPosition, TradeJournal, Drawing, ExitReason } from '../types';
 import type { SessionState } from '../services/firebaseSessionService';
 import type { SavedAutoBacktestConfig } from '../services/autoBacktestConfigService';
 import { createBacktestActions } from './backtestActions';
 import { createLiveActions } from './liveActions';
 import { createSharedActions } from './sharedActions';
 import { createAutoBacktestActions } from './autoBacktestActions';
-import { type AutoBacktestConfig, type EntryMetricsSnapshot, type RegimeKey, defaultAutoBacktestConfig } from '../utils/autoBacktestEngine';
+import { type AutoBacktestConfig, type AutoSignal, type EntryMetricsSnapshot, type RegimeKey, defaultAutoBacktestConfig } from '../utils/autoBacktestEngine';
 
 export interface SessionConfig {
   securityId: string;
@@ -30,7 +30,16 @@ export interface SessionStore {
   candles: Candle[];
   currentIndex: number;
   trades: Trade[];
+  // Single net position — the only model outside multi-trade mode. Inside it,
+  // this becomes a DERIVED net mirror of `openPositions` (rebuilt by
+  // syncNetPositionMirror) and must never be traded against directly.
   position: Position | null;
+  // Multi-trade mode only: the independently-managed open trades. Empty array
+  // everywhere else, which is what keeps the legacy path bit-for-bit unchanged.
+  openPositions: OpenPosition[];
+  // Realized P&L of trades closed in multi-trade mode (the mirror is rebuilt
+  // from scratch each time, so it cannot accumulate this itself).
+  multiRealizedPnL: number;
   instrument: string;
   sessionConfig: SessionConfig | null;
 
@@ -130,10 +139,12 @@ export interface SessionStore {
   checkTrendReversal: (index: number, currentPrice?: number) => void;
   deleteTrade: (tradeId: string) => void;
   deleteTrades: (tradeIds: string[]) => void;
+  // Rebuilds position / openPositions / P&L from a mutated trade log.
+  applyTradeLogMutation: (trades: Trade[]) => void;
   saveCurrentSession: () => void;
   saveRemoteSession: () => Promise<void>;
-  loadRemoteSession: () => Promise<{ config: SessionConfig; data: { trades: Trade[]; position: Position | null; currentIndex: number; uiSettings?: any } } | null>;
-  restoreSessionState: (trades: Trade[], position: Position | null, currentIndex: number, uiSettings?: any) => void;
+  loadRemoteSession: () => Promise<{ config: SessionConfig; data: { trades: Trade[]; position: Position | null; currentIndex: number; uiSettings?: any; openPositions?: OpenPosition[]; multiRealizedPnL?: number } } | null>;
+  restoreSessionState: (trades: Trade[], position: Position | null, currentIndex: number, uiSettings?: any, multi?: { openPositions?: OpenPosition[]; multiRealizedPnL?: number }) => void;
   restoreRemoteBackup: (historyId?: string) => Promise<void>;
   saveRemoteSnapshot: (name: string) => Promise<void>;
   deleteRemoteSnapshot: (id: string) => Promise<void>;
@@ -165,6 +176,14 @@ export interface SessionStore {
   runAutoExitCheck: (index: number) => void;
   runBatchAutoBacktest: () => void;
 
+  // ── Actions (multi-trade mode — "Skip if open" unchecked) ────────────────────
+  // Each open trade is managed on its own; `position` is only a derived mirror.
+  openIndependentPosition: (signal: AutoSignal, quantity: number, index: number, journal?: TradeJournal) => void;
+  closeIndependentPosition: (id: string, reason: ExitReason, fillPrice?: number) => void;
+  // Per-bar lifecycle for every open trade: trail → SL/TP → signal exits → square-off.
+  // `slTpOnly` mirrors what jump()/setCurrentIndex() do on the single-position path.
+  runMultiPositionCycle: (index: number, opts?: { slTpOnly?: boolean }) => void;
+
   // ── Actions (saved auto-backtest configurations) ─────────────────────────────
   loadSavedAutoBacktestConfigsList: () => Promise<void>;
   saveAutoBacktestConfigAs: (name: string) => Promise<void>;
@@ -179,6 +198,8 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
   currentIndex: 0,
   trades: [],
   position: null,
+  openPositions: [],
+  multiRealizedPnL: 0,
   instrument: '',
   sessionConfig: null,
   isLiveMode: false,
@@ -205,8 +226,8 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
   highlightTimestamp: null,
   activeChartId: 'primary',
   sharedActiveTool: 'none',
-  primaryIndicators: ['ema21', 'pivotPoints', 'alBrooks'],
-  secondaryIndicators: ['ema21', 'pivotPoints', 'alBrooks'],
+  primaryIndicators: ['ema21', 'alBrooks'],
+  secondaryIndicators: ['ema21', 'alBrooks'],
   drawings: [],
   secondaryDrawings: [],
   isLivePriceUpdate: false,

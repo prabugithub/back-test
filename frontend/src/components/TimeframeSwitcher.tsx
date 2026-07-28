@@ -45,6 +45,10 @@ export function TimeframeSwitcher() {
                 const currentState = useSessionStore.getState();
                 const savedTrades = [...currentState.trades];
                 const savedPosition = currentState.position ? { ...currentState.position } : null;
+                // Multi-trade mode: the independently-managed trades must survive the
+                // switch too, or they'd be orphaned with only the mirror left behind.
+                const savedOpenPositions = currentState.openPositions.map(p => ({ ...p }));
+                const savedMultiRealizedPnL = currentState.multiRealizedPnL;
                 const currentCandle = currentState.candles[currentState.currentIndex];
                 const currentTimestamp = currentCandle?.timestamp;
 
@@ -164,7 +168,10 @@ export function TimeframeSwitcher() {
 
                     // Immediately restore the session state (synchronously)
                     // Use the saved variables, not fetching from store again
-                    useSessionStore.getState().restoreSessionState(savedTrades, savedPosition, newIndex);
+                    useSessionStore.getState().restoreSessionState(savedTrades, savedPosition, newIndex, undefined, {
+                        openPositions: savedOpenPositions,
+                        multiRealizedPnL: savedMultiRealizedPnL,
+                    });
                 }
             } else {
                 // For API data source, we would need to re-fetch from the API

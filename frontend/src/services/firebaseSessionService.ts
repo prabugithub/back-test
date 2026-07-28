@@ -1,6 +1,6 @@
 import { db } from '../config/firebase';
 import { doc, setDoc, getDoc, writeBatch, deleteDoc, updateDoc } from 'firebase/firestore';
-import type { Trade, Position, Drawing } from '../types';
+import type { Trade, Position, OpenPosition, Drawing } from '../types';
 
 export interface SessionState {
     id?: string;
@@ -14,6 +14,11 @@ export interface SessionState {
     currentIndex: number;
     trades: Trade[];
     position: Position | null;
+    // Multi-trade mode only ("Skip if open" unchecked) — the independently-managed
+    // open trades. Absent on every session saved before the mode existed, which
+    // restores as [] and falls straight back to the single-position path.
+    openPositions?: OpenPosition[];
+    multiRealizedPnL?: number;
     uiSettings?: {
         drawings?: Drawing[];
         secondaryDrawings?: Drawing[];

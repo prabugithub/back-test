@@ -201,7 +201,15 @@ export interface RegimeRules {
 
 export interface AutoBacktestConfig {
   enabled: boolean;
+  // true  — a signal is skipped entirely while any position is open (default).
+  // false — MULTI-TRADE MODE: every qualifying signal opens its own independent
+  //         trade with its own SL/TP/qty, running concurrently with the others
+  //         (long and short can be open at the same time). See isMultiTradeMode.
   skipIfPositionOpen: boolean;
+  // Multi-trade mode only — hard cap on concurrently open independent trades.
+  // 0 = unlimited. undefined on configs saved before this field existed, so
+  // always read it as `?? MULTI_TRADE_DEFAULT_CAP`.
+  maxOpenPositions?: number;
 
   // Trading time window (IST, 24h "HH:MM" — applied to candle timestamps)
   tradeStartTime: string;  // e.g. "09:15" — skip entries before this
@@ -347,9 +355,26 @@ const defaultRangeRules: RegimeRules = {
   ema50SlopeFilter: 'none',
 };
 
+// ─── Multi-trade mode ────────────────────────────────────────────────────────
+// "Skip if open" unchecked turns the engine from one-net-position into N
+// independent concurrent trades. Everything that behaves differently in that
+// mode is gated on this single predicate — it is never true in live mode and
+// never true while "Skip if open" is checked, so the default/manual/live paths
+// are untouched.
+
+export const MULTI_TRADE_DEFAULT_CAP = 5;
+
+export function isMultiTradeMode(s: {
+  isLiveMode: boolean;
+  autoBacktestConfig: AutoBacktestConfig;
+}): boolean {
+  return !s.isLiveMode && s.autoBacktestConfig.enabled && s.autoBacktestConfig.skipIfPositionOpen === false;
+}
+
 export const defaultAutoBacktestConfig: AutoBacktestConfig = {
   enabled: false,
   skipIfPositionOpen: true,
+  maxOpenPositions: MULTI_TRADE_DEFAULT_CAP,
   tradeStartTime: '09:15',
   tradeEndTime: '14:45',
   useAutoQty: true,

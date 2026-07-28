@@ -1,8 +1,9 @@
 // @backtest-only — pure simulation, no store access, no side effects.
 
-import type { Candle, Trade, BacktestPosition, ExitReason } from '../types';
+import type { Candle, Trade, BacktestPosition, OpenPosition, ExitReason } from '../types';
 import type { TradeJournal } from '../types';
-import { type AutoBacktestConfig, type AutoSignal, type RegimeKey, evaluateAutoSignals, evaluateTrailStop, evaluateAutoExitSignal } from './autoBacktestEngine';
+import { type AutoBacktestConfig, type AutoSignal, type RegimeKey, MULTI_TRADE_DEFAULT_CAP, evaluateAutoSignals, evaluateTrailStop, evaluateAutoExitSignal } from './autoBacktestEngine';
+import { buildNetPositionMirror } from './netPosition';
 import { analyzeManualEntry, calculateBarOverlap, averageBarOverlap, calculateBarRanges, averageBarRanges, calculateBarQuality, averageBarQuality, calculateEfficiencyRatio, calculateBarBreaks, calculateEMASlope, calculateEMAInteraction } from './pivotAnalysis';
 import { buildLegSequence } from './legSequence';
 
@@ -21,11 +22,20 @@ interface SimPosition {
   exitWithTrendSeen?: boolean;
   exitAgainstBars?: number;
   slTrailed?: boolean;
+  // Multi-trade mode only — pairs this trade's entry and exit fills. Absent in
+  // single-position mode, where there is only ever one position to talk about.
+  id?: string;
+  entryTimestamp?: number;
 }
 
 export interface BatchSimResult {
   trades: Trade[];
+  // Net view of whatever is still open — one position in single-position mode,
+  // the aggregate mirror of `finalPositions` in multi-trade mode.
   finalPosition: BacktestPosition | null;
+  // Multi-trade mode: the independent trades left open at the end. Empty otherwise.
+  finalPositions: OpenPosition[];
+  finalRealizedPnL: number;
   tradeCount: number;   // completed round-trips (trades with pnl)
   totalPnL: number;
 }
@@ -50,20 +60,29 @@ export function runBatchSimulation(
   onProgress?: (percent: number) => void
 ): BatchSimResult {
   const trades: Trade[] = [];
-  let position: SimPosition | null = null;
+  // Single-position mode keeps at most one element here (the same blended position
+  // it always had); multi-trade mode holds one entry per independent trade.
+  let openPositions: SimPosition[] = [];
+  let multiRealizedPnL = 0;
   let tradeCounter = 0;
   const interval = sessionInterval || '5';
   const total = candles.length - startIndex;
   const reportEvery = Math.max(1, Math.floor(total / 20));
+  // Mirrors isMultiTradeMode() in the store — the batch worker has no isLiveMode.
+  const multi = config.enabled && config.skipIfPositionOpen === false;
 
   function enterPosition(candle: Candle, signal: AutoSignal, qty: number, candleIndex: number) {
     const entryPrice = candle.close;
+    // Multi-trade mode: a new signal sees no existing exposure — it opens its own
+    // trade rather than blending. Single-position mode blends into the open one.
+    const position: SimPosition | null = multi ? null : (openPositions[0] ?? null);
+    const positionId = multi ? `bpos-${tradeCounter}` : undefined;
 
-    // Blend into an already-open position instead of overwriting it — lets
-    // "enter even with a position open" (skipIfPositionOpen: false) pyramid correctly.
-    // Mirrors the same-direction averaging / opposite-direction reduce math in
-    // sharedActions.ts's executeTrade (the live/step-through path), so batch and
-    // interactive runs stay consistent.
+    // Single-position mode: blend into an already-open position rather than
+    // overwriting it — the same-direction averaging / opposite-direction reduce math
+    // from sharedActions.ts's executeTrade, so batch and interactive runs stay
+    // consistent. Multi-trade mode never reaches this: it takes the branch below,
+    // where each signal becomes its own trade with its own SL/TP.
     const currentQty = position ? position.quantity : 0;
     const currentAvgPrice = position ? position.averagePrice : 0;
     const currentRealizedPnL = position ? position.realizedPnL : 0;
@@ -125,6 +144,7 @@ export function runBatchSimulation(
       price: entryPrice,
       quantity: qty,
       instrument,
+      positionId,
       pnl: tradePnL,
       stopLoss: newStopLoss,
       target: newTarget,
@@ -193,7 +213,7 @@ export function runBatchSimulation(
     const isFlip = isReducing && newQty !== 0 && Math.sign(newQty) === tradeSign;
     const opensNewTrade = currentQty === 0 || isFlip;
 
-    position = newQty !== 0 ? {
+    const next: SimPosition | null = newQty !== 0 ? {
       instrument,
       quantity: newQty,
       averagePrice: newAvgPrice,
@@ -206,17 +226,26 @@ export function runBatchSimulation(
       exitWithTrendSeen: opensNewTrade ? undefined : position?.exitWithTrendSeen,
       exitAgainstBars: opensNewTrade ? undefined : position?.exitAgainstBars,
       slTrailed: opensNewTrade ? undefined : position?.slTrailed,
+      id: positionId,
+      entryTimestamp: candle.timestamp,
     } : null;
+
+    // Multi-trade mode appends; single-position mode replaces the one position.
+    if (multi) {
+      if (next) openPositions = [...openPositions, next];
+    } else {
+      openPositions = next ? [next] : [];
+    }
   }
 
-  function exitPosition(candle: Candle, reason: ExitReason, fillPrice?: number) {
-    if (!position) return;
+  function exitPosition(pos: SimPosition, candle: Candle, reason: ExitReason, fillPrice?: number) {
     const exitPrice = fillPrice ?? candle.close;
-    const isLong = position.quantity > 0;
-    const qty = Math.abs(position.quantity);
+    const isLong = pos.quantity > 0;
+    const qty = Math.abs(pos.quantity);
     const pnlPerShare = isLong
-      ? exitPrice - position.averagePrice
-      : position.averagePrice - exitPrice;
+      ? exitPrice - pos.averagePrice
+      : pos.averagePrice - exitPrice;
+    const pnl = pnlPerShare * qty;
     trades.push({
       id: `batch-${Date.now()}-${tradeCounter++}`,
       timestamp: candle.timestamp,
@@ -224,16 +253,78 @@ export function runBatchSimulation(
       price: exitPrice,
       quantity: qty,
       instrument,
-      pnl: pnlPerShare * qty,
-      stopLoss: position.stopLoss,
-      target: position.target,
+      positionId: pos.id,
+      pnl,
+      stopLoss: pos.stopLoss,
+      target: pos.target,
       exitReason: reason,
       slHit: reason === 'SL',
       tpHit: reason === 'TP',
-      slTrailed: position.slTrailed || undefined,
+      slTrailed: pos.slTrailed || undefined,
       interval,
     });
-    position = null;
+    if (multi) multiRealizedPnL += pnl;
+    openPositions = openPositions.filter(p => p !== pos);
+  }
+
+  // The per-bar lifecycle for ONE position: trail → SL/TP touch → signal exits →
+  // square-off. Extracted so single-position and multi-trade runs execute the exact
+  // same sequence — the former calls it once, the latter once per open trade.
+  // Mutates `pos` (trail + reversal state) and returns the exit it decided on.
+  function evaluateBarForPosition(
+    pos: SimPosition, i: number, candle: Candle
+  ): { reason: ExitReason; fillPrice?: number } | null {
+    // ── 0. Pivot trailing stop — ratchet the SL before the touch check below
+    //      tests it (uses only pivots confirmed through bar i-1; ratchet only).
+    const trail = evaluateTrailStop(candles, i, pos, config);
+    if (trail) {
+      pos.stopLoss = trail.newStopLoss;
+      pos.slTrailed = true;
+    }
+
+    // ── 1. SL/TP check ───────────────────────────────────────────────────────
+    // 'exact' (default): fill at the sl/tp price itself the instant intrabar high/low touches it.
+    // 'close': legacy — mirrors checkSLTPHits() backtest path (sharedActions.ts), only fires when
+    //          candle.close crosses the level, filled at that close.
+    const isLong = pos.quantity > 0;
+    const sl = pos.stopLoss ?? 0;
+    const tp = pos.target ?? 0;
+    const fillMode = config.slTpFillMode ?? 'exact';
+
+    if (fillMode === 'exact') {
+      const { high, low } = candle;
+      if (isLong) {
+        if (sl > 0 && low <= sl) return { reason: 'SL', fillPrice: sl };
+        if (tp > 0 && high >= tp) return { reason: 'TP', fillPrice: tp };
+      } else {
+        if (sl > 0 && high >= sl) return { reason: 'SL', fillPrice: sl };
+        if (tp > 0 && low <= tp) return { reason: 'TP', fillPrice: tp };
+      }
+    } else {
+      const close = candle.close;
+      if (isLong) {
+        if (sl > 0 && close <= sl) return { reason: 'SL' };
+        if (tp > 0 && close >= tp) return { reason: 'TP' };
+      } else {
+        if (sl > 0 && close >= sl) return { reason: 'SL' };
+        if (tp > 0 && close <= tp) return { reason: 'TP' };
+      }
+    }
+
+    // ── 2. Price-action exit signals (auto exit engine) ─────────────────────
+    // Evaluated on bar close, after the SL/TP touch check, before square-off.
+    // The reversal state must be persisted even when no exit fires, or the
+    // confirm-bars counter would reset every bar.
+    const { exit, state } = evaluateAutoExitSignal(candles, i, pos, config);
+    pos.exitWithTrendSeen = state.exitWithTrendSeen;
+    pos.exitAgainstBars = state.exitAgainstBars;
+    if (exit) return { reason: exit.reason, fillPrice: candle.close };
+
+    // ── 3. Auto square-off ──────────────────────────────────────────────────
+    if (config.autoSquareOff && candleTimeMinutes(candle.timestamp) >= parseHHMM(config.squareOffTime)) {
+      return { reason: 'TIME_OVER' };
+    }
+    return null;
   }
 
   for (let i = startIndex; i < candles.length; i++) {
@@ -242,85 +333,20 @@ export function runBatchSimulation(
     }
     const candle = candles[i];
 
-    // ── 1. SL/TP check ───────────────────────────────────────────────────────
-    // 'exact' (default): fill at the sl/tp price itself the instant intrabar high/low touches it.
-    // 'close': legacy — mirrors checkSLTPHits() backtest path (sharedActions.ts), only fires when
-    //          candle.close crosses the level, filled at that close.
-    // `position` is a mutable `let` only ever reassigned inside the `enterPosition`/
-    // `exitPosition` closures (called later in this same loop body) — TS's control-flow
-    // narrowing doesn't see those closured assignments as reachable here, so it narrows
-    // the loop-body type of `position` down to `null` and a plain `if (position)` collapses
-    // to `never`. Re-widen explicitly to the declared type before narrowing.
-    const pos = position as SimPosition | null;
-    if (pos) {
-      // ── 0. Pivot trailing stop — ratchet the SL before the touch check below
-      //      tests it (uses only pivots confirmed through bar i-1; ratchet only).
-      const trail = evaluateTrailStop(candles, i, pos, config);
-      if (trail) {
-        pos.stopLoss = trail.newStopLoss;
-        pos.slTrailed = true;
-      }
-      const isLong = pos.quantity > 0;
-      const sl = pos.stopLoss ?? 0;
-      const tp = pos.target ?? 0;
-      const fillMode = config.slTpFillMode ?? 'exact';
-
-      if (fillMode === 'exact') {
-        const { high, low } = candle;
-        if (isLong) {
-          if (sl > 0 && low <= sl) {
-            exitPosition(candle, 'SL', sl);
-          } else if (tp > 0 && high >= tp) {
-            exitPosition(candle, 'TP', tp);
-          }
-        } else {
-          if (sl > 0 && high >= sl) {
-            exitPosition(candle, 'SL', sl);
-          } else if (tp > 0 && low <= tp) {
-            exitPosition(candle, 'TP', tp);
-          }
-        }
-      } else {
-        const close = candle.close;
-        if (isLong) {
-          if (sl > 0 && close <= sl) {
-            exitPosition(candle, 'SL');
-          } else if (tp > 0 && close >= tp) {
-            exitPosition(candle, 'TP');
-          }
-        } else {
-          if (sl > 0 && close >= sl) {
-            exitPosition(candle, 'SL');
-          } else if (tp > 0 && close <= tp) {
-            exitPosition(candle, 'TP');
-          }
-        }
-      }
-    }
-
-    // ── 2. Price-action exit signals (auto exit engine) ─────────────────────
-    // Evaluated on bar close, after the SL/TP touch check, before square-off.
-    // The reversal state must be persisted even when no exit fires, or the
-    // confirm-bars counter would reset every bar.
-    const posForExit = position as SimPosition | null;
-    if (posForExit) {
-      const { exit, state } = evaluateAutoExitSignal(candles, i, posForExit, config);
-      posForExit.exitWithTrendSeen = state.exitWithTrendSeen;
-      posForExit.exitAgainstBars = state.exitAgainstBars;
-      if (exit) exitPosition(candle, exit.reason, candle.close);
-    }
-
-    // ── 3. Auto square-off ──────────────────────────────────────────────────
-    if (position && config.autoSquareOff) {
-      const candleMin = candleTimeMinutes(candle.timestamp);
-      if (candleMin >= parseHHMM(config.squareOffTime)) {
-        exitPosition(candle, 'TIME_OVER');
-      }
+    // ── 1-3. Per-position lifecycle: trail → SL/TP → signal exits → square-off.
+    // Snapshot the array first — exitPosition mutates it as we go.
+    for (const pos of [...openPositions]) {
+      const decision = evaluateBarForPosition(pos, i, candle);
+      if (decision) exitPosition(pos, candle, decision.reason, decision.fillPrice);
     }
 
     // ── 4. Signal check ─────────────────────────────────────────────────────
     if (!config.enabled) continue;
-    if (position !== null && config.skipIfPositionOpen) continue;
+    if (!multi && openPositions.length > 0) continue;
+    if (multi) {
+      const cap = config.maxOpenPositions ?? MULTI_TRADE_DEFAULT_CAP;
+      if (cap > 0 && openPositions.length >= cap) continue;
+    }
 
     const candleMin = candleTimeMinutes(candle.timestamp);
     if (
@@ -346,9 +372,22 @@ export function runBatchSimulation(
 
   const totalPnL = trades.reduce((sum, t) => sum + (t.pnl ?? 0), 0);
 
+  const finalPositions: OpenPosition[] = multi
+    ? openPositions.map(p => ({
+        ...p,
+        id: p.id!,
+        entryTimestamp: p.entryTimestamp!,
+        autoEntry: true,
+      }))
+    : [];
+
   return {
     trades,
-    finalPosition: position as BacktestPosition | null,
+    finalPosition: multi
+      ? buildNetPositionMirror(finalPositions, multiRealizedPnL, instrument, candles[candles.length - 1]?.close)
+      : ((openPositions[0] ?? null) as BacktestPosition | null),
+    finalPositions,
+    finalRealizedPnL: multiRealizedPnL,
     tradeCount: trades.filter(t => t.pnl !== undefined).length,
     totalPnL,
   };

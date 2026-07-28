@@ -3,6 +3,7 @@
 
 import { useNotificationStore } from './notificationStore';
 import type { SessionStore, StoreSet, StoreGet } from './sessionStore';
+import { isMultiTradeMode } from '../utils/autoBacktestEngine';
 
 export function createBacktestActions(set: StoreSet, get: StoreGet) {
   return {
@@ -26,6 +27,8 @@ export function createBacktestActions(set: StoreSet, get: StoreGet) {
         currentIndex: candles.length > 0 ? candles.length - 1 : 0,
         trades: [],
         position: null,
+        openPositions: [],
+        multiRealizedPnL: 0,
         isPlaying: false,
         manualLevels: null,
         pendingExitRequest: null,
@@ -52,10 +55,13 @@ export function createBacktestActions(set: StoreSet, get: StoreGet) {
         get().checkTrendReversal(nextIndex);
         // Canonical per-bar exit order — mirrored in batchBacktestSimulator's loop:
         // trail SL → SL/TP touch check → signal exits → square-off → entry check.
+        // In multi-trade mode runMultiPositionCycle applies that same order to each
+        // open trade in turn; the single-position actions all no-op there.
         get().runAutoTrailStop(nextIndex);
         get().checkSLTPHits(nextIndex);
         get().runAutoExitCheck(nextIndex);
         get().runAutoSquareOff(nextIndex);
+        get().runMultiPositionCycle(nextIndex);
         get().runAutoBacktestCheck(nextIndex);
       } else if (direction === 'backward' && currentIndex > 0) {
         set({ currentIndex: currentIndex - 1 });
@@ -70,6 +76,7 @@ export function createBacktestActions(set: StoreSet, get: StoreGet) {
         set({ currentIndex: newIndex });
         get().checkTrendReversal(newIndex);
         get().checkSLTPHits(newIndex);
+        get().runMultiPositionCycle(newIndex, { slTpOnly: true });
       } else if (newIndex < 0) {
         set({ currentIndex: 0 });
       } else {
@@ -84,6 +91,7 @@ export function createBacktestActions(set: StoreSet, get: StoreGet) {
       if (index >= 0 && index < candles.length) {
         set({ currentIndex: index });
         get().checkSLTPHits(index);
+        get().runMultiPositionCycle(index, { slTpOnly: true });
       }
     },
 
@@ -93,6 +101,17 @@ export function createBacktestActions(set: StoreSet, get: StoreGet) {
       stopLoss?: number,
       target?: number
     ) => {
+      // Multi-trade mode has no single position for a manual order to act on —
+      // entries are auto-only and exits go through closeIndependentPosition.
+      // TradingPanel disables its buttons too; this is the backstop for the
+      // keyboard shortcuts and any other caller.
+      if (isMultiTradeMode(get())) {
+        useNotificationStore.getState().notify(
+          'Manual trading is disabled while "Skip if open" is unchecked — exit trades from the position panel.',
+          'info'
+        );
+        return;
+      }
       set({ isPlaying: false, pendingTradeRequest: { type, quantity, stopLoss, target } });
     },
 
@@ -153,6 +172,8 @@ export function createBacktestActions(set: StoreSet, get: StoreGet) {
         currentIndex: 0,
         trades: [],
         position: null,
+        openPositions: [],
+        multiRealizedPnL: 0,
         isPlaying: false,
         manualLevels: null,
         pendingExitRequest: null,
