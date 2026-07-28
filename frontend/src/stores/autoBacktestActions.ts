@@ -8,7 +8,7 @@ import {
 } from '../utils/autoBacktestEngine';
 import { useNotificationStore } from './notificationStore';
 import type { ExitReason, OpenPosition, Trade, TradeJournal } from '../types';
-import { analyzeManualEntry } from '../utils/pivotAnalysis';
+import { calculateMAPosition } from '../utils/pivotAnalysis';
 import { buildEntryInstrumentation } from '../utils/entryInstrumentation';
 import { buildNetPositionMirror } from '../utils/netPosition';
 import {
@@ -346,11 +346,10 @@ export function createAutoBacktestActions(set: StoreSet, get: StoreGet) {
 
       set({ lastAutoSignalReason: signal.reason });
 
-      const maAnalysis = analyzeManualEntry(candles, index, signal.type);
       const journal: TradeJournal = {
         ltMarket: signal.ltMarket,
         htMarket: signal.htMarket,
-        entryPosition: maAnalysis.entryPosition,
+        entryPosition: calculateMAPosition(candles, index, signal.type),
         llhhPivot: signal.llhhPivot,
         entrySign: signal.reason,
         notes: `[Auto BT] ${signal.reason}`,

@@ -1574,7 +1574,7 @@ export function AdvancedChart({
                     </div>
                   )}
                   {/* Raw object dump — full trade record (journal + every *AtEntry instrumentation
-                      field) so values like brrAtEntry/clvAtEntry/uwrAtEntry/lwrAtEntry can be
+                      field, including legSequenceAtEntry's per-leg brr/clv/uwr/lwr) so values can be
                       eyeballed directly, the same way you'd inspect an object in the console. */}
                   <pre className="bg-gray-50 border border-gray-100 rounded p-2 text-[10px] leading-snug text-gray-700 whitespace-pre-wrap break-words">
                     {JSON.stringify(t, null, 2)}

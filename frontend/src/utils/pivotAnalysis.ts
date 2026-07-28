@@ -485,11 +485,11 @@ export function calculateConsecutiveBreaks(
  * convenience specific to that function, not appropriate for raw instrumentation.
  */
 export function calculateEMASlope(candles: Candle[], currentIndex: number, period: number, slopeLookback: number): number | undefined {
-    const visible = candles.slice(0, currentIndex + 1);
-    const ema = calculateEMA(visible, period);
-    if (ema.length < slopeLookback + 1) return undefined;
-    const current = ema[ema.length - 1].value;
-    const prior = ema[ema.length - 1 - slopeLookback].value;
+    // getEmaValueAt is the cached lookup (indicators.ts) — same formula as the
+    // full-recompute this replaced, amortized O(1) instead of O(n) per call.
+    const current = getEmaValueAt(candles, currentIndex, period);
+    const prior = getEmaValueAt(candles, currentIndex - slopeLookback, period);
+    if (current === null || prior === null) return undefined;
     return (current - prior) / slopeLookback;
 }
 
@@ -506,11 +506,10 @@ export interface EMAInteractionStats {
  * on-MA/gap check (0.01% of the EMA value) rather than inventing a new one.
  */
 export function calculateEMAInteraction(candles: Candle[], currentIndex: number, period: number = 20, lookback: number = 20): EMAInteractionStats {
-    const visible = candles.slice(0, currentIndex + 1);
-    const ema = calculateEMA(visible, period);
-    if (ema.length === 0) return { barsCompared: 0 };
-
-    const emaMap = new Map(ema.map(e => [e.time, e.value]));
+    // Cached per-bar lookup (indicators.ts) instead of slicing + rebuilding the
+    // whole EMA series + a timestamp Map on every call — same values, O(window)
+    // instead of O(n) per call.
+    if (currentIndex < period - 1) return { barsCompared: 0 };
     const start = Math.max(period - 1, currentIndex - lookback + 1);
     const bufferMult = 0.0001;
 
@@ -520,8 +519,8 @@ export function calculateEMAInteraction(candles: Candle[], currentIndex: number,
 
     for (let i = start; i <= currentIndex; i++) {
         const c = candles[i];
-        const maVal = emaMap.get(c.timestamp);
-        if (maVal === undefined) continue;
+        const maVal = getEmaValueAt(candles, i, period);
+        if (maVal === null) continue;
         const buffer = maVal * bufferMult;
         const touches = c.low <= maVal + buffer && c.high >= maVal - buffer;
         if (!touches) touchless++;
@@ -612,26 +611,29 @@ export function averagePivotGapBars(stats: PivotSequenceStats): number | undefin
 }
 
 /**
- * Generic function to calculate MA position for any given 3 candles ending at 'index'
+ * Generic function to calculate MA position for any given 3 candles ending at 'index'.
+ * Exported so hot call sites that only need this (not the pivot/market-structure work
+ * analyzeManualEntry also does) can call it directly instead of computing and discarding
+ * that extra work. Uses the cached getEmaValueAt lookup (indicators.ts) — O(1) per
+ * candle instead of recomputing the full EMA21 series on every call.
  */
-function calculateMAPosition(
+export function calculateMAPosition(
     candles: Candle[],
     index: number,
     tradeType: 'BUY' | 'SELL'
 ): 'gap' | 'on-MA' | 'gap-opposite' | '' {
-    const ema21 = calculateEMA(candles, 21);
-    if (ema21.length === 0 || index < 2) return '';
+    if (index < 2) return '';
 
     const testCandles = [
         candles[index],
         candles[index - 1],
         candles[index - 2],
     ];
-
-    // Build lookup map for efficiency
-    const maMap = new Map(ema21.map(m => [m.time, m.value]));
-
-    const maValues = testCandles.map(c => maMap.get(c.timestamp) ?? null);
+    const maValues = [
+        getEmaValueAt(candles, index, 21),
+        getEmaValueAt(candles, index - 1, 21),
+        getEmaValueAt(candles, index - 2, 21),
+    ];
 
     if (maValues.some(ma => ma === null)) return '';
 

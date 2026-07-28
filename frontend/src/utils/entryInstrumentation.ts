@@ -83,14 +83,6 @@ export function buildEntryInstrumentation(
       pivotHighSeqAtEntry: pivotHighSeq.length ? pivotHighSeq.join('-') : undefined,
       pivotLowSeqAtEntry: pivotLowSeq.length ? pivotLowSeq.join('-') : undefined,
       pivotGapAvgBarsAtEntry: entryMetricsOverride?.pivotGapAvgBars ?? fallback?.pivotGapAvgBars,
-      brrAtEntry: entryMetricsOverride?.brrSeries ?? fallback?.brrSeries,
-      clvAtEntry: entryMetricsOverride?.clvSeries ?? fallback?.clvSeries,
-      uwrAtEntry: entryMetricsOverride?.uwrSeries ?? fallback?.uwrSeries,
-      lwrAtEntry: entryMetricsOverride?.lwrSeries ?? fallback?.lwrSeries,
-      brrAvgAtEntry: entryMetricsOverride?.brrAvg ?? fallback?.brrAvg,
-      clvAvgAtEntry: entryMetricsOverride?.clvAvg ?? fallback?.clvAvg,
-      uwrAvgAtEntry: entryMetricsOverride?.uwrAvg ?? fallback?.uwrAvg,
-      lwrAvgAtEntry: entryMetricsOverride?.lwrAvg ?? fallback?.lwrAvg,
       // Leg fields have no fallback recompute: undefined simply means the entry was
       // graded with currentIndex windows (PIVOT mode / no completed leg / degenerate leg).
       legStartIndexAtEntry: entryMetricsOverride?.legStartIndex ?? fallback?.legStartIndex,

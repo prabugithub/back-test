@@ -4,7 +4,7 @@ import type { Candle, Trade, BacktestPosition, OpenPosition, ExitReason } from '
 import type { TradeJournal } from '../types';
 import { type AutoBacktestConfig, type AutoSignal, type RegimeKey, MULTI_TRADE_DEFAULT_CAP, evaluateAutoSignals, evaluateTrailStop, evaluateAutoExitSignal } from './autoBacktestEngine';
 import { buildNetPositionMirror } from './netPosition';
-import { analyzeManualEntry, calculateBarOverlap, averageBarOverlap, calculateBarRanges, averageBarRanges, calculateBarQuality, averageBarQuality, calculateEfficiencyRatio, calculateBarBreaks, calculateEMASlope, calculateEMAInteraction } from './pivotAnalysis';
+import { calculateMAPosition, calculateBarOverlap, averageBarOverlap, calculateBarRanges, averageBarRanges, calculateEfficiencyRatio, calculateBarBreaks, calculateEMASlope, calculateEMAInteraction } from './pivotAnalysis';
 import { buildLegSequence } from './legSequence';
 
 interface SimPosition {
@@ -126,7 +126,7 @@ export function runBatchSimulation(
     const journal: TradeJournal = {
       ltMarket: signal.ltMarket,
       htMarket: signal.htMarket,
-      entryPosition: analyzeManualEntry(candles, candleIndex, signal.type).entryPosition,
+      entryPosition: calculateMAPosition(candles, candleIndex, signal.type),
       llhhPivot: signal.llhhPivot,
       entrySign: signal.reason,
       notes: `[Batch BT] ${signal.reason}`,
@@ -161,8 +161,6 @@ export function runBatchSimulation(
       const barOverlapAtEntry = calculateBarOverlap(candles, candleIndex, config.barOverlapLookback ?? 8);
       const barRangeSamples = calculateBarRanges(candles, candleIndex, config.barRangeLookback ?? 20);
       const barRangeFallback = averageBarRanges(barRangeSamples);
-      const barQualitySamples = calculateBarQuality(candles, candleIndex, config.barQualityLookback ?? 20);
-      const barQualityFallback = averageBarQuality(barQualitySamples);
       const barBreakFallback = calculateBarBreaks(candles, candleIndex, config.barBreakLookback ?? 20);
       const emaInteractionFallback = calculateEMAInteraction(candles, candleIndex, 20, config.emaInteractionLookback ?? 20);
       trade.barOverlapAtEntry = barOverlapAtEntry;
@@ -170,14 +168,6 @@ export function runBatchSimulation(
       trade.barRangeAvgAtEntry = entryMetrics?.barRangeAvg ?? barRangeFallback.barRangeAvg;
       trade.bullBarRangeAvgAtEntry = entryMetrics?.bullBarRangeAvg ?? barRangeFallback.bullBarRangeAvg;
       trade.bearBarRangeAvgAtEntry = entryMetrics?.bearBarRangeAvg ?? barRangeFallback.bearBarRangeAvg;
-      trade.brrAtEntry = entryMetrics?.brrSeries ?? barQualitySamples.map(s => s.brr);
-      trade.clvAtEntry = entryMetrics?.clvSeries ?? barQualitySamples.map(s => s.clv);
-      trade.uwrAtEntry = entryMetrics?.uwrSeries ?? barQualitySamples.map(s => s.uwr);
-      trade.lwrAtEntry = entryMetrics?.lwrSeries ?? barQualitySamples.map(s => s.lwr);
-      trade.brrAvgAtEntry = entryMetrics?.brrAvg ?? barQualityFallback.brrAvg;
-      trade.clvAvgAtEntry = entryMetrics?.clvAvg ?? barQualityFallback.clvAvg;
-      trade.uwrAvgAtEntry = entryMetrics?.uwrAvg ?? barQualityFallback.uwrAvg;
-      trade.lwrAvgAtEntry = entryMetrics?.lwrAvg ?? barQualityFallback.lwrAvg;
       trade.efficiencyRatioAtEntry = entryMetrics?.efficiencyRatio ?? calculateEfficiencyRatio(candles, candleIndex, config.efficiencyRatioLookback ?? 10);
       trade.highBreakCountAtEntry = entryMetrics?.highBreakCount ?? barBreakFallback.highBreakCount;
       trade.lowBreakCountAtEntry = entryMetrics?.lowBreakCount ?? barBreakFallback.lowBreakCount;

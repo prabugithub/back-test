@@ -16,8 +16,6 @@ import {
   averageBarOverlap,
   calculateBarRanges,
   averageBarRanges,
-  calculateBarQuality,
-  averageBarQuality,
   calculateBarBreaks,
   calculateConsecutiveBreaks,
   calculateEMASlope,
@@ -236,10 +234,6 @@ export interface AutoBacktestConfig {
   // Bar range instrumentation — trend-strength metric recorded on trade entries
   barRangeLookback: number; // bars looked back for bar-range trend-strength instrumentation (default 20)
 
-  // Bar quality instrumentation — per-bar body/close/wick ratios (BRR, CLV, UWR, LWR)
-  // recorded on trade entries, one sample per candle across the window
-  barQualityLookback: number; // bars looked back for BRR/CLV/UWR/LWR instrumentation when no leg window applies (default 20)
-
   // Kaufman Efficiency Ratio instrumentation — trend efficiency metric recorded on trade entries
   efficiencyRatioLookback: number; // bars looked back for Kaufman Efficiency Ratio (default 10)
 
@@ -385,7 +379,6 @@ export const defaultAutoBacktestConfig: AutoBacktestConfig = {
   slTpFillMode: 'exact',
   barOverlapLookback: 8,
   barRangeLookback: 20,
-  barQualityLookback: 20,
   efficiencyRatioLookback: 10,
   barBreakLookback: 20,
   ema21SlopeLookback: 10,
@@ -518,25 +511,12 @@ export const AUTO_BT_PRESETS: Record<string, Partial<AutoBacktestConfig>> = {
 
 // Bundle of instrumentation metrics computed once per bar in evaluateAutoSignals —
 // reused both for filter gating (evalLong/evalShort) and, via AutoSignal.entryMetrics,
-// for stamping the resulting Trade record without recomputing (calculateEMASlope/
-// calculateEMAInteraction rerun EMA over full history, so recomputation is real cost).
+// for stamping the resulting Trade record without recomputing.
 export interface EntryMetricsSnapshot {
   barOverlapAvg?: number;
   barRangeAvg?: number;
   bullBarRangeAvg?: number;
   bearBarRangeAvg?: number;
-  // Per-candle body/close/wick quality ratios (BRR, CLV, UWR, LWR) across the graded
-  // window — one entry per candle, oldest→newest (e.g. a 7-bar leg yields 7-length
-  // arrays), so the bar-by-bar sequence within the leg can be inspected, not just
-  // the average. *Avg is the mean of the corresponding series.
-  brrSeries?: number[];
-  clvSeries?: number[];
-  uwrSeries?: number[];
-  lwrSeries?: number[];
-  brrAvg?: number;
-  clvAvg?: number;
-  uwrAvg?: number;
-  lwrAvg?: number;
   efficiencyRatio?: number;
   highBreakCount?: number;
   lowBreakCount?: number;
@@ -589,8 +569,8 @@ export interface LegWindow {
 // site derives every metric identically.
 //
 // When legWindow is given (H/L-signal entries + direction-matched manual entries),
-// the leg-strength metrics (ER, overlap, breaks, bar ranges, bar quality — BRR/CLV/
-// UWR/LWR, EMA20 gap-bar, consecutive breaks) window over the COMPLETED breakout leg's own bars — from the
+// the leg-strength metrics (ER, overlap, breaks, bar ranges, EMA20 gap-bar,
+// consecutive breaks) window over the COMPLETED breakout leg's own bars — from the
 // last H/L fired before the breakout to the swing extreme frozen at the next
 // pullback — trimmed to the most recent legMaxBarCount bars for long legs. Pair-wise
 // metrics (overlap, breaks, ER, consecutive runs) use windowBars-1 comparisons so
@@ -622,9 +602,6 @@ export function computeEntryMetrics(
   const barRangeSamples = calculateBarRanges(candles, end,
     windowBars ?? (config.barRangeLookback ?? 20));
   const { barRangeAvg, bullBarRangeAvg, bearBarRangeAvg } = averageBarRanges(barRangeSamples);
-  const barQualitySamples = calculateBarQuality(candles, end,
-    windowBars ?? (config.barQualityLookback ?? 20));
-  const { brrAvg, clvAvg, uwrAvg, lwrAvg } = averageBarQuality(barQualitySamples);
   const { highBreakCount, lowBreakCount, barsCompared: barBreakWindow } =
     calculateBarBreaks(candles, end,
       windowBars !== undefined ? windowBars - 1 : (config.barBreakLookback ?? 20));
@@ -647,14 +624,6 @@ export function computeEntryMetrics(
     barRangeAvg,
     bullBarRangeAvg,
     bearBarRangeAvg,
-    brrSeries: barQualitySamples.map(s => s.brr),
-    clvSeries: barQualitySamples.map(s => s.clv),
-    uwrSeries: barQualitySamples.map(s => s.uwr),
-    lwrSeries: barQualitySamples.map(s => s.lwr),
-    brrAvg,
-    clvAvg,
-    uwrAvg,
-    lwrAvg,
     efficiencyRatio: calculateEfficiencyRatio(candles, end,
       windowBars !== undefined ? windowBars - 1 : (config.efficiencyRatioLookback ?? 10)),
     highBreakCount,
@@ -717,6 +686,23 @@ export function evaluateAutoSignals(
     ...(['uptrend', 'downtrend', 'range', 'reversal'] as RegimeKey[]).filter(k => k !== matchedRegime),
   ];
 
+  // computeEntryMetrics's result depends only on (candles, currentIndex, config's
+  // GLOBAL lookback fields, legWindow) — never on which regime is asking — and
+  // legWindow itself is derived only from currentAbMarker + entryMode==='PIVOT',
+  // both bar-level, not per-regime. So across the up-to-4 regimes tried below there
+  // are at most 2 distinct snapshots (PIVOT-mode window vs. the one shared H/L leg
+  // window). Cache per bar instead of recomputing per regime.
+  const entryMetricsCache = new Map<string, EntryMetricsSnapshot>();
+  const getEntryMetrics = (legWindow: LegWindow | null): EntryMetricsSnapshot => {
+    const key = legWindow ? `${legWindow.startIndex}-${legWindow.endIndex}` : 'none';
+    let cached = entryMetricsCache.get(key);
+    if (!cached) {
+      cached = computeEntryMetrics(candles, currentIndex, config, legWindow);
+      entryMetricsCache.set(key, cached);
+    }
+    return cached;
+  };
+
   for (const regime of regimeOrder) {
     const regimeRules = config[regime];
     if (!regimeRules.enabled) continue;
@@ -737,7 +723,7 @@ export function evaluateAutoSignals(
     // Instrumentation snapshot — computed once per candidate regime, used both for filter
     // gating below and (via the returned AutoSignal.entryMetrics) for stamping the resulting
     // Trade without recomputing.
-    const entryMetrics = computeEntryMetrics(candles, currentIndex, config, legWindow);
+    const entryMetrics = getEntryMetrics(legWindow);
 
     // Leg-strength filters grade the previous completed leg — with any of them active,
     // an H/L entry with no completed leg yet, or a leg shorter than legMinBarCount, is
