@@ -11,8 +11,8 @@ import {
   type SessionState,
 } from '../services/firebaseSessionService';
 import { useNotificationStore } from './notificationStore';
-import { calculatePivotPoints } from '../utils/indicators';
-import { analyzeMarketStructure } from '../utils/pivotAnalysis';
+import { calculatePivotPoints, getPivotPointsUpTo } from '../utils/indicators';
+import { analyzeMarketStructure, analyzeMarketStructureAt } from '../utils/pivotAnalysis';
 import { buildEntryInstrumentation } from '../utils/entryInstrumentation';
 import { buildNetPositionMirror, rebuildOpenPositionsFromTrades } from '../utils/netPosition';
 import {
@@ -529,9 +529,12 @@ export function createSharedActions(set: StoreSet, get: StoreGet) {
       if (isMultiTradeMode(state)) return;
       if (!position || position.quantity === 0 || position.trendReversed) return;
 
-      const visibleCandles = candles.slice(0, index + 1);
-      const pivots = calculatePivotPoints(visibleCandles);
-      const { ltMarket } = analyzeMarketStructure(visibleCandles, pivots);
+      // Cached lookups against the full candles array — checkTrendReversal runs on
+      // every bar of the step() pipeline while a position is open, so re-deriving
+      // pivots/EMA from a fresh candles.slice(0, index + 1) here every bar was the
+      // same O(n)-per-bar cost as the auto-backtest engine's equivalent checks.
+      const pivots = getPivotPointsUpTo(candles, index);
+      const { ltMarket } = analyzeMarketStructureAt(candles, index, pivots);
       const direction = position.quantity > 0 ? 'LONG' : 'SHORT';
 
       const isAgainst =

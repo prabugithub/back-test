@@ -1,5 +1,5 @@
 import type { Candle } from '../types';
-import { calculatePivotPoints, calculateEMA, type PivotPoint } from './indicators';
+import { calculatePivotPoints, calculateEMA, getEmaValueAt, type PivotPoint } from './indicators';
 
 export interface PivotAnalysisResult {
     llhhPivot: 'HH-HL' | 'HH-LL' | 'LH-HL' | 'LH-LL' | '';
@@ -165,6 +165,88 @@ export function analyzeMarketStructure(candles: Candle[], pivots: PivotPoint[]):
     // hasHL/hasLH/hasLL) as the LT branch above for the Reversal case. In sustained trends it
     // structurally tends to agree with ltMarket — don't assume LT/HT agreement or divergence here
     // reflects independent confirmation.
+    let htMarket = 'Range';
+    if (htSlope > 0.02 && lastPrice > currentEma60) {
+        htMarket = 'Bull-Trend';
+    } else if (htSlope < -0.02 && lastPrice < currentEma60) {
+        htMarket = 'Bear-Trend';
+    } else if (htSlope > 0 && lastPrice > currentEma60 && hasHL && !hasHH) {
+        htMarket = 'Bull-Reversal'; // Potential MTR
+    } else if (htSlope < 0 && lastPrice < currentEma60 && hasLH && !hasLL) {
+        htMarket = 'Bear-Reversal'; // Potential MTR
+    }
+
+    return { ltMarket, htMarket };
+}
+
+/**
+ * Same regime read as analyzeMarketStructure, but takes the FULL `candles` array
+ * plus an explicit `currentIndex` instead of a pre-sliced `candles.slice(0,
+ * currentIndex + 1)` view, so it can use the cached EMA lookups (getEmaValueAt)
+ * instead of recomputing calculateEMA(candles, 21/60) over the whole prefix on
+ * every call. Used by the auto-backtest engine's per-bar hot path
+ * (evaluateAutoSignals / evaluateAutoExitSignal / resolveExitRules), which calls
+ * this once per bar (per open position, in multi-trade mode) — recomputing EMA21/
+ * EMA60 from scratch each time is the dominant cost there on any sizeable candle
+ * history. Produces byte-identical output to
+ * analyzeMarketStructure(candles.slice(0, currentIndex + 1), pivots) since
+ * calculateEMA is strictly causal (each value depends only on earlier candles).
+ */
+export function analyzeMarketStructureAt(
+    candles: Candle[],
+    currentIndex: number,
+    pivots: PivotPoint[]
+): { ltMarket: string, htMarket: string } {
+    if (currentIndex < 24) return { ltMarket: 'Range', htMarket: 'Range' };
+
+    const getSlope = (period: number, lookback: number) => {
+        const current = getEmaValueAt(candles, currentIndex, period);
+        const prev = getEmaValueAt(candles, currentIndex - lookback, period);
+        if (current === null || prev === null) return 0;
+        return (current - prev) / lookback;
+    };
+
+    const ltSlope = getSlope(21, 10);
+    const htSlope = getSlope(60, 20);
+
+    const lastPrice = candles[currentIndex].close;
+    const currentEma21 = getEmaValueAt(candles, currentIndex, 21) ?? lastPrice;
+    const currentEma60 = getEmaValueAt(candles, currentIndex, 60) ?? lastPrice;
+
+    // Check bar overlap (Range vs Trend)
+    let overlapCount = 0;
+    const overlapLookback = 10;
+    for (let i = currentIndex - overlapLookback + 1; i <= currentIndex; i++) {
+        const c = candles[i];
+        const prev = candles[i - 1];
+        if (c.high > prev.low && c.low < prev.high) {
+            const overlapRange = Math.min(c.high, prev.high) - Math.max(c.low, prev.low);
+            const totalRange = Math.max(c.high, prev.high) - Math.min(c.low, prev.low);
+            if (overlapRange / totalRange > 0.5) overlapCount++;
+        }
+    }
+    const isHighOverlap = overlapCount > 6;
+
+    // Analyze Pivots
+    const lastPivots = pivots.slice(-4);
+    const hasHH = lastPivots.some(p => p.trendLabel === 'HH');
+    const hasLL = lastPivots.some(p => p.trendLabel === 'LL');
+    const hasHL = lastPivots.some(p => p.trendLabel === 'HL');
+    const hasLH = lastPivots.some(p => p.trendLabel === 'LH');
+
+    // LT Structure Identification
+    let ltMarket = 'Range';
+    if (ltSlope > 0.05 && lastPrice > currentEma21 && hasHH && hasHL) {
+        ltMarket = isHighOverlap ? 'Bull-Trending-range' : 'Bull-Trend';
+    } else if (ltSlope < -0.05 && lastPrice < currentEma21 && hasLL && hasLH) {
+        ltMarket = isHighOverlap ? 'Bear-Trending-range' : 'Bear-Trend';
+    } else if (ltSlope > 0 && lastPrice > currentEma21 && hasHL && !hasHH) {
+        ltMarket = 'Bull-Reversal'; // Potential MTR
+    } else if (ltSlope < 0 && lastPrice < currentEma21 && hasLH && !hasLL) {
+        ltMarket = 'Bear-Reversal'; // Potential MTR
+    }
+
+    // HT Structure Identification — see analyzeMarketStructure's comment above; same caveat applies.
     let htMarket = 'Range';
     if (htSlope > 0.02 && lastPrice > currentEma60) {
         htMarket = 'Bull-Trend';

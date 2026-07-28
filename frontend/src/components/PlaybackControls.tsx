@@ -4,7 +4,7 @@ import { useSessionStore } from '../stores/sessionStore';
 import { useNotificationStore } from '../stores/notificationStore';
 import { formatTimestamp } from '../utils/formatters';
 import { parseColumnarData, resampleCandles, type ColumnarData } from '../utils/resampler';
-import { calculatePivotPoints } from '../utils/indicators';
+import { getPivotPointsUpTo } from '../utils/indicators';
 
 import { fetchCandles } from '../services/api';
 import { getCurrentMarketState } from '../utils/autoBacktestEngine';
@@ -185,7 +185,7 @@ export function PlaybackControls({ onOpenHistory, onOpenDashboard, onOpenBacktes
 
   const memoizedPivots = useMemo(() => {
     if (candles.length === 0) return [];
-    return calculatePivotPoints(candles.slice(0, currentIndex + 1));
+    return getPivotPointsUpTo(candles, currentIndex);
   }, [candles, currentIndex]);
 
   const marketState = useMemo(

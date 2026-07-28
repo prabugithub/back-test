@@ -2,15 +2,15 @@
 
 import type { Candle } from '../types';
 import {
-  calculatePivotPoints,
-  calculateAlBrooks,
-  calculateAlBrooksLegs,
-  calculateEMA,
-  calculateATR,
+  getPivotPointsUpTo,
+  getAlBrooksMarkersUpTo,
+  getAlBrooksLegsAt,
+  getEmaValueAt,
+  getAtrValueAt,
   type PivotPoint,
 } from './indicators';
 import {
-  analyzeMarketStructure,
+  analyzeMarketStructureAt,
   calculateEfficiencyRatio,
   calculateBarOverlap,
   averageBarOverlap,
@@ -607,7 +607,7 @@ export function computeEntryMetrics(
   config: AutoBacktestConfig,
   legWindow?: LegWindow | null
 ): EntryMetricsSnapshot {
-  const pivots = calculatePivotPoints(candles.slice(0, currentIndex + 1));
+  const pivots = getPivotPointsUpTo(candles, currentIndex);
   const pivotSeqStats = getPivotSequenceStats(pivots, 4);
 
   const leg = legWindow && legWindow.endIndex >= 0 ? legWindow : null;
@@ -686,19 +686,20 @@ export function evaluateAutoSignals(
 ): AutoSignal | null {
   if (currentIndex < 50 || candles.length < 51) return null;
 
-  const visibleCandles = candles.slice(0, currentIndex + 1);
   const currentCandle = candles[currentIndex];
   const currentTs = currentCandle.timestamp;
 
-  // Pre-compute indicators (shared across every regime's evaluation below)
-  const pivots = calculatePivotPoints(visibleCandles);
-  const alBrooks = calculateAlBrooks(visibleCandles);
+  // Pre-compute indicators (shared across every regime's evaluation below) —
+  // cached lookups against the full candles array so a bar-by-bar auto-backtest
+  // run doesn't re-derive pivots/AlBrooks/EMA/ATR from scratch every single bar.
+  const pivots = getPivotPointsUpTo(candles, currentIndex);
+  const alBrooks = getAlBrooksMarkersUpTo(candles, currentIndex);
   const ema21 = getEmaAt(candles, currentIndex, 21);
   const ema60 = getEmaAt(candles, currentIndex, 60);
   const atr = getAtrAt(candles, currentIndex);
 
   // Detect regime from LT market structure
-  const { ltMarket, htMarket } = analyzeMarketStructure(visibleCandles, pivots);
+  const { ltMarket, htMarket } = analyzeMarketStructureAt(candles, currentIndex, pivots);
   const matchedRegime = getRegimeKey(ltMarket);
 
   // Shared indicators at this bar
@@ -1122,13 +1123,11 @@ function getPivotSeq(pivots: PivotPoint[]): string {
 }
 
 export function getEmaAt(candles: Candle[], index: number, period: number): number | null {
-  const ema = calculateEMA(candles.slice(0, index + 1), period);
-  return ema.length ? ema[ema.length - 1].value : null;
+  return getEmaValueAt(candles, index, period);
 }
 
 export function getAtrAt(candles: Candle[], index: number): number {
-  const atr = calculateATR(candles.slice(0, index + 1), 14);
-  return atr.length ? atr[atr.length - 1].value : 0;
+  return getAtrValueAt(candles, index, 14);
 }
 
 function findRecentBullPivot(pivots: PivotPoint[], idx: number, candles: Candle[], lookback: number): PivotPoint | null {
@@ -1195,8 +1194,8 @@ const resolveExitRules = (
   if (entryRegime) return config[entryRegime];
   // Restored old session with an open auto position but no stamped regime —
   // fall back to the regime the current LT structure maps to.
-  const visible = candles.slice(0, currentIndex + 1);
-  const { ltMarket } = analyzeMarketStructure(visible, calculatePivotPoints(visible));
+  const pivots = getPivotPointsUpTo(candles, currentIndex);
+  const { ltMarket } = analyzeMarketStructureAt(candles, currentIndex, pivots);
   return config[getRegimeKey(ltMarket)];
 };
 
@@ -1216,7 +1215,7 @@ export function evaluateTrailStop(
   if (!rules.exitTrailPivot) return null;
 
   const isLong = position.quantity > 0;
-  const pivots = calculatePivotPoints(candles.slice(0, currentIndex));
+  const pivots = getPivotPointsUpTo(candles, currentIndex - 1);
   let pivot: PivotPoint | null = null;
   for (let i = pivots.length - 1; i >= 0; i--) {
     if (pivots[i].type === (isLong ? 'bullish' : 'bearish')) { pivot = pivots[i]; break; }
@@ -1261,11 +1260,11 @@ export function evaluateAutoExitSignal(
   const rules = resolveExitRules(candles, currentIndex, position.entryRegime, config);
   if (!rules.exitOnReversal && !rules.exitOnOppSignal && !rules.exitLegDecay) return { exit: null, state };
   const isLong = position.quantity > 0;
-  const visible = candles.slice(0, currentIndex + 1);
 
   // 1. REVERSAL — LT structure against the position for N consecutive checks
   if (rules.exitOnReversal) {
-    const { ltMarket } = analyzeMarketStructure(visible, calculatePivotPoints(visible));
+    const pivots = getPivotPointsUpTo(candles, currentIndex);
+    const { ltMarket } = analyzeMarketStructureAt(candles, currentIndex, pivots);
     const isAgainst = isLong ? ltMarket.startsWith('Bear') : ltMarket.startsWith('Bull');
     const isWith = isLong ? ltMarket.startsWith('Bull') : ltMarket.startsWith('Bear');
     if (isWith) state.exitWithTrendSeen = true;
@@ -1278,7 +1277,7 @@ export function evaluateAutoExitSignal(
 
   // 2. OPP_SIGNAL — opposite Brooks pullback signal on the current bar
   if (rules.exitOnOppSignal) {
-    const marker = calculateAlBrooks(visible).find(m => m.time === candles[currentIndex].timestamp) ?? null;
+    const marker = getAlBrooksMarkersUpTo(candles, currentIndex).find(m => m.time === candles[currentIndex].timestamp) ?? null;
     if (marker) {
       const opp1 = isLong ? 'L1' : 'H1';
       const opp2 = isLong ? 'L2' : 'H2';
@@ -1294,8 +1293,8 @@ export function evaluateAutoExitSignal(
   // 3. LEG_DECAY — re-grade the newest completed with-trend leg formed after entry
   if (rules.exitLegDecay && position.entryBarIndex !== undefined
     && currentIndex - position.entryBarIndex >= (rules.exitLegDecayMinBarsInTrade ?? 3)) {
-    const legs = calculateAlBrooksLegs(visible);
-    const leg = isLong ? legs.bull[currentIndex] : legs.bear[currentIndex];
+    const legs = getAlBrooksLegsAt(candles, currentIndex);
+    const leg = isLong ? legs.bull : legs.bear;
     // Only grade legs whose extreme formed after entry — never re-judge the
     // entry leg the confirmation filters already approved.
     if (leg && leg.endIndex > position.entryBarIndex) {
@@ -1334,8 +1333,7 @@ export function getCurrentMarketState(candles: Candle[], currentIndex: number): 
   if (currentIndex < 25 || candles.length < 26) {
     return { ltMarket: 'Range', htMarket: 'Range', regime: 'range' };
   }
-  const visible = candles.slice(0, currentIndex + 1);
-  const pivots = calculatePivotPoints(visible);
-  const { ltMarket, htMarket } = analyzeMarketStructure(visible, pivots);
+  const pivots = getPivotPointsUpTo(candles, currentIndex);
+  const { ltMarket, htMarket } = analyzeMarketStructureAt(candles, currentIndex, pivots);
   return { ltMarket, htMarket, regime: getRegimeKey(ltMarket) };
 }

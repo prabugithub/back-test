@@ -602,3 +602,152 @@ function runAlBrooks(
 
   return done;
 }
+
+// ─── Per-array memoization (auto-backtest hot path) ───────────────────────────
+//
+// calculatePivotPoints/calculateEMA/calculateATR/runAlBrooks are all strictly
+// causal — the value at bar i is a fold over candles[0..i] only, never anything
+// after it (verified: each loop only ever reads i, i-1, i-2, i-3 and running
+// state built from earlier iterations). That means calling e.g.
+// calculatePivotPoints(candles.slice(0, i + 1)) for every i from 0..N produces,
+// bar for bar, exactly the same PivotPoint[] prefix as calling it ONCE on the
+// full `candles` array and reading off the entries up to bar i — but the naive
+// per-bar slice-and-recompute is O(n) per bar (O(n^2) total across a backtest
+// run), while computing once and indexing is O(n) total. The auto-backtest
+// engine re-derives these on every single bar (entry signal check, trail stop,
+// exit-signal check — each potentially per open position), so this is the
+// actual cost driver behind a slow/laggy auto-backtest on any reasonably long
+// candle history.
+//
+// WeakMap keys on the exact candles array reference, so this only ever pays
+// off when callers pass the SAME stable array (as the auto-backtest loops do)
+// — a fresh slice or a different array always misses and just recomputes,
+// identically to calling the un-cached function directly. Nothing here changes
+// any computed value, only how often it's recomputed.
+
+const pivotPointsCache = new WeakMap<Candle[], PivotPoint[]>();
+
+function getFullPivotPoints(candles: Candle[]): PivotPoint[] {
+  let cached = pivotPointsCache.get(candles);
+  if (!cached) {
+    cached = calculatePivotPoints(candles);
+    pivotPointsCache.set(candles, cached);
+  }
+  return cached;
+}
+
+/** Pivots visible as of `endIndex` (inclusive) — identical to
+ *  calculatePivotPoints(candles.slice(0, endIndex + 1)), amortized O(log n). */
+export function getPivotPointsUpTo(candles: Candle[], endIndex: number): PivotPoint[] {
+  const full = getFullPivotPoints(candles);
+  // barIndex is strictly ascending in `full`, so binary-search the cut point
+  // instead of an O(full.length) filter on every call.
+  let lo = 0, hi = full.length;
+  while (lo < hi) {
+    const mid = (lo + hi) >> 1;
+    if (full[mid].barIndex <= endIndex) lo = mid + 1; else hi = mid;
+  }
+  return full.slice(0, lo);
+}
+
+const emaCache = new WeakMap<Candle[], Map<number, Array<{ time: number; value: number }>>>();
+
+function getFullEma(candles: Candle[], period: number): Array<{ time: number; value: number }> {
+  let byPeriod = emaCache.get(candles);
+  if (!byPeriod) {
+    byPeriod = new Map();
+    emaCache.set(candles, byPeriod);
+  }
+  let cached = byPeriod.get(period);
+  if (!cached) {
+    cached = calculateEMA(candles, period);
+    byPeriod.set(period, cached);
+  }
+  return cached;
+}
+
+/** EMA(period) value at `index` — identical to the last value of
+ *  calculateEMA(candles.slice(0, index + 1), period), amortized O(1). */
+export function getEmaValueAt(candles: Candle[], index: number, period: number): number | null {
+  if (index < period - 1) return null;
+  const full = getFullEma(candles, period);
+  const i = index - (period - 1);
+  return i >= 0 && i < full.length ? full[i].value : null;
+}
+
+const atrCache = new WeakMap<Candle[], Map<number, Array<{ time: number; value: number }>>>();
+
+function getFullAtr(candles: Candle[], period: number): Array<{ time: number; value: number }> {
+  let byPeriod = atrCache.get(candles);
+  if (!byPeriod) {
+    byPeriod = new Map();
+    atrCache.set(candles, byPeriod);
+  }
+  let cached = byPeriod.get(period);
+  if (!cached) {
+    cached = calculateATR(candles, period);
+    byPeriod.set(period, cached);
+  }
+  return cached;
+}
+
+/** ATR(period) value at `index` — identical to the last value of
+ *  calculateATR(candles.slice(0, index + 1), period), amortized O(1). */
+export function getAtrValueAt(candles: Candle[], index: number, period: number = 14): number {
+  if (index < period - 1) return 0;
+  const full = getFullAtr(candles, period);
+  const i = index - (period - 1);
+  return i >= 0 && i < full.length ? full[i].value : 0;
+}
+
+const alBrooksCache = new WeakMap<Candle[], Map<string, { markers: AlBrooksMarker[]; legs: AlBrooksLegsByBar; legHistory: CompletedLeg[] }>>();
+
+function getFullAlBrooks(
+  candles: Candle[],
+  usePullbackDepth: boolean,
+  atrDepthMultiplier: number
+): { markers: AlBrooksMarker[]; legs: AlBrooksLegsByBar; legHistory: CompletedLeg[] } {
+  const key = `${usePullbackDepth}|${atrDepthMultiplier}`;
+  let byKey = alBrooksCache.get(candles);
+  if (!byKey) {
+    byKey = new Map();
+    alBrooksCache.set(candles, byKey);
+  }
+  let cached = byKey.get(key);
+  if (!cached) {
+    cached = runAlBrooks(candles, usePullbackDepth, atrDepthMultiplier);
+    byKey.set(key, cached);
+  }
+  return cached;
+}
+
+/** AlBrooks markers visible as of `endIndex` (inclusive) — identical to
+ *  calculateAlBrooks(candles.slice(0, endIndex + 1), ...), amortized O(log n). */
+export function getAlBrooksMarkersUpTo(
+  candles: Candle[],
+  endIndex: number,
+  usePullbackDepth: boolean = false,
+  atrDepthMultiplier: number = 1.0
+): AlBrooksMarker[] {
+  const full = getFullAlBrooks(candles, usePullbackDepth, atrDepthMultiplier).markers;
+  const maxTime = candles[endIndex]?.timestamp;
+  if (maxTime === undefined) return [];
+  // Markers are pushed in ascending bar-index (== ascending time) order.
+  let lo = 0, hi = full.length;
+  while (lo < hi) {
+    const mid = (lo + hi) >> 1;
+    if (full[mid].time <= maxTime) lo = mid + 1; else hi = mid;
+  }
+  return full.slice(0, lo);
+}
+
+/** Per-bar completed-leg lookup as of `endIndex` — identical to reading
+ *  calculateAlBrooksLegs(candles.slice(0, endIndex + 1)).{bull,bear}[endIndex],
+ *  amortized O(1). */
+export function getAlBrooksLegsAt(
+  candles: Candle[],
+  endIndex: number
+): { bull: AlBrooksLeg | null; bear: AlBrooksLeg | null } {
+  const full = getFullAlBrooks(candles, false, 1.0).legs;
+  return { bull: full.bull[endIndex] ?? null, bear: full.bear[endIndex] ?? null };
+}
