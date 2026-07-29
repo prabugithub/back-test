@@ -2,7 +2,7 @@ import { useMemo, useState, useEffect } from 'react';
 import { createPortal } from 'react-dom';
 import {
   Zap, TrendingUp, TrendingDown, Minus, RefreshCw, BarChart2, Save, Trash2, FolderOpen,
-  Settings2, Compass, LogIn, ShieldCheck, LogOut, ShieldAlert, Download,
+  Settings2, Compass, LogIn, ShieldCheck, LogOut, ShieldAlert, Download, Calendar, X,
 } from 'lucide-react';
 import { useSessionStore } from '../stores/sessionStore';
 import { EntryMetricsDashboard } from './EntryMetricsDashboard';
@@ -152,6 +152,8 @@ export function AutoBacktestPanel({ onNavigate, hidden }: AutoBacktestPanelProps
   const isBatchRunning = useSessionStore(s => s.isBatchBacktestRunning);
   const batchProgress = useSessionStore(s => s.batchBacktestProgress);
   const trades = useSessionStore(s => s.trades);
+  const sessionConfig = useSessionStore(s => s.sessionConfig);
+  const reloadCandlesWithRange = useSessionStore(s => s.reloadCandlesWithRange);
 
   const savedConfigs = useSessionStore(s => s.savedAutoBacktestConfigs);
   const activeConfigId = useSessionStore(s => s.activeAutoBacktestConfigId);
@@ -171,6 +173,48 @@ export function AutoBacktestPanel({ onNavigate, hidden }: AutoBacktestPanelProps
   const [isDeleteConfirmOpen, setIsDeleteConfirmOpen] = useState(false);
   const [isSessionSettingsOpen, setIsSessionSettingsOpen] = useState(false);
   const [hoveredFilterKey, setHoveredFilterKey] = useState<PreviewFilterKey | null>(null);
+
+  // Date range control — lets the date span be changed without leaving this page
+  // (previously required going back to the chart page's Data Settings panel).
+  const [showDateRange, setShowDateRange] = useState(false);
+  const [rangeFromDate, setRangeFromDate] = useState('');
+  const [rangeToDate, setRangeToDate] = useState('');
+  const [rangeSelectedYear, setRangeSelectedYear] = useState(''); // '' = custom range
+  const [isRangeReloading, setIsRangeReloading] = useState(false);
+
+  const rangeYearOptions = useMemo(() => {
+    const currentYear = new Date().getFullYear();
+    const years: number[] = [];
+    for (let y = currentYear; y >= 2015; y--) years.push(y);
+    return years;
+  }, []);
+
+  // Sync draft range with session config whenever the popover opens
+  useEffect(() => {
+    if (showDateRange && sessionConfig) {
+      setRangeFromDate(sessionConfig.fromDate || '');
+      setRangeToDate(sessionConfig.toDate || '');
+      setRangeSelectedYear('');
+    }
+  }, [showDateRange, sessionConfig]);
+
+  const handleRangeYearSelect = (year: string) => {
+    setRangeSelectedYear(year);
+    if (year) {
+      const currentYear = new Date().getFullYear();
+      setRangeFromDate(`${year}-01-01`);
+      // Cap "to date" at today for the current year so we don't request future data
+      setRangeToDate(Number(year) === currentYear ? new Date().toISOString().split('T')[0] : `${year}-12-31`);
+    }
+  };
+
+  const handleLoadDateRange = async () => {
+    if (!sessionConfig) return;
+    setIsRangeReloading(true);
+    const success = await reloadCandlesWithRange(rangeFromDate, rangeToDate, sessionConfig.interval);
+    setIsRangeReloading(false);
+    if (success) setShowDateRange(false);
+  };
 
   useEffect(() => {
     loadSavedAutoBacktestConfigsList();
@@ -255,6 +299,76 @@ export function AutoBacktestPanel({ onNavigate, hidden }: AutoBacktestPanelProps
           <div className="hidden lg:block">
             <h2 className="text-xl font-bold text-slate-800 tracking-tight">Auto Backtesting Engine</h2>
             <p className="text-slate-500 text-xs font-medium">Configure regime rules and run instant batch backtests</p>
+          </div>
+
+          {/* Date Range — change the loaded data span without leaving this page */}
+          <div className="relative">
+            <button
+              onClick={() => setShowDateRange(v => !v)}
+              disabled={!sessionConfig}
+              className="flex items-center gap-1.5 px-2.5 py-1.5 text-xs font-medium text-slate-600 border border-slate-200 rounded-lg hover:bg-slate-50 hover:border-slate-300 transition-all duration-150 active:scale-95 disabled:opacity-50 disabled:cursor-not-allowed"
+              title="Change the loaded date range"
+            >
+              <Calendar size={14} />
+              {sessionConfig?.fromDate && sessionConfig?.toDate
+                ? `${sessionConfig.fromDate} → ${sessionConfig.toDate}`
+                : 'Date Range'}
+            </button>
+
+            {showDateRange && (
+              <div className="absolute top-full left-0 mt-2 bg-white border-2 border-gray-300 rounded-lg shadow-2xl p-4 z-[120] min-w-[280px]">
+                <div className="flex items-center justify-between mb-3 pb-2 border-b">
+                  <h3 className="font-bold text-sm text-gray-800">Date Range</h3>
+                  <button onClick={() => setShowDateRange(false)} className="text-gray-400 hover:text-gray-600">
+                    <X size={16} />
+                  </button>
+                </div>
+
+                <div className="space-y-3">
+                  <div>
+                    <label className="block text-xs font-medium text-gray-700 mb-1">Year</label>
+                    <select
+                      value={rangeSelectedYear}
+                      onChange={(e) => handleRangeYearSelect(e.target.value)}
+                      className="w-full px-2 py-1.5 text-sm border border-gray-300 rounded focus:outline-none focus:ring-2 focus:ring-blue-500"
+                    >
+                      <option value="">Custom Range</option>
+                      {rangeYearOptions.map((y) => (
+                        <option key={y} value={y}>{y}</option>
+                      ))}
+                    </select>
+                  </div>
+
+                  <div>
+                    <label className="block text-xs font-medium text-gray-700 mb-1">From Date</label>
+                    <input
+                      type="date"
+                      value={rangeFromDate}
+                      onChange={(e) => { setRangeFromDate(e.target.value); setRangeSelectedYear(''); }}
+                      className="w-full px-2 py-1.5 text-sm border border-gray-300 rounded focus:outline-none focus:ring-2 focus:ring-blue-500"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="block text-xs font-medium text-gray-700 mb-1">To Date</label>
+                    <input
+                      type="date"
+                      value={rangeToDate}
+                      onChange={(e) => { setRangeToDate(e.target.value); setRangeSelectedYear(''); }}
+                      className="w-full px-2 py-1.5 text-sm border border-gray-300 rounded focus:outline-none focus:ring-2 focus:ring-blue-500"
+                    />
+                  </div>
+
+                  <button
+                    onClick={handleLoadDateRange}
+                    disabled={isRangeReloading || !rangeFromDate || !rangeToDate}
+                    className="w-full px-3 py-2 bg-blue-600 text-white rounded font-medium text-sm hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed"
+                  >
+                    {isRangeReloading ? 'Loading...' : 'Load Data'}
+                  </button>
+                </div>
+              </div>
+            )}
           </div>
         </div>
 

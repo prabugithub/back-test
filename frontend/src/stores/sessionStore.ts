@@ -107,6 +107,11 @@ export interface SessionStore {
 
   // ── Actions (backtest-only) ──────────────────────────────────────────────────
   loadCandles: (candles: Candle[], instrument: string, config?: SessionConfig) => void;
+  // Refetches (API) or re-filters (local) candles for a new date range/timeframe against
+  // the active sessionConfig, then calls loadCandles with the updated range. Shared by
+  // PlaybackControls' Data Settings panel and AutoBacktestPanel's Date Range control so
+  // both stay in sync instead of duplicating the fetch/resample logic.
+  reloadCandlesWithRange: (fromDate: string, toDate: string, timeframe: string, jumpToDateStr?: string) => Promise<boolean>;
   play: () => void;
   pause: () => void;
   step: (direction: 'forward' | 'backward') => void;

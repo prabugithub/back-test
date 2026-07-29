@@ -212,7 +212,7 @@ Two separate panels are accessible from the control bar:
 
 #### Data Settings (gear icon ⚙️)
 
-Requires **"Load Data"** to apply.
+Requires **"Load Data"** to apply. The reload itself runs through `sessionStore.reloadCandlesWithRange()` — the same action backing the [Auto-Backtest Panel's Date Range control](#6-trade-execution-backtesting), so a range/timeframe change behaves identically from either page.
 
 | Field | Description |
 |-------|-------------|
@@ -281,6 +281,8 @@ Per-regime rules are configured through a 5-section **Market → Entry → Confi
 Two elements stay pinned above the scrollable accordion regardless of which section is expanded: the **Live Preview Strip** (see below) and a **Strategy Summary** chip bar — a plain-language, read-only recap of the active regime's current rules (direction, entry mode, MA filter, confirmation-filter count, SL method, RR), derived entirely from `RegimeRules` with no new state. Clicking a chip expands the accordion section that owns that setting. A **Run Full Backtest** footer (status + progress bar + the button itself) stays pinned below the scrollable area so it's always reachable without scrolling.
 
 Session-wide settings that apply across all regimes — Position Management, Trading Window, Quantity/Risk sizing, Auto Square-off, SL/TP Fill Mode, and the Instrumentation Lookbacks — live in a **Session Settings** slide-over drawer (opened from a header button), separate from the per-regime workflow since they aren't scoped to Market/Entry/Confirmation/Exit/Risk. The Instrumentation Lookbacks card additionally hosts **Leg Min Bars** / **Leg Max Bars** (defaults 5/15) — the bounds for the completed-breakout-leg metric windows described under Entry Instrumentation below.
+
+**Date Range control (header):** a button next to the page title showing the currently loaded span (e.g. `2021-01-01 → 2026-01-20`) — click it to open a compact popover with a **Year** quick-select, **From Date**/**To Date** inputs, and a **Load Data** button, so the date range being backtested can be changed without leaving this page (previously required switching back to the Chart page's Data Settings panel). Reuses the same Year quick-select behaviour as the Chart page (`fromDate` = Jan 1, `toDate` = Dec 31, capped at today for the current year) and keeps the current timeframe from the session's config. Refetches (API source) or re-filters (Local source) via the shared `sessionStore.reloadCandlesWithRange()` action — the same one the Chart page's Data Settings panel uses — so both stay in sync. Disabled until a session is loaded.
 
 ### Auto-Backtest Entry Modes — one position vs. independent trades
 
@@ -853,4 +855,4 @@ Dialogs (open on demand, floating modal):
 
 ---
 
-**Last Updated:** 2026-07-25 (Trade History converted from a floating modal to a full-page view; added `PageNavTabs` cross-page navigation and mount-once/hide-don't-unmount state persistence across Chart/Trade Log/Backtest/Dashboard)
+**Last Updated:** 2026-07-28 (Added a Date Range control to the Auto-Backtest Panel header so the loaded date span can be changed without leaving that page; extracted the shared `sessionStore.reloadCandlesWithRange()` action so it and the Chart page's Data Settings panel stay in sync)

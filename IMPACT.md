@@ -38,7 +38,7 @@ Keep this updated whenever the architecture changes (new component, store action
 | `trades` | TradeHistoryDialog, SessionStats | executeTrade, deleteTrade, editTrade | MEDIUM |
 | `drawings` | useChartDrawings (primary), AdvancedChart (primary) | setDrawings (auto-patches Firestore 2s debounce) | LOW |
 | `secondaryDrawings` | useChartDrawings (secondary), AdvancedChart (secondary) | setSecondaryDrawings (auto-patches Firestore 2s debounce) | LOW |
-| `sessionConfig` | PlaybackControls (Data Settings form) | performDataReload | MEDIUM |
+| `sessionConfig` | PlaybackControls (Data Settings form), AutoBacktestPanel (Date Range control) | loadCandles, reloadCandlesWithRange | MEDIUM |
 | `secondaryCandles` | AdvancedChart (secondary chart in live mode) | loadSecondaryCandles, addLiveCandle, setSecondaryTimeframe | LOW — live mode only; backtest ignores this field |
 | `scrollToTimestamp` | AdvancedChart (primary chart only — pans `timeScale` to the matching candle, then clears it back to `null`) | `scrollToTime` (called by TradeHistoryDialog's "Jump to entry"/execution-row jump) | LOW — pure viewport pan, deliberately does not touch `currentIndex`/playback so it can't hide candles revealed after the target |
 | `highlightTimestamp` | AdvancedChart (primary chart only — draws an amber band + arrow over the matching candle in `handleCustomRender`, auto-clears itself back to `null` 3.5s after rendering via `setTimeout`) | `highlightCandle` (called alongside `scrollToTime` by TradeHistoryDialog's jump handler) | LOW — visual-only flash, no state side effects |
@@ -54,6 +54,14 @@ Owns all backtest-only logic. Every action guards `if (get().isLiveMode) return`
 → resets trades, position, playback state, manualLevels
 
 **Check when changing:** live position guard condition, state fields reset list
+
+#### `reloadCandlesWithRange(fromDate, toDate, timeframe, jumpToDateStr?)`
+→ shared by `PlaybackControls`' Data Settings panel and `AutoBacktestPanel`'s header Date Range control — the fetch/resample logic used to be duplicated in `PlaybackControls` (`performDataReload`) before this was extracted; both callers now delegate here instead of drifting independently
+→ reads `sessionConfig` off the store (fails with a notification if null) — for `dataSource === 'api'` calls `fetchCandles()`; for `'local'` re-parses/resamples the bundled Nifty JSON and filters by date
+→ on success calls `loadCandles()` with the updated `{ ...config, interval, fromDate, toDate }`, then optionally jumps `currentIndex` to `jumpToDateStr` via `setCurrentIndex`
+→ returns `Promise<boolean>` (success/failure) — callers use this to decide whether to close their own popover/panel; does **not** manage any caller-local loading-spinner state itself
+
+**Check when changing:** both call sites (`PlaybackControls`' `performDataReload` wrapper, `AutoBacktestPanel`'s `handleLoadDateRange`) expect the same success/failure contract — a behavior change here affects both pages identically
 
 #### `initiateTrade(type, qty, sl, target)`
 → called from PlaybackControls handleExecuteTrade

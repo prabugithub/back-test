@@ -3,14 +3,8 @@ import { Play, Pause, ChevronLeft, ChevronRight, FastForward, CalendarClock, Set
 import { useSessionStore } from '../stores/sessionStore';
 import { useNotificationStore } from '../stores/notificationStore';
 import { formatTimestamp } from '../utils/formatters';
-import { parseColumnarData, resampleCandles, type ColumnarData } from '../utils/resampler';
 import { getPivotPointsUpTo } from '../utils/indicators';
-
-import { fetchCandles } from '../services/api';
 import { getCurrentMarketState } from '../utils/autoBacktestEngine';
-
-// Dynamic import for local data
-const loadNiftyData = () => import('../assets/market-data/nifty5min_data.json');
 
 /**
  * Returns { secondsLeft, totalSeconds, pct } for the current candle based on timeframe.
@@ -161,7 +155,6 @@ export function PlaybackControls({ onOpenHistory, onOpenDashboard, onOpenBacktes
     setCurrentIndex,
     jump,
     initiateTrade,
-    loadCandles,
     tradeQuantity,
     setTradeQuantity,
     riskPerTrade,
@@ -291,123 +284,19 @@ export function PlaybackControls({ onOpenHistory, onOpenDashboard, onOpenBacktes
     }
   }, [showSettings, sessionConfig]);
 
-  // Helper: Perform the actual data loading (reusable)
+  // Helper: Perform the actual data loading (reusable) — delegates to the store so
+  // this logic stays in sync with AutoBacktestPanel's Date Range control.
+  const reloadCandlesWithRange = useSessionStore((s) => s.reloadCandlesWithRange);
   const performDataReload = async (startStr: string, endStr: string, newTimeframe: string, targetDateStr?: string) => {
-    const config = useSessionStore.getState().sessionConfig;
-    if (!config) {
-      useNotificationStore.getState().notify('No active session config found.', 'error');
-      return;
-    }
-
     setIsReloading(true);
-    try {
-      // API Data Source
-      if (config.dataSource === 'api') {
-        const response = await fetchCandles({
-          securityId: config.securityId,
-          exchangeSegment: config.exchangeSegment,
-          instrument: config.instrumentType,
-          interval: newTimeframe,
-          fromDate: startStr,
-          toDate: endStr,
-        });
-
-        if (response.success && response.data.length > 0) {
-          const newConfig = {
-            ...config,
-            interval: newTimeframe,
-            fromDate: startStr,
-            toDate: endStr
-          };
-          loadCandles(response.data, `${config.securityId}-${config.exchangeSegment}`, newConfig);
-          useNotificationStore.getState().notify('Data reloaded successfully (API)!', 'success');
-        } else {
-          throw new Error((response as any).message || 'No data received from API');
-        }
-      }
-      // Local Data Source
-      else {
-        const module = await loadNiftyData();
-        const rawData: any = module.default || module;
-
-        if (!rawData || !rawData.t || !rawData.o || !rawData.h || !rawData.l || !rawData.c || !rawData.v) {
-          throw new Error('Invalid JSON data format');
-        }
-
-        // Local data (Nifty JSON) is already offset by 5.5 hours (IST)
-        let allCandles = parseColumnarData(rawData as ColumnarData, -19800);
-
-        // Filter by date range
-        if (startStr) {
-          const fromTs = new Date(startStr).getTime() / 1000;
-          allCandles = allCandles.filter(c => c.timestamp >= fromTs);
-        }
-        if (endStr) {
-          const toTs = (new Date(endStr).getTime() / 1000) + 86400;
-          allCandles = allCandles.filter(c => c.timestamp < toTs);
-        }
-
-        // Resample (Base is now 5 minutes)
-        let tfMinutes = 5;
-        if (newTimeframe === '1') {
-          tfMinutes = 5; // Fallback for local data since we only have 5m
-          useNotificationStore.getState().notify('1m timeframe not available for local data. Using 5m instead.', 'warning');
-        }
-        if (newTimeframe === '5') tfMinutes = 5;
-        if (newTimeframe === '15') tfMinutes = 15;
-        if (newTimeframe === '30') tfMinutes = 30;
-        if (newTimeframe === '60') tfMinutes = 60;
-        if (newTimeframe === '240') tfMinutes = 240;
-        if (newTimeframe === '1440' || newTimeframe === '1D') tfMinutes = 1440;
-
-        const resampledCandles = tfMinutes === 5 ? allCandles : resampleCandles(allCandles, tfMinutes);
-
-        if (resampledCandles.length === 0) {
-          throw new Error('No candles found for the selected range/timeframe');
-        }
-
-        const newConfig = {
-          ...config,
-          interval: newTimeframe,
-          fromDate: startStr,
-          toDate: endStr
-        };
-
-        loadCandles(resampledCandles, `NIFTY50 (Local ${newTimeframe}m)`, newConfig);
-        useNotificationStore.getState().notify('Data reloaded successfully (Local)!', 'success');
-      }
-
-      // Update local state to match the executed reload
+    const success = await reloadCandlesWithRange(startStr, endStr, newTimeframe, targetDateStr);
+    if (success) {
       setFromDate(startStr);
       setToDate(endStr);
       setTimeframe(newTimeframe);
       setShowSettings(false); // Close settings if open
-
-      // Attempt jump if target date provided
-      if (targetDateStr) {
-        const candles = useSessionStore.getState().candles;
-        const targetTs = new Date(targetDateStr).getTime() / 1000;
-
-        let foundIndex = -1;
-        for (let i = 0; i < candles.length; i++) {
-          if (candles[i].timestamp >= targetTs) {
-            foundIndex = i;
-            break;
-          }
-        }
-
-        if (foundIndex !== -1) {
-          setCurrentIndex(foundIndex);
-          useNotificationStore.getState().notify(`Jumped to ${targetDateStr}`, 'info');
-        }
-      }
-
-    } catch (error: any) {
-      console.error('Failed to reload data:', error);
-      useNotificationStore.getState().notify(`Failed to reload data: ${error.message}`, 'error');
-    } finally {
-      setIsReloading(false);
     }
+    setIsReloading(false);
   };
 
   // Handle data reload with new timeframe/dates
