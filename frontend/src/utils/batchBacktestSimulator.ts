@@ -4,7 +4,7 @@ import type { Candle, Trade, BacktestPosition, OpenPosition, ExitReason } from '
 import type { TradeJournal } from '../types';
 import { type AutoBacktestConfig, type AutoSignal, type RegimeKey, MULTI_TRADE_DEFAULT_CAP, evaluateAutoSignals, evaluateTrailStop, evaluateAutoExitSignal } from './autoBacktestEngine';
 import { buildNetPositionMirror } from './netPosition';
-import { calculateMAPosition, calculateBarOverlap, averageBarOverlap, calculateBarRanges, averageBarRanges, calculateEfficiencyRatio, calculateBarBreaks, calculateEMASlope, calculateEMAInteraction } from './pivotAnalysis';
+import { calculateMAPosition, calculateBarOverlap, averageBarOverlap, calculateBarRanges, averageBarRanges, calculateBarQuality, averageBarQualityIQR, calculateEfficiencyRatio, calculateBarBreaks, calculateEMASlope, calculateEMAInteraction } from './pivotAnalysis';
 import { buildLegSequence } from './legSequence';
 
 interface SimPosition {
@@ -172,6 +172,8 @@ export function runBatchSimulation(
       trade.highBreakCountAtEntry = entryMetrics?.highBreakCount ?? barBreakFallback.highBreakCount;
       trade.lowBreakCountAtEntry = entryMetrics?.lowBreakCount ?? barBreakFallback.lowBreakCount;
       trade.barBreakWindowAtEntry = entryMetrics?.barBreakWindow ?? barBreakFallback.barsCompared;
+      const barQualitySamples = calculateBarQuality(candles, candleIndex, config.barQualityLookback ?? 20);
+      trade.brrAvgIQRAtEntry = entryMetrics?.brrAvgIQR ?? averageBarQualityIQR(barQualitySamples).brrAvgIQR;
       trade.ema21SlopeAtEntry = entryMetrics?.ema21Slope ?? calculateEMASlope(candles, candleIndex, 21, config.ema21SlopeLookback ?? 10);
       trade.ema50SlopeAtEntry = entryMetrics?.ema50Slope ?? calculateEMASlope(candles, candleIndex, 50, config.ema50SlopeLookback ?? 20);
       trade.ema20GapBarRatioAtEntry = entryMetrics?.ema20GapBarRatio ?? emaInteractionFallback.gapBarRatio;

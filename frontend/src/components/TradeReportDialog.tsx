@@ -1,7 +1,7 @@
 import { useState, useMemo } from 'react';
 import { X, Trash2, TrendingUp, TrendingDown, DollarSign, Target, Calendar, BarChart3, FileJson, Printer, FileSpreadsheet, Link as LinkIcon, Activity } from 'lucide-react';
 import { getStoredSessions, deleteTradeSession, updateTradeSession, type TradeSession } from '../utils/tradeStorage';
-import { formatCurrency, formatTimestamp } from '../utils/formatters';
+import { formatCurrency, formatTimestamp, formatDDMMYYYY } from '../utils/formatters';
 import { groupTradesIntoPositions, calculatePerformanceStats, recalculateTradesPnL, exitReasonBadge } from '../utils/tradeAnalysis';
 
 interface TradeReportDialogProps {
@@ -205,7 +205,7 @@ export function TradeReportDialog({ isOpen, onClose, onOpenDashboard }: TradeRep
             },
             performance: selectedSessionStats,
             positions: positions,
-            trades: selectedSession.trades
+            trades: selectedSession.trades.map(t => ({ ...t, formattedDate: formatDDMMYYYY(t.timestamp) }))
         };
 
         const blob = new Blob([JSON.stringify(reportData, null, 2)], { type: 'application/json' });

@@ -395,6 +395,50 @@ export function averageBarQuality(samples: BarQualitySample[]): {
 }
 
 /**
+ * Linear-interpolated quartile (R-7 method, matches numpy/Excel default) of a
+ * pre-sorted array at proportion q in [0,1].
+ */
+function sortedQuantile(sorted: number[], q: number): number {
+    const pos = (sorted.length - 1) * q;
+    const base = Math.floor(pos);
+    const rest = pos - base;
+    return sorted[base + 1] !== undefined
+        ? sorted[base] + rest * (sorted[base + 1] - sorted[base])
+        : sorted[base];
+}
+
+/**
+ * IQR-trimmed mean: drops values outside [Q1-1.5*IQR, Q3+1.5*IQR] (the standard
+ * Tukey outlier fence) before averaging, so a single freak doji/marubozu bar
+ * doesn't skew the window the way a plain mean would. Falls back to the plain
+ * mean when the fence would remove every sample (e.g. all values identical).
+ */
+function iqrTrimmedMean(values: number[]): number | undefined {
+    if (values.length === 0) return undefined;
+    const sorted = [...values].sort((a, b) => a - b);
+    const q1 = sortedQuantile(sorted, 0.25);
+    const q3 = sortedQuantile(sorted, 0.75);
+    const iqr = q3 - q1;
+    const lower = q1 - 1.5 * iqr;
+    const upper = q3 + 1.5 * iqr;
+    const kept = values.filter(v => v >= lower && v <= upper);
+    const xs = kept.length > 0 ? kept : values;
+    return xs.reduce((sum, x) => sum + x, 0) / xs.length;
+}
+
+/**
+ * IQR-trimmed mean Body-to-Range Ratio from calculateBarQuality samples — a
+ * robust variant of averageBarQuality's brrAvg. Undefined when the window is
+ * empty, mirroring averageBarQuality's convention.
+ */
+export function averageBarQualityIQR(samples: BarQualitySample[]): {
+    brrAvgIQR?: number;
+} {
+    if (samples.length === 0) return {};
+    return { brrAvgIQR: iqrTrimmedMean(samples.map(s => s.brr)) };
+}
+
+/**
  * Kaufman Efficiency Ratio: net price displacement over the lookback window
  * divided by the total bar-to-bar distance traveled within it. Bounded in
  * [0,1] — near 1 means the window's moves were efficient/one-directional

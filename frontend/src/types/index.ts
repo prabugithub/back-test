@@ -96,6 +96,7 @@ export interface Trade {
   highBreakCountAtEntry?: number; // count of bars whose high broke the immediately preceding bar's high, within the window
   lowBreakCountAtEntry?: number;  // count of bars whose low broke the immediately preceding bar's low, within the same window
   barBreakWindowAtEntry?: number; // actual bar-to-bar comparisons made for the two counts above (<= configured lookback)
+  brrAvgIQRAtEntry?: number; // IQR-trimmed mean body-to-range ratio over the last N bars ending at entry — outliers outside [Q1-1.5*IQR, Q3+1.5*IQR] dropped before averaging; a robust variant of a plain brrAvg
   ema21SlopeAtEntry?: number; // EMA21 points-per-bar slope over the configured lookback ending at entry
   ema50SlopeAtEntry?: number; // EMA50 points-per-bar slope over the configured lookback ending at entry
   ema20GapBarRatioAtEntry?: number;      // fraction of bars in window not touching EMA20 (Brooks gap bar — strong trend)

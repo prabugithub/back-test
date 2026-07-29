@@ -16,6 +16,8 @@ import {
   averageBarOverlap,
   calculateBarRanges,
   averageBarRanges,
+  calculateBarQuality,
+  averageBarQualityIQR,
   calculateBarBreaks,
   calculateConsecutiveBreaks,
   calculateEMASlope,
@@ -240,6 +242,9 @@ export interface AutoBacktestConfig {
   // High/low break count instrumentation — momentum/persistence metric recorded on trade entries
   barBreakLookback: number; // bars looked back for high/low break counts (default 20)
 
+  // Bar-quality (BRR) IQR instrumentation — robust body-to-range-ratio average recorded on trade entries
+  barQualityLookback?: number; // bars looked back for the IQR-trimmed BRR average, brrAvgIQRAtEntry (default 20)
+
   // EMA slope instrumentation — trend momentum metric recorded on trade entries
   ema21SlopeLookback: number; // bars looked back for EMA21 slope (default 10)
   ema50SlopeLookback: number; // bars looked back for EMA50 slope (default 20)
@@ -381,6 +386,7 @@ export const defaultAutoBacktestConfig: AutoBacktestConfig = {
   barRangeLookback: 20,
   efficiencyRatioLookback: 10,
   barBreakLookback: 20,
+  barQualityLookback: 20,
   ema21SlopeLookback: 10,
   ema50SlopeLookback: 20,
   emaInteractionLookback: 20,
@@ -521,6 +527,7 @@ export interface EntryMetricsSnapshot {
   highBreakCount?: number;
   lowBreakCount?: number;
   barBreakWindow?: number;
+  brrAvgIQR?: number;
   ema21Slope?: number;
   ema50Slope?: number;
   ema20GapBarRatio?: number;
@@ -605,6 +612,9 @@ export function computeEntryMetrics(
   const { highBreakCount, lowBreakCount, barsCompared: barBreakWindow } =
     calculateBarBreaks(candles, end,
       windowBars !== undefined ? windowBars - 1 : (config.barBreakLookback ?? 20));
+  const barQualitySamples = calculateBarQuality(candles, end,
+    windowBars ?? (config.barQualityLookback ?? 20));
+  const { brrAvgIQR } = averageBarQualityIQR(barQualitySamples);
   const legInteraction = calculateEMAInteraction(candles, end, 20,
     windowBars ?? (config.emaInteractionLookback ?? 20));
   // Close-above bias is "always-in" context at the entry bar, not a leg-strength
@@ -629,6 +639,7 @@ export function computeEntryMetrics(
     highBreakCount,
     lowBreakCount,
     barBreakWindow,
+    brrAvgIQR,
     ema21Slope: calculateEMASlope(candles, end, 21, config.ema21SlopeLookback ?? 10),
     ema50Slope: calculateEMASlope(candles, end, 50, config.ema50SlopeLookback ?? 20),
     ema20GapBarRatio: gapBarRatio,

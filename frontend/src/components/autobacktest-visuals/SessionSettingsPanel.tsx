@@ -198,6 +198,14 @@ export function SessionSettingsPanel({ config, onChange, isOpen, onClose }: Sess
                 />
               </div>
               <div className="flex items-center justify-between gap-1">
+                <span className="text-[10px] text-gray-500" title="Bars looked back for the IQR-trimmed body-to-range-ratio average instrumentation on trade records (brrAvgIQRAtEntry)">Bar Quality</span>
+                <input
+                  type="number" min={5} max={50} value={config.barQualityLookback ?? 20}
+                  onChange={e => onChange({ barQualityLookback: Number(e.target.value) })}
+                  className="w-12 px-1.5 py-1 text-xs border rounded text-center"
+                />
+              </div>
+              <div className="flex items-center justify-between gap-1">
                 <span className="text-[10px] text-gray-500" title="Bars looked back for EMA21 slope instrumentation on trade records">EMA21</span>
                 <input
                   type="number" min={3} max={30} value={config.ema21SlopeLookback}

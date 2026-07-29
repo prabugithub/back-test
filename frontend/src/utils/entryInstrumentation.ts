@@ -75,6 +75,7 @@ export function buildEntryInstrumentation(
       highBreakCountAtEntry: entryMetricsOverride?.highBreakCount ?? fallback?.highBreakCount,
       lowBreakCountAtEntry: entryMetricsOverride?.lowBreakCount ?? fallback?.lowBreakCount,
       barBreakWindowAtEntry: entryMetricsOverride?.barBreakWindow ?? fallback?.barBreakWindow,
+      brrAvgIQRAtEntry: entryMetricsOverride?.brrAvgIQR ?? fallback?.brrAvgIQR,
       ema21SlopeAtEntry: entryMetricsOverride?.ema21Slope ?? fallback?.ema21Slope,
       ema50SlopeAtEntry: entryMetricsOverride?.ema50Slope ?? fallback?.ema50Slope,
       ema20GapBarRatioAtEntry: entryMetricsOverride?.ema20GapBarRatio ?? fallback?.ema20GapBarRatio,

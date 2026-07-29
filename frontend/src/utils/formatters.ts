@@ -24,6 +24,24 @@ export function formatTimestamp(timestamp: number): string {
 }
 
 /**
+ * Format timestamp as DD/MM/YYYY (local time, slash-separated).
+ * Used for the `formattedDate` field added to trades on JSON export.
+ */
+export function formatDDMMYYYY(timestamp: number): string {
+  if (!timestamp) return 'N/A';
+
+  // Handle both seconds (Unix) and milliseconds — same 1e11 cutoff as formatTimestamp
+  const tsMs = timestamp > 1e11 ? timestamp : timestamp * 1000;
+  const date = new Date(tsMs);
+
+  const d = date.getDate().toString().padStart(2, '0');
+  const m = (date.getMonth() + 1).toString().padStart(2, '0');
+  const y = date.getFullYear();
+
+  return `${d}/${m}/${y}`;
+}
+
+/**
  * Format time only (UTC)
  */
 export function formatTime(timestamp: number): string {

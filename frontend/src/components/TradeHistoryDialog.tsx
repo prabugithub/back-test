@@ -1,7 +1,7 @@
 import { useMemo, useState } from 'react';
 import { ChevronRight, ChevronDown, ClipboardList, FileJson, Printer, FileSpreadsheet, Trash2, Link as LinkIcon, Eye } from 'lucide-react';
 import { useSessionStore } from '../stores/sessionStore';
-import { formatCurrency, formatTimestamp } from '../utils/formatters';
+import { formatCurrency, formatTimestamp, formatDDMMYYYY } from '../utils/formatters';
 import { groupTradesIntoPositions, calculatePerformanceStats, exitReasonBadge } from '../utils/tradeAnalysis';
 import { PageNavTabs, type ActivePage } from './PageNavTabs';
 
@@ -85,7 +85,7 @@ export function TradeHistoryDialog({ isOpen, onNavigate }: TradeHistoryDialogPro
             },
             performance: stats,
             positions: positions,
-            trades: trades
+            trades: trades.map(t => ({ ...t, formattedDate: formatDDMMYYYY(t.timestamp) }))
         };
 
         const blob = new Blob([JSON.stringify(reportData, null, 2)], { type: 'application/json' });
