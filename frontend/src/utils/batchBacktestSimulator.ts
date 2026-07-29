@@ -183,6 +183,8 @@ export function runBatchSimulation(
       // was graded with currentIndex windows (PIVOT mode / degenerate leg).
       trade.legStartIndexAtEntry = entryMetrics?.legStartIndex;
       trade.legEndIndexAtEntry = entryMetrics?.legEndIndex;
+      trade.legStartTimeAtEntry = entryMetrics?.legStartTime;
+      trade.legEndTimeAtEntry = entryMetrics?.legEndTime;
       trade.legBarCountAtEntry = entryMetrics?.legBarCount;
       trade.maxConsecutiveHighBreaksAtEntry = entryMetrics?.maxConsecutiveHighBreaks;
       trade.maxConsecutiveLowBreaksAtEntry = entryMetrics?.maxConsecutiveLowBreaks;

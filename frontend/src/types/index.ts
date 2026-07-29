@@ -107,6 +107,8 @@ export interface Trade {
   pivotGapAvgBarsAtEntry?: number; // mean bar-count gap between consecutive same-type pivots across both sequences
   legStartIndexAtEntry?: number;  // bar index where the frozen impulse leg began (undefined = leg window not used; metrics windowed at entry bar)
   legEndIndexAtEntry?: number;    // bar index of the leg's swing extreme (frozen at pullback start)
+  legStartTimeAtEntry?: number;   // candle timestamp at legStartIndexAtEntry — index-alignment-free, survives the loaded candle array changing later
+  legEndTimeAtEntry?: number;     // candle timestamp at legEndIndexAtEntry
   legBarCountAtEntry?: number;    // bars in the frozen leg, inclusive of both ends
   maxConsecutiveHighBreaksAtEntry?: number; // longest run of bars each breaking prior high without breaking prior low, within the leg/window
   maxConsecutiveLowBreaksAtEntry?: number;  // mirror: prior-low breaks without prior-high breaks

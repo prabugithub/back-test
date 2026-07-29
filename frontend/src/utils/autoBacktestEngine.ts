@@ -541,6 +541,8 @@ export interface EntryMetricsSnapshot {
   // with no completed leg yet, or degenerate leg).
   legStartIndex?: number;
   legEndIndex?: number;
+  legStartTime?: number; // candle timestamp at legStartIndex — robust replay when the loaded candle array differs later
+  legEndTime?: number;   // candle timestamp at legEndIndex
   legBarCount?: number; // bars in the leg, inclusive of both ends (may exceed the legMaxBarCount cap actually windowed)
   legTooShort?: boolean; // leg shorter than legMinBarCount — auto entries with leg-strength filters active are blocked
   maxConsecutiveHighBreaks?: number;
@@ -650,6 +652,8 @@ export function computeEntryMetrics(
     pivotGapAvgBars: averagePivotGapBars(pivotSeqStats),
     legStartIndex: leg?.startIndex,
     legEndIndex: leg?.endIndex,
+    legStartTime: leg ? candles[leg.startIndex]?.timestamp : undefined,
+    legEndTime: leg ? candles[leg.endIndex]?.timestamp : undefined,
     legBarCount,
     legTooShort: legBarCount !== undefined
       ? legBarCount < (config.legMinBarCount ?? 5)

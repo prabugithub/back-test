@@ -88,6 +88,8 @@ export function buildEntryInstrumentation(
       // graded with currentIndex windows (PIVOT mode / no completed leg / degenerate leg).
       legStartIndexAtEntry: entryMetricsOverride?.legStartIndex ?? fallback?.legStartIndex,
       legEndIndexAtEntry: entryMetricsOverride?.legEndIndex ?? fallback?.legEndIndex,
+      legStartTimeAtEntry: entryMetricsOverride?.legStartTime ?? fallback?.legStartTime,
+      legEndTimeAtEntry: entryMetricsOverride?.legEndTime ?? fallback?.legEndTime,
       legBarCountAtEntry: entryMetricsOverride?.legBarCount ?? fallback?.legBarCount,
       maxConsecutiveHighBreaksAtEntry:
         entryMetricsOverride?.maxConsecutiveHighBreaks ?? fallback?.maxConsecutiveHighBreaks,
