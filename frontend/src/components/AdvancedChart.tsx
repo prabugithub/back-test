@@ -1503,7 +1503,7 @@ export function AdvancedChart({
                             <button
                               key={i}
                               onClick={() => setSelectedSegment(isSel ? null : seg)}
-                              title={`${seg.kind} ${seg.direction} · bars ${seg.startIndex}–${seg.endIndex} (${seg.barCount}) · move ${seg.movePct.toFixed(2)}% · H ${seg.high.toFixed(2)} L ${seg.low.toFixed(2)} · BRR ${seg.brrAvg.toFixed(2)} CLV ${seg.clvAvg.toFixed(2)} UWR ${seg.uwrAvg.toFixed(2)} LWR ${seg.lwrAvg.toFixed(2)} · H/L breaks ${seg.highBreakCount}/${seg.lowBreakCount}`}
+                              title={`${seg.kind} ${seg.direction} · bars ${seg.startIndex}–${seg.endIndex} (${seg.barCount}) · move ${seg.movePct.toFixed(2)}% · H ${seg.high.toFixed(2)} L ${seg.low.toFixed(2)} · BRR ${seg.brrAvg.toFixed(2)} CLV ${seg.clvAvg.toFixed(2)} UWR ${seg.uwrAvg.toFixed(2)} LWR ${seg.lwrAvg.toFixed(2)} · H/L breaks ${seg.highBreakCount}/${seg.lowBreakCount}${seg.bullBear ? ` · bull/bear ${seg.bullBear.join('')}` : ''}`}
                               className={`shrink-0 rounded px-1.5 py-1 text-[9px] leading-tight text-center min-w-[3rem] cursor-pointer transition-all ${
                                 bull ? 'text-green-700' : 'text-red-700'
                               } ${
@@ -1538,6 +1538,8 @@ export function AdvancedChart({
                               <span>High: <b>{fmt(s.high)}</b> · Low: <b>{fmt(s.low)}</b></span>
                               <span>Range: <b>{fmt(s.high - s.low)}</b></span>
                               <span>H/L breaks: <b>{s.highBreakCount}/{s.lowBreakCount}</b></span>
+                              {/* Absent on trades restored from sessions saved before bullCount existed. */}
+                              <span>Bull/bear bars: <b>{Number.isFinite(s.bullCount) ? `${s.bullCount}/${s.barCount - s.bullCount}` : '—'}</b></span>
                               <span>Avg BRR {fmt(s.brrAvg)} · CLV {fmt(s.clvAvg)}</span>
                               <span>Avg UWR {fmt(s.uwrAvg)} · LWR {fmt(s.lwrAvg)}</span>
                             </div>
@@ -1547,6 +1549,7 @@ export function AdvancedChart({
                                   <thead className="text-gray-400 sticky top-0 bg-inherit">
                                     <tr className="text-left">
                                       <th className="pr-2 font-semibold">Bar</th>
+                                      <th className="pr-2 font-semibold">Dir</th>
                                       <th className="pr-2 font-semibold">BRR</th>
                                       <th className="pr-2 font-semibold">CLV</th>
                                       <th className="pr-2 font-semibold">UWR</th>
@@ -1557,6 +1560,9 @@ export function AdvancedChart({
                                     {s.brr.map((_, k) => (
                                       <tr key={k} className="border-t border-gray-100">
                                         <td className="pr-2 text-gray-400">{s.startIndex + k}</td>
+                                        <td className={`pr-2 font-bold ${s.bullBear?.[k] === 1 ? 'text-green-600' : 'text-red-600'}`}>
+                                          {s.bullBear === undefined ? '—' : s.bullBear[k] === 1 ? '▲' : '▼'}
+                                        </td>
                                         <td className="pr-2">{fmt(s.brr?.[k])}</td>
                                         <td className="pr-2">{fmt(s.clv?.[k])}</td>
                                         <td className="pr-2">{fmt(s.uwr?.[k])}</td>

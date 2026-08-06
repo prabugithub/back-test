@@ -56,8 +56,16 @@ function checkSequence(seq: LegSegment[], entryIndex: number, detail: 'full' | '
     // 4. Detail mode contract.
     if (detail === 'full') {
       if (!s.brr || s.brr.length !== s.barCount) fail(`${tag}: full mode brr length ${s.brr?.length} != barCount ${s.barCount}`);
-    } else if (s.brr !== undefined) {
+      if (!s.bullBear || s.bullBear.length !== s.barCount) fail(`${tag}: full mode bullBear length ${s.bullBear?.length} != barCount ${s.barCount}`);
+      if (s.bullBear && s.bullBear.reduce((n, v) => n + v, 0) !== s.bullCount) {
+        fail(`${tag}: bullCount ${s.bullCount} != sum(bullBear) ${s.bullBear.reduce((n, v) => n + v, 0)}`);
+      }
+    } else if (s.brr !== undefined || s.bullBear !== undefined) {
       fail(`${tag}: avg mode should not carry per-candle arrays`);
+    }
+    // 4b. bullCount is always present and within the segment's bar range.
+    if (!Number.isInteger(s.bullCount) || s.bullCount < 0 || s.bullCount > s.barCount) {
+      fail(`${tag}: bullCount ${s.bullCount} out of [0, ${s.barCount}]`);
     }
     // 5. Averages finite & in range.
     for (const v of [s.brrAvg, s.clvAvg, s.uwrAvg, s.lwrAvg]) {
@@ -108,8 +116,9 @@ for (const detail of ['full', 'avg'] as const) {
       console.log(
         `    ${s.kind.padEnd(8)} ${s.direction.padEnd(4)} bars ${String(s.startIndex).padStart(4)}-${String(s.endIndex).padStart(4)} ` +
         `(${String(s.barCount).padStart(2)})  move ${s.movePct.toFixed(2).padStart(6)}%  ` +
-        `brr ${s.brrAvg.toFixed(2)} clv ${s.clvAvg.toFixed(2)}  H/L ${s.highBreakCount}/${s.lowBreakCount}` +
-        (s.brr ? `  [${s.brr.length} candle samples]` : '')
+        `brr ${s.brrAvg.toFixed(2)} clv ${s.clvAvg.toFixed(2)}  H/L ${s.highBreakCount}/${s.lowBreakCount}  ` +
+        `bull ${s.bullCount}/${s.barCount}` +
+        (s.bullBear ? `  [${s.bullBear.join('')}]` : '')
       );
     }
   }

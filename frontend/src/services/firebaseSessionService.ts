@@ -59,16 +59,17 @@ export const sanitizeData = (data: any): any => {
     return cleaned;
 };
 
-// legSequenceAtEntry carries a per-candle brr/clv/uwr/lwr array per segment — analysis/
-// export detail that is intentionally NOT persisted (keeps trade docs small, well under
-// Firestore's 1MB/doc limit). We store the per-segment averages + structure only; the full
-// arrays live in-memory during a backtest and are recoverable via the JSON export.
+// legSequenceAtEntry carries per-candle brr/clv/uwr/lwr/bullBear arrays per segment —
+// analysis/export detail that is intentionally NOT persisted (keeps trade docs small, well
+// under Firestore's 1MB/doc limit). We store the per-segment averages + structure only (incl.
+// bullCount, the collapsed form of bullBear); the full arrays live in-memory during a backtest
+// and are recoverable via the JSON export.
 const stripLegSequenceArrays = (trades: Trade[] = []): Trade[] =>
     trades.map(t => {
         if (!t.legSequenceAtEntry) return t;
         return {
             ...t,
-            legSequenceAtEntry: t.legSequenceAtEntry.map(({ brr, clv, uwr, lwr, ...rest }) => rest),
+            legSequenceAtEntry: t.legSequenceAtEntry.map(({ brr, clv, uwr, lwr, bullBear, ...rest }) => rest),
         };
     });
 

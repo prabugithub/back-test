@@ -36,9 +36,15 @@ function makeSegment(
   const endPrice = candles[endIndex].close;
   let high = -Infinity;
   let low = Infinity;
+  // Per-candle direction, oldest→newest: 1 = bull (close > open), 0 = bear/doji.
+  const bullBear: (0 | 1)[] = [];
+  let bullCount = 0;
   for (let i = startIndex; i <= endIndex; i++) {
     if (candles[i].high > high) high = candles[i].high;
     if (candles[i].low < low) low = candles[i].low;
+    const isBull = candles[i].close > candles[i].open ? 1 : 0;
+    bullBear.push(isBull);
+    bullCount += isBull;
   }
   const seg: LegSegment = {
     kind,
@@ -59,12 +65,14 @@ function makeSegment(
     lwrAvg: avg.lwrAvg ?? 0,
     highBreakCount: breaks.highBreakCount,
     lowBreakCount: breaks.lowBreakCount,
+    bullCount,
   };
   if (detail === 'full') {
     seg.brr = samples.map(s => s.brr);
     seg.clv = samples.map(s => s.clv);
     seg.uwr = samples.map(s => s.uwr);
     seg.lwr = samples.map(s => s.lwr);
+    seg.bullBear = bullBear;
   }
   return seg;
 }
