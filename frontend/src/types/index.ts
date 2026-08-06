@@ -52,6 +52,11 @@ export interface LegSegment {
   highBreakCount: number;          // bars whose high broke the prior bar's high, within the segment
   lowBreakCount: number;           // bars whose low broke the prior bar's low, within the segment
   bullCount: number;               // bull candles (close > open) within the segment; bears+dojis = barCount - bullCount
+  // Al Brooks H/L labels that fired inside this segment, oldest→newest, '-'-joined
+  // (e.g. 'H1-H2-H3'); '' when none fired. Same convention as pivotHighSeqAtEntry.
+  // Collapsed form of `hl` below — unlike the array, this survives Firestore.
+  // A count can legitimately restart mid-segment ('L1-L2-L1') when the swing broke.
+  hlSeq: string;
   // Per-candle quality series (oldest→newest), present only in 'full' detail mode —
   // stripped before Firestore persistence, retained in exports.
   brr?: number[];
@@ -62,6 +67,11 @@ export interface LegSegment {
   // (close <= open). Applies to both 'leg' and 'pullback' segments, so an impulse's
   // counter-candles and a pullback's with-trend candles are both visible.
   bullBear?: (0 | 1)[];
+  // Per-candle Al Brooks label (oldest→newest), index-aligned with bullBear/brr/…:
+  // 'H1'|'H2'|…|'L1'|… on the bar the signal fired, null on every other bar. At most
+  // one label per candle — H and L are mutually exclusive per bar (the outside-bar
+  // tiebreak in runAlBrooks decides by close direction).
+  hl?: (string | null)[];
 }
 
 // Trade record

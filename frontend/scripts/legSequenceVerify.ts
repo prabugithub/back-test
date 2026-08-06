@@ -7,6 +7,7 @@ import { fileURLToPath } from 'node:url';
 import Database from 'better-sqlite3';
 import { runBatchSimulation } from '../src/utils/batchBacktestSimulator';
 import { buildLegSequence } from '../src/utils/legSequence';
+import { calculateAlBrooks, calculateAlBrooksRun } from '../src/utils/indicators';
 import { defaultAutoBacktestConfig, type AutoBacktestConfig } from '../src/utils/autoBacktestEngine';
 import type { Candle, LegSegment } from '../src/types';
 
@@ -60,12 +61,25 @@ function checkSequence(seq: LegSegment[], entryIndex: number, detail: 'full' | '
       if (s.bullBear && s.bullBear.reduce((n, v) => n + v, 0) !== s.bullCount) {
         fail(`${tag}: bullCount ${s.bullCount} != sum(bullBear) ${s.bullBear.reduce((n, v) => n + v, 0)}`);
       }
-    } else if (s.brr !== undefined || s.bullBear !== undefined) {
+      if (!s.hl || s.hl.length !== s.barCount) fail(`${tag}: full mode hl length ${s.hl?.length} != barCount ${s.barCount}`);
+      // hlSeq is exactly the dense array collapsed — no signal may be lost or invented.
+      if (s.hl && s.hl.filter(Boolean).join('-') !== s.hlSeq) {
+        fail(`${tag}: hlSeq '${s.hlSeq}' != collapse(hl) '${s.hl.filter(Boolean).join('-')}'`);
+      }
+    } else if (s.brr !== undefined || s.bullBear !== undefined || s.hl !== undefined) {
       fail(`${tag}: avg mode should not carry per-candle arrays`);
     }
     // 4b. bullCount is always present and within the segment's bar range.
     if (!Number.isInteger(s.bullCount) || s.bullCount < 0 || s.bullCount > s.barCount) {
       fail(`${tag}: bullCount ${s.bullCount} out of [0, ${s.barCount}]`);
+    }
+    // 4c. hlSeq is always present (both detail modes) and well-formed.
+    if (typeof s.hlSeq !== 'string') {
+      fail(`${tag}: hlSeq missing on ${s.kind} (must be present in both detail modes)`);
+    } else if (s.hlSeq !== '') {
+      for (const part of s.hlSeq.split('-')) {
+        if (!/^[HL]\d+$/.test(part)) fail(`${tag}: malformed hlSeq part '${part}' in '${s.hlSeq}'`);
+      }
     }
     // 5. Averages finite & in range.
     for (const v of [s.brrAvg, s.clvAvg, s.uwrAvg, s.lwrAvg]) {
@@ -93,6 +107,9 @@ for (const detail of ['full', 'avg'] as const) {
   console.log(`\n=== detail='${detail}': ${result.trades.length} trades, ${withSeq} carry a sequence field ===`);
 
   let maxLegs = 0;
+  // Corpus-wide H/L observations (never assertions — see the count-reset note below).
+  let segCount = 0, segWithHl = 0, resets = 0, legOwnLabel = 0, legTotal = 0;
+  const labelHist = new Map<string, number>();
   for (const t of result.trades) {
     if (!t.legSequenceAtEntry) continue;
     // Recover the entry bar index from the trade's own frozen leg fields if present,
@@ -104,8 +121,31 @@ for (const detail of ['full', 'avg'] as const) {
     const legCount = t.legSequenceAtEntry.filter(s => s.kind === 'leg').length;
     maxLegs = Math.max(maxLegs, legCount);
     if (legCount > (cfg.legSequenceCount ?? 10)) fail(`trade@${entryIndex}: ${legCount} legs > cap ${cfg.legSequenceCount}`);
+    for (const s of t.legSequenceAtEntry) {
+      segCount++;
+      if (s.hlSeq) segWithHl++;
+      const parts = s.hlSeq ? s.hlSeq.split('-') : [];
+      for (const p of parts) labelHist.set(p, (labelHist.get(p) ?? 0) + 1);
+      // A count restarting mid-segment ('L1-L2-L1') is EXPECTED — the swing broke, so
+      // Brooks counting resets. Counted, never failed.
+      for (let k = 1; k < parts.length; k++) {
+        const prev = parts[k - 1], cur = parts[k];
+        if (prev[0] === cur[0] && parseInt(cur.slice(1)) <= parseInt(prev.slice(1))) resets++;
+      }
+      // A leg should normally open on its own side's label (legs only start at an H/L bar);
+      // misses are legitimate when legStart = max(leg.startIndex, cursor) clipped that bar.
+      if (s.kind === 'leg' && s.hl) {
+        legTotal++;
+        if (s.hl[0]?.startsWith(s.direction === 'bull' ? 'H' : 'L')) legOwnLabel++;
+      }
+    }
   }
   console.log(`  entries with a sequence: ${entries.length}, max legs seen: ${maxLegs} (cap ${cfg.legSequenceCount})`);
+  const hist = [...labelHist].sort((a, b) => a[0].localeCompare(b[0])).map(([k, v]) => `${k}:${v}`).join(' ');
+  console.log(`  segments: ${segCount}, with a non-empty hlSeq: ${segWithHl} (${((segWithHl / (segCount || 1)) * 100).toFixed(0)}%)`);
+  console.log(`  labels: ${hist || '(none)'}`);
+  console.log(`  count-resets within a segment: ${resets} (expected — swing broke)` +
+    (legTotal ? `; leg segments opening on their own label: ${legOwnLabel}/${legTotal}` : ''));
 
   // Print one representative full example.
   if (detail === 'full' && entries.length) {
@@ -118,7 +158,8 @@ for (const detail of ['full', 'avg'] as const) {
         `(${String(s.barCount).padStart(2)})  move ${s.movePct.toFixed(2).padStart(6)}%  ` +
         `brr ${s.brrAvg.toFixed(2)} clv ${s.clvAvg.toFixed(2)}  H/L ${s.highBreakCount}/${s.lowBreakCount}  ` +
         `bull ${s.bullCount}/${s.barCount}` +
-        (s.bullBear ? `  [${s.bullBear.join('')}]` : '')
+        (s.bullBear ? `  [${s.bullBear.join('')}]` : '') +
+        `  hl [${s.hlSeq || '-'}]`
       );
     }
   }
@@ -136,6 +177,38 @@ for (const detail of ['full', 'avg'] as const) {
   const spanSum = seq.reduce((n, s) => n + s.barCount, 0);
   console.log(`  covered span ${chrono[0]?.startIndex}..${chrono[chrono.length - 1]?.endIndex} = ${covered} bars, Σ barCount = ${spanSum} (must be equal → no gaps/overlaps)`);
   if (covered !== spanSum) fail('direct: span sum != covered span (gap or overlap!)');
+
+  // H/L cross-check: every segment's per-candle label must equal the marker the public
+  // calculateAlBrooks stream reports for that bar's timestamp. Strongest available proof
+  // that signalsByBar indexing agrees with the markers the chart draws.
+  const prefix = candles.slice(0, idx + 1);
+  const markers = calculateAlBrooks(prefix, false, 1.0);
+  const byTime = new Map(markers.map(m => [m.time, m.signal]));
+  // Same-bar exclusivity: H and L are mutually exclusive per bar, so no two markers may
+  // share a timestamp. The whole one-slot-per-candle design rests on this.
+  if (byTime.size !== markers.length) fail(`direct: ${markers.length - byTime.size} duplicate marker timestamp(s) — H/L exclusivity broken`);
+  let checked = 0, mismatched = 0;
+  for (const s of seq) {
+    for (let k = 0; k < s.barCount; k++) {
+      checked++;
+      if ((s.hl?.[k] ?? null) !== (byTime.get(candles[s.startIndex + k].timestamp) ?? null)) mismatched++;
+    }
+  }
+  if (mismatched > 0) fail(`direct: ${mismatched}/${checked} bars disagree with the calculateAlBrooks marker stream`);
+  else console.log(`  hl matches the calculateAlBrooks marker stream on all ${checked} bars ✓`);
+
+  // Causality: building over the FULL array (what batchBacktestSimulator does) must equal
+  // building over a 0-based prefix (what entryInstrumentation does). Guards against lookahead.
+  const sliced = buildLegSequence(prefix, idx, 10, 'full');
+  const same = sliced.length === seq.length && seq.every((s, i) => s.hlSeq === sliced[i].hlSeq && s.startIndex === sliced[i].startIndex);
+  if (!same) fail('direct: full-array vs sliced-array build disagree (lookahead!)');
+  else console.log(`  full-array and sliced-array builds produce identical hlSeq ✓`);
+
+  // A precomputed run must give the same answer as the internal recompute.
+  const viaRun = buildLegSequence(candles, idx, 10, 'full', calculateAlBrooksRun(prefix));
+  if (viaRun.length !== seq.length || !seq.every((s, i) => s.hlSeq === viaRun[i].hlSeq)) {
+    fail('direct: caller-supplied run disagrees with the internal recompute');
+  } else console.log(`  caller-supplied run matches the internal recompute ✓`);
 }
 
 console.log(failures === 0 ? '\n✅ ALL INVARIANTS PASSED' : `\n❌ ${failures} FAILURE(S)`);
