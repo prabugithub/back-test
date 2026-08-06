@@ -87,15 +87,6 @@ export interface Trade {
   withTrendSeen?: boolean;
   journal?: TradeJournal;
   atrDepthAtEntry?: number;
-  barOverlapAtEntry?: number[]; // raw per-bar overlap ratio, up to N bars ending at entry candle (most recent last), unclamped — used for later range/regime labeling
-  barOverlapAvgAtEntry?: number; // mean of barOverlapAtEntry — convenience summary of the same window
-  barRangeAvgAtEntry?: number;      // mean (high-low) over last N bars ending at entry, direction-agnostic
-  bullBarRangeAvgAtEntry?: number;  // mean (high-low) of only bull bars (close>open) in the same window
-  bearBarRangeAvgAtEntry?: number;  // mean (high-low) of only bear bars (close<open) in the same window
-  efficiencyRatioAtEntry?: number; // Kaufman ER over last N bars ending at entry — net displacement / total path, bounded [0,1]; near 1 = efficient trend, near 0 = chop
-  highBreakCountAtEntry?: number; // count of bars whose high broke the immediately preceding bar's high, within the window
-  lowBreakCountAtEntry?: number;  // count of bars whose low broke the immediately preceding bar's low, within the same window
-  barBreakWindowAtEntry?: number; // actual bar-to-bar comparisons made for the two counts above (<= configured lookback)
   brrAvgIQRAtEntry?: number; // IQR-trimmed mean body-to-range ratio over the last N bars ending at entry — outliers outside [Q1-1.5*IQR, Q3+1.5*IQR] dropped before averaging; a robust variant of a plain brrAvg
   ema21SlopeAtEntry?: number; // EMA21 points-per-bar slope over the configured lookback ending at entry
   ema50SlopeAtEntry?: number; // EMA50 points-per-bar slope over the configured lookback ending at entry
@@ -105,13 +96,6 @@ export interface Trade {
   pivotHighSeqAtEntry?: string;    // last up-to-4 bearish trend labels (HH/LH), oldest→newest, joined with '-'
   pivotLowSeqAtEntry?: string;     // last up-to-4 bullish trend labels (HL/LL), oldest→newest, joined with '-'
   pivotGapAvgBarsAtEntry?: number; // mean bar-count gap between consecutive same-type pivots across both sequences
-  legStartIndexAtEntry?: number;  // bar index where the frozen impulse leg began (undefined = leg window not used; metrics windowed at entry bar)
-  legEndIndexAtEntry?: number;    // bar index of the leg's swing extreme (frozen at pullback start)
-  legStartTimeAtEntry?: number;   // candle timestamp at legStartIndexAtEntry — index-alignment-free, survives the loaded candle array changing later
-  legEndTimeAtEntry?: number;     // candle timestamp at legEndIndexAtEntry
-  legBarCountAtEntry?: number;    // bars in the frozen leg, inclusive of both ends
-  maxConsecutiveHighBreaksAtEntry?: number; // longest run of bars each breaking prior high without breaking prior low, within the leg/window
-  maxConsecutiveLowBreaksAtEntry?: number;  // mirror: prior-low breaks without prior-high breaks
   // Recent-price-action context: the last up-to-N Al Brooks impulse legs plus the
   // pullback candles between them, contiguous back from the entry bar, newest→oldest
   // (index 0 = closest to entry, walking back in time). Per-candle arrays are present

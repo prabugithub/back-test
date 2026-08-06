@@ -4,7 +4,7 @@ import type { Candle, Trade, BacktestPosition, OpenPosition, ExitReason } from '
 import type { TradeJournal } from '../types';
 import { type AutoBacktestConfig, type AutoSignal, type RegimeKey, MULTI_TRADE_DEFAULT_CAP, evaluateAutoSignals, evaluateTrailStop, evaluateAutoExitSignal } from './autoBacktestEngine';
 import { buildNetPositionMirror } from './netPosition';
-import { calculateMAPosition, calculateBarOverlap, averageBarOverlap, calculateBarRanges, averageBarRanges, calculateBarQuality, averageBarQualityIQR, calculateEfficiencyRatio, calculateBarBreaks, calculateEMASlope, calculateEMAInteraction } from './pivotAnalysis';
+import { calculateMAPosition, calculateBarQuality, averageBarQualityIQR, calculateEMASlope, calculateEMAInteraction } from './pivotAnalysis';
 import { buildLegSequence } from './legSequence';
 
 interface SimPosition {
@@ -158,20 +158,7 @@ export function runBatchSimulation(
     // `!isReducing` gating in sharedActions.ts).
     if (!isReducing) {
       const entryMetrics = signal.entryMetrics;
-      const barOverlapAtEntry = calculateBarOverlap(candles, candleIndex, config.barOverlapLookback ?? 8);
-      const barRangeSamples = calculateBarRanges(candles, candleIndex, config.barRangeLookback ?? 20);
-      const barRangeFallback = averageBarRanges(barRangeSamples);
-      const barBreakFallback = calculateBarBreaks(candles, candleIndex, config.barBreakLookback ?? 20);
       const emaInteractionFallback = calculateEMAInteraction(candles, candleIndex, 20, config.emaInteractionLookback ?? 20);
-      trade.barOverlapAtEntry = barOverlapAtEntry;
-      trade.barOverlapAvgAtEntry = entryMetrics?.barOverlapAvg ?? averageBarOverlap(barOverlapAtEntry);
-      trade.barRangeAvgAtEntry = entryMetrics?.barRangeAvg ?? barRangeFallback.barRangeAvg;
-      trade.bullBarRangeAvgAtEntry = entryMetrics?.bullBarRangeAvg ?? barRangeFallback.bullBarRangeAvg;
-      trade.bearBarRangeAvgAtEntry = entryMetrics?.bearBarRangeAvg ?? barRangeFallback.bearBarRangeAvg;
-      trade.efficiencyRatioAtEntry = entryMetrics?.efficiencyRatio ?? calculateEfficiencyRatio(candles, candleIndex, config.efficiencyRatioLookback ?? 10);
-      trade.highBreakCountAtEntry = entryMetrics?.highBreakCount ?? barBreakFallback.highBreakCount;
-      trade.lowBreakCountAtEntry = entryMetrics?.lowBreakCount ?? barBreakFallback.lowBreakCount;
-      trade.barBreakWindowAtEntry = entryMetrics?.barBreakWindow ?? barBreakFallback.barsCompared;
       const barQualitySamples = calculateBarQuality(candles, candleIndex, config.barQualityLookback ?? 20);
       trade.brrAvgIQRAtEntry = entryMetrics?.brrAvgIQR ?? averageBarQualityIQR(barQualitySamples).brrAvgIQR;
       trade.ema21SlopeAtEntry = entryMetrics?.ema21Slope ?? calculateEMASlope(candles, candleIndex, 21, config.ema21SlopeLookback ?? 10);
@@ -179,15 +166,6 @@ export function runBatchSimulation(
       trade.ema20GapBarRatioAtEntry = entryMetrics?.ema20GapBarRatio ?? emaInteractionFallback.gapBarRatio;
       trade.ema20CloseAboveRatioAtEntry = entryMetrics?.ema20CloseAboveRatio ?? emaInteractionFallback.closeAboveRatio;
       trade.ema20InteractionWindowAtEntry = entryMetrics?.ema20InteractionWindow ?? emaInteractionFallback.barsCompared;
-      // Leg fields have no fallback recompute: undefined simply means the entry
-      // was graded with currentIndex windows (PIVOT mode / degenerate leg).
-      trade.legStartIndexAtEntry = entryMetrics?.legStartIndex;
-      trade.legEndIndexAtEntry = entryMetrics?.legEndIndex;
-      trade.legStartTimeAtEntry = entryMetrics?.legStartTime;
-      trade.legEndTimeAtEntry = entryMetrics?.legEndTime;
-      trade.legBarCountAtEntry = entryMetrics?.legBarCount;
-      trade.maxConsecutiveHighBreaksAtEntry = entryMetrics?.maxConsecutiveHighBreaks;
-      trade.maxConsecutiveLowBreaksAtEntry = entryMetrics?.maxConsecutiveLowBreaks;
       // Recent-price-action context: last N Al Brooks impulse legs + the pullbacks
       // between them, contiguous back from the entry bar (same H/L machinery, no pivots).
       const legSequence = buildLegSequence(

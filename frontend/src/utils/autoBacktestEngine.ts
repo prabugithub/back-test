@@ -231,7 +231,7 @@ export interface AutoBacktestConfig {
   slTpFillMode?: 'exact' | 'close';
 
   // Bar overlap instrumentation — raw regime metric recorded on trade entries
-  barOverlapLookback: number; // bars looked back for barOverlapAtEntry (default 8)
+  barOverlapLookback: number; // bars looked back for the bar-overlap average (default 8)
 
   // Bar range instrumentation — trend-strength metric recorded on trade entries
   barRangeLookback: number; // bars looked back for bar-range trend-strength instrumentation (default 20)
@@ -526,7 +526,6 @@ export interface EntryMetricsSnapshot {
   efficiencyRatio?: number;
   highBreakCount?: number;
   lowBreakCount?: number;
-  barBreakWindow?: number;
   brrAvgIQR?: number;
   ema21Slope?: number;
   ema50Slope?: number;
@@ -536,14 +535,9 @@ export interface EntryMetricsSnapshot {
   pivotHighSeq?: string[];
   pivotLowSeq?: string[];
   pivotGapAvgBars?: number;
-  // Completed breakout-leg window used for the strength metrics above (undefined when
-  // the currentIndex fallback windows were used instead — PIVOT mode, manual entry
-  // with no completed leg yet, or degenerate leg).
-  legStartIndex?: number;
-  legEndIndex?: number;
-  legStartTime?: number; // candle timestamp at legStartIndex — robust replay when the loaded candle array differs later
-  legEndTime?: number;   // candle timestamp at legEndIndex
-  legBarCount?: number; // bars in the leg, inclusive of both ends (may exceed the legMaxBarCount cap actually windowed)
+  // Length verdict on the completed breakout-leg window the strength metrics above were
+  // graded over. Undefined when the currentIndex fallback windows were used instead —
+  // PIVOT mode, manual entry with no completed leg yet, or degenerate leg.
   legTooShort?: boolean; // leg shorter than legMinBarCount — auto entries with leg-strength filters active are blocked
   maxConsecutiveHighBreaks?: number;
   maxConsecutiveLowBreaks?: number;
@@ -611,7 +605,7 @@ export function computeEntryMetrics(
   const barRangeSamples = calculateBarRanges(candles, end,
     windowBars ?? (config.barRangeLookback ?? 20));
   const { barRangeAvg, bullBarRangeAvg, bearBarRangeAvg } = averageBarRanges(barRangeSamples);
-  const { highBreakCount, lowBreakCount, barsCompared: barBreakWindow } =
+  const { highBreakCount, lowBreakCount } =
     calculateBarBreaks(candles, end,
       windowBars !== undefined ? windowBars - 1 : (config.barBreakLookback ?? 20));
   const barQualitySamples = calculateBarQuality(candles, end,
@@ -640,7 +634,6 @@ export function computeEntryMetrics(
       windowBars !== undefined ? windowBars - 1 : (config.efficiencyRatioLookback ?? 10)),
     highBreakCount,
     lowBreakCount,
-    barBreakWindow,
     brrAvgIQR,
     ema21Slope: calculateEMASlope(candles, end, 21, config.ema21SlopeLookback ?? 10),
     ema50Slope: calculateEMASlope(candles, end, 50, config.ema50SlopeLookback ?? 20),
@@ -650,11 +643,6 @@ export function computeEntryMetrics(
     pivotHighSeq: pivotSeqStats.highSeq,
     pivotLowSeq: pivotSeqStats.lowSeq,
     pivotGapAvgBars: averagePivotGapBars(pivotSeqStats),
-    legStartIndex: leg?.startIndex,
-    legEndIndex: leg?.endIndex,
-    legStartTime: leg ? candles[leg.startIndex]?.timestamp : undefined,
-    legEndTime: leg ? candles[leg.endIndex]?.timestamp : undefined,
-    legBarCount,
     legTooShort: legBarCount !== undefined
       ? legBarCount < (config.legMinBarCount ?? 5)
       : undefined,

@@ -9,7 +9,7 @@
 
 import type { Candle, Trade } from '../types';
 import { calculatePivotPoints, calculateATR, calculateEMA, calculateAlBrooksLegs } from './indicators';
-import { analyzeMarketStructure, calculateBarOverlap } from './pivotAnalysis';
+import { analyzeMarketStructure } from './pivotAnalysis';
 import { computeEntryMetrics, type AutoBacktestConfig, type EntryMetricsSnapshot } from './autoBacktestEngine';
 import { buildLegSequence } from './legSequence';
 
@@ -37,13 +37,12 @@ export function buildEntryInstrumentation(
   const atrVal = atrSeries[atrSeries.length - 1]?.value ?? 0;
   const emaVal = emaSeries[emaSeries.length - 1]?.value ?? 0;
   const atrDepthAtEntry = atrVal > 0 ? Math.abs(entryPrice - emaVal) / atrVal : 0;
-  const barOverlapAtEntry = calculateBarOverlap(candles, index, config.barOverlapLookback ?? 8);
 
   // Manual/fallback instrumentation — the same computeEntryMetrics the auto engine
   // uses, graded over the completed breakout leg matching the trade's direction
   // (BUY → bull leg, SELL → bear leg) when one exists. A short leg still records
-  // (manual entries are never blocked — legBarCountAtEntry shows it was under Leg
-  // Min Bars); no completed leg yet → entry-bar windows, leg fields undefined.
+  // over the bars available (manual entries are never blocked by Leg Min Bars);
+  // no completed leg yet → entry-bar windows with the configured lookbacks.
   const legs = calculateAlBrooksLegs(visible);
   const leg = type === 'BUY' ? legs.bull[index] : legs.bear[index];
   const fallback = computeEntryMetrics(candles, index, config, leg);
@@ -66,15 +65,6 @@ export function buildEntryInstrumentation(
       (type === 'SELL' && ltMarket.startsWith('Bear')),
     fields: {
       atrDepthAtEntry,
-      barOverlapAtEntry,
-      barOverlapAvgAtEntry: entryMetricsOverride?.barOverlapAvg ?? fallback?.barOverlapAvg,
-      barRangeAvgAtEntry: entryMetricsOverride?.barRangeAvg ?? fallback?.barRangeAvg,
-      bullBarRangeAvgAtEntry: entryMetricsOverride?.bullBarRangeAvg ?? fallback?.bullBarRangeAvg,
-      bearBarRangeAvgAtEntry: entryMetricsOverride?.bearBarRangeAvg ?? fallback?.bearBarRangeAvg,
-      efficiencyRatioAtEntry: entryMetricsOverride?.efficiencyRatio ?? fallback?.efficiencyRatio,
-      highBreakCountAtEntry: entryMetricsOverride?.highBreakCount ?? fallback?.highBreakCount,
-      lowBreakCountAtEntry: entryMetricsOverride?.lowBreakCount ?? fallback?.lowBreakCount,
-      barBreakWindowAtEntry: entryMetricsOverride?.barBreakWindow ?? fallback?.barBreakWindow,
       brrAvgIQRAtEntry: entryMetricsOverride?.brrAvgIQR ?? fallback?.brrAvgIQR,
       ema21SlopeAtEntry: entryMetricsOverride?.ema21Slope ?? fallback?.ema21Slope,
       ema50SlopeAtEntry: entryMetricsOverride?.ema50Slope ?? fallback?.ema50Slope,
@@ -84,17 +74,6 @@ export function buildEntryInstrumentation(
       pivotHighSeqAtEntry: pivotHighSeq.length ? pivotHighSeq.join('-') : undefined,
       pivotLowSeqAtEntry: pivotLowSeq.length ? pivotLowSeq.join('-') : undefined,
       pivotGapAvgBarsAtEntry: entryMetricsOverride?.pivotGapAvgBars ?? fallback?.pivotGapAvgBars,
-      // Leg fields have no fallback recompute: undefined simply means the entry was
-      // graded with currentIndex windows (PIVOT mode / no completed leg / degenerate leg).
-      legStartIndexAtEntry: entryMetricsOverride?.legStartIndex ?? fallback?.legStartIndex,
-      legEndIndexAtEntry: entryMetricsOverride?.legEndIndex ?? fallback?.legEndIndex,
-      legStartTimeAtEntry: entryMetricsOverride?.legStartTime ?? fallback?.legStartTime,
-      legEndTimeAtEntry: entryMetricsOverride?.legEndTime ?? fallback?.legEndTime,
-      legBarCountAtEntry: entryMetricsOverride?.legBarCount ?? fallback?.legBarCount,
-      maxConsecutiveHighBreaksAtEntry:
-        entryMetricsOverride?.maxConsecutiveHighBreaks ?? fallback?.maxConsecutiveHighBreaks,
-      maxConsecutiveLowBreaksAtEntry:
-        entryMetricsOverride?.maxConsecutiveLowBreaks ?? fallback?.maxConsecutiveLowBreaks,
       legSequenceAtEntry: legSequence.length ? legSequence : undefined,
     },
   };
