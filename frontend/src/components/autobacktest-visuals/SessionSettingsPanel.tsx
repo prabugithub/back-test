@@ -198,7 +198,7 @@ export function SessionSettingsPanel({ config, onChange, isOpen, onClose }: Sess
                 />
               </div>
               <div className="flex items-center justify-between gap-1">
-                <span className="text-[10px] text-gray-500" title="Bars looked back for the IQR-trimmed body-to-range-ratio average instrumentation on trade records (brrAvgIQRAtEntry)">Bar Quality</span>
+                <span className="text-[10px] text-gray-500" title="Bars looked back for the body-to-range-ratio average instrumentation on trade records — sizes both the plain mean (brrAvgAtEntry) and the IQR-trimmed mean (brrAvgIQRAtEntry)">Bar Quality</span>
                 <input
                   type="number" min={5} max={50} value={config.barQualityLookback ?? 20}
                   onChange={e => onChange({ barQualityLookback: Number(e.target.value) })}

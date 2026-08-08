@@ -1547,14 +1547,20 @@ export function AdvancedChart({
                                   it's only absent on trades restored from older sessions. */}
                               <span className="col-span-2">Brooks H/L: <b>{typeof s.hlSeq === 'string' ? (s.hlSeq === '' ? 'none' : s.hlSeq) : '—'}</b></span>
                             </div>
+                            {/* overflow-auto + whitespace-nowrap: 11 columns (4 of them raw
+                                prices) don't fit the 26rem popup — scroll rather than wrap. */}
                             {s.brr && s.brr.length > 0 && (
-                              <div className="mt-1.5 max-h-40 overflow-y-auto">
-                                <table className="w-full text-[9px] tabular-nums">
+                              <div className="mt-1.5 max-h-40 overflow-auto">
+                                <table className="w-full text-[9px] tabular-nums whitespace-nowrap">
                                   <thead className="text-gray-400 sticky top-0 bg-inherit">
                                     <tr className="text-left">
                                       <th className="pr-2 font-semibold">Bar</th>
                                       <th className="pr-2 font-semibold">Dir</th>
                                       <th className="pr-2 font-semibold">H/L</th>
+                                      <th className="pr-2 font-semibold">O</th>
+                                      <th className="pr-2 font-semibold">H</th>
+                                      <th className="pr-2 font-semibold">L</th>
+                                      <th className="pr-2 font-semibold">C</th>
                                       <th className="pr-2 font-semibold">BRR</th>
                                       <th className="pr-2 font-semibold">CLV</th>
                                       <th className="pr-2 font-semibold">UWR</th>
@@ -1573,6 +1579,12 @@ export function AdvancedChart({
                                         <td className={`pr-2 font-bold ${s.hl?.[k]?.startsWith('H') ? 'text-green-600' : 'text-red-600'}`}>
                                           {s.hl === undefined ? '—' : (s.hl[k] ?? '')}
                                         </td>
+                                        {/* Raw prices of the bar — dashes on segments
+                                            stored before o/h/l/c existed. */}
+                                        <td className="pr-2 text-gray-500">{fmt(s.o?.[k])}</td>
+                                        <td className="pr-2 text-gray-500">{fmt(s.h?.[k])}</td>
+                                        <td className="pr-2 text-gray-500">{fmt(s.l?.[k])}</td>
+                                        <td className="pr-2 text-gray-500">{fmt(s.c?.[k])}</td>
                                         <td className="pr-2">{fmt(s.brr?.[k])}</td>
                                         <td className="pr-2">{fmt(s.clv?.[k])}</td>
                                         <td className="pr-2">{fmt(s.uwr?.[k])}</td>

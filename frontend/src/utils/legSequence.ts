@@ -48,10 +48,21 @@ function makeSegment(
   // Per-candle H/L label + the collapsed sequence of the ones that fired.
   const hl: (string | null)[] = [];
   const hlParts: string[] = [];
+  // Per-candle raw OHLC, oldest→newest. `h`/`l` are the per-bar series; the segment
+  // extremes accumulated above stay in `high`/`low`.
+  const o: number[] = [];
+  const h: number[] = [];
+  const l: number[] = [];
+  const c: number[] = [];
   for (let i = startIndex; i <= endIndex; i++) {
-    if (candles[i].high > high) high = candles[i].high;
-    if (candles[i].low < low) low = candles[i].low;
-    const isBull = candles[i].close > candles[i].open ? 1 : 0;
+    const candle = candles[i];
+    if (candle.high > high) high = candle.high;
+    if (candle.low < low) low = candle.low;
+    o.push(candle.open);
+    h.push(candle.high);
+    l.push(candle.low);
+    c.push(candle.close);
+    const isBull = candle.close > candle.open ? 1 : 0;
     bullBear.push(isBull);
     bullCount += isBull;
     const sig = signals[i] ?? null; // ?? null guards a short caller-supplied array
@@ -87,6 +98,10 @@ function makeSegment(
     seg.lwr = samples.map(s => s.lwr);
     seg.bullBear = bullBear;
     seg.hl = hl;
+    seg.o = o;
+    seg.h = h;
+    seg.l = l;
+    seg.c = c;
   }
   return seg;
 }
@@ -96,7 +111,7 @@ function makeSegment(
  *                      array — indices in the result are absolute into `candles`.
  * @param currentIndex  The entry bar index into `candles`.
  * @param count         Max number of impulse legs to keep (pullbacks are extra segments).
- * @param detail        'full' attaches per-candle brr/clv/uwr/lwr/bullBear/hl arrays; 'avg' omits them.
+ * @param detail        'full' attaches per-candle brr/clv/uwr/lwr/bullBear/hl/o/h/l/c arrays; 'avg' omits them.
  * @param run           Optional precomputed AlBrooks pass (leg history + per-bar H/L labels).
  *                      Must come from ONE run over `candles` itself or a 0-based prefix of it —
  *                      indices are absolute. Recomputed via calculateAlBrooksRun when omitted;

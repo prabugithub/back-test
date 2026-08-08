@@ -72,6 +72,16 @@ export interface LegSegment {
   // one label per candle — H and L are mutually exclusive per bar (the outside-bar
   // tiebreak in runAlBrooks decides by close direction).
   hl?: (string | null)[];
+  // Per-candle raw prices (oldest→newest), index-aligned with bullBear/hl/brr/…: the
+  // segment's candles as-is. The segment-level startPrice/endPrice/high/low above are
+  // the aggregates of these — note `h`/`l` here are the PER-CANDLE series, while
+  // `high`/`low` are the segment extremes. 'full' detail only, like the arrays above:
+  // stripped before Firestore persistence, retained in exports. No collapsed form is
+  // needed — startPrice/endPrice/high/low already persist.
+  o?: number[];
+  h?: number[];
+  l?: number[];
+  c?: number[];
 }
 
 // Trade record
@@ -102,6 +112,7 @@ export interface Trade {
   withTrendSeen?: boolean;
   journal?: TradeJournal;
   atrDepthAtEntry?: number;
+  brrAvgAtEntry?: number;    // plain mean body-to-range ratio over the same window as brrAvgIQRAtEntry — every bar counted, so a single freak doji/marubozu shows up here; read the pair together (a wide gap = outlier-skewed window)
   brrAvgIQRAtEntry?: number; // IQR-trimmed mean body-to-range ratio over the last N bars ending at entry — outliers outside [Q1-1.5*IQR, Q3+1.5*IQR] dropped before averaging; a robust variant of a plain brrAvg
   ema21SlopeAtEntry?: number; // EMA21 points-per-bar slope over the configured lookback ending at entry
   ema50SlopeAtEntry?: number; // EMA50 points-per-bar slope over the configured lookback ending at entry
@@ -111,6 +122,15 @@ export interface Trade {
   pivotHighSeqAtEntry?: string;    // last up-to-4 bearish trend labels (HH/LH), oldest→newest, joined with '-'
   pivotLowSeqAtEntry?: string;     // last up-to-4 bullish trend labels (HL/LL), oldest→newest, joined with '-'
   pivotGapAvgBarsAtEntry?: number; // mean bar-count gap between consecutive same-type pivots across both sequences
+  // Session-open context: which bar opened the entry's trading day, how far it
+  // gapped from the previous day's close, and how deep into the session the
+  // entry was. Gap fields are absent (not 0) when no previous day is loaded.
+  openBarTimestampAtEntry?: number; // timestamp of the entry day's first bar (Unix seconds, same unit as Candle)
+  dayOpenAtEntry?: number;          // open price of that first bar — the session open
+  prevDayCloseAtEntry?: number;     // close of the last bar of the previous trading day
+  gapPointsAtEntry?: number;        // signed dayOpen - prevDayClose; positive = gap up, negative = gap down
+  gapPercentAtEntry?: number;       // gapPointsAtEntry as a percentage of prevDayCloseAtEntry
+  barsSinceOpenAtEntry?: number;    // bars from the day's open bar to the entry bar (0 = entered on the open bar)
   // Recent-price-action context: the last up-to-N Al Brooks impulse legs plus the
   // pullback candles between them, contiguous back from the entry bar, newest→oldest
   // (index 0 = closest to entry, walking back in time). Per-candle arrays are present

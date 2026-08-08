@@ -66,7 +66,27 @@ function checkSequence(seq: LegSegment[], entryIndex: number, detail: 'full' | '
       if (s.hl && s.hl.filter(Boolean).join('-') !== s.hlSeq) {
         fail(`${tag}: hlSeq '${s.hlSeq}' != collapse(hl) '${s.hl.filter(Boolean).join('-')}'`);
       }
-    } else if (s.brr !== undefined || s.bullBear !== undefined || s.hl !== undefined) {
+      // 4a. Per-candle OHLC: present, right length, and consistent with the aggregates
+      // that ARE persisted — the aggregates are the only cross-check available after a
+      // restore, so they must never disagree with the arrays they were derived from.
+      for (const [name, arr] of [['o', s.o], ['h', s.h], ['l', s.l], ['c', s.c]] as const) {
+        if (!arr || arr.length !== s.barCount) fail(`${tag}: full mode ${name} length ${arr?.length} != barCount ${s.barCount}`);
+      }
+      if (s.o && s.h && s.l && s.c && s.o.length === s.barCount) {
+        if (Math.max(...s.h) !== s.high) fail(`${tag}: max(h) ${Math.max(...s.h)} != segment high ${s.high}`);
+        if (Math.min(...s.l) !== s.low) fail(`${tag}: min(l) ${Math.min(...s.l)} != segment low ${s.low}`);
+        if (s.o[0] !== s.startPrice) fail(`${tag}: o[0] ${s.o[0]} != startPrice ${s.startPrice}`);
+        if (s.c[s.c.length - 1] !== s.endPrice) fail(`${tag}: last c ${s.c[s.c.length - 1]} != endPrice ${s.endPrice}`);
+        // Ties the price arrays to the direction array: same candles, same order.
+        if (s.bullBear) {
+          for (let k = 0; k < s.barCount; k++) {
+            const expected = s.c[k] > s.o[k] ? 1 : 0;
+            if (s.bullBear[k] !== expected) fail(`${tag}: bullBear[${k}] ${s.bullBear[k]} != (c>o) ${expected} — arrays misaligned`);
+          }
+        }
+      }
+    } else if (s.brr !== undefined || s.bullBear !== undefined || s.hl !== undefined
+               || s.o !== undefined || s.h !== undefined || s.l !== undefined || s.c !== undefined) {
       fail(`${tag}: avg mode should not carry per-candle arrays`);
     }
     // 4b. bullCount is always present and within the segment's bar range.

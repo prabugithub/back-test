@@ -17,6 +17,7 @@ import {
   calculateBarRanges,
   averageBarRanges,
   calculateBarQuality,
+  averageBarQuality,
   averageBarQualityIQR,
   calculateBarBreaks,
   calculateConsecutiveBreaks,
@@ -242,8 +243,8 @@ export interface AutoBacktestConfig {
   // High/low break count instrumentation — momentum/persistence metric recorded on trade entries
   barBreakLookback: number; // bars looked back for high/low break counts (default 20)
 
-  // Bar-quality (BRR) IQR instrumentation — robust body-to-range-ratio average recorded on trade entries
-  barQualityLookback?: number; // bars looked back for the IQR-trimmed BRR average, brrAvgIQRAtEntry (default 20)
+  // Bar-quality (BRR) instrumentation — plain + IQR-trimmed body-to-range-ratio averages recorded on trade entries
+  barQualityLookback?: number; // bars looked back for both BRR averages, brrAvgAtEntry / brrAvgIQRAtEntry (default 20)
 
   // EMA slope instrumentation — trend momentum metric recorded on trade entries
   ema21SlopeLookback: number; // bars looked back for EMA21 slope (default 10)
@@ -526,6 +527,7 @@ export interface EntryMetricsSnapshot {
   efficiencyRatio?: number;
   highBreakCount?: number;
   lowBreakCount?: number;
+  brrAvg?: number;
   brrAvgIQR?: number;
   ema21Slope?: number;
   ema50Slope?: number;
@@ -610,6 +612,10 @@ export function computeEntryMetrics(
       windowBars !== undefined ? windowBars - 1 : (config.barBreakLookback ?? 20));
   const barQualitySamples = calculateBarQuality(candles, end,
     windowBars ?? (config.barQualityLookback ?? 20));
+  // Both BRR averages over the SAME window: the plain mean (every bar counted) and
+  // the IQR-trimmed mean (Tukey-fence outliers dropped). Kept side by side so a
+  // window skewed by one freak bar is visible as a gap between the two.
+  const { brrAvg } = averageBarQuality(barQualitySamples);
   const { brrAvgIQR } = averageBarQualityIQR(barQualitySamples);
   const legInteraction = calculateEMAInteraction(candles, end, 20,
     windowBars ?? (config.emaInteractionLookback ?? 20));
@@ -634,6 +640,7 @@ export function computeEntryMetrics(
       windowBars !== undefined ? windowBars - 1 : (config.efficiencyRatioLookback ?? 10)),
     highBreakCount,
     lowBreakCount,
+    brrAvg,
     brrAvgIQR,
     ema21Slope: calculateEMASlope(candles, end, 21, config.ema21SlopeLookback ?? 10),
     ema50Slope: calculateEMASlope(candles, end, 50, config.ema50SlopeLookback ?? 20),
