@@ -4,8 +4,9 @@ import type { Candle, Trade, BacktestPosition, OpenPosition, ExitReason } from '
 import type { TradeJournal } from '../types';
 import { type AutoBacktestConfig, type AutoSignal, type RegimeKey, MULTI_TRADE_DEFAULT_CAP, evaluateAutoSignals, evaluateTrailStop, evaluateAutoExitSignal } from './autoBacktestEngine';
 import { buildNetPositionMirror } from './netPosition';
-import { calculateMAPosition, calculateBarQuality, averageBarQualityIQR, calculateEMASlope, calculateEMAInteraction } from './pivotAnalysis';
+import { calculateMAPosition, calculateBarQuality, averageBarQuality, averageBarQualityIQR, calculateEMASlope, calculateEMAInteraction } from './pivotAnalysis';
 import { buildLegSequence } from './legSequence';
+import { buildSessionOpenFields } from './sessionDay';
 
 interface SimPosition {
   instrument: string;
@@ -160,7 +161,12 @@ export function runBatchSimulation(
       const entryMetrics = signal.entryMetrics;
       const emaInteractionFallback = calculateEMAInteraction(candles, candleIndex, 20, config.emaInteractionLookback ?? 20);
       const barQualitySamples = calculateBarQuality(candles, candleIndex, config.barQualityLookback ?? 20);
+      trade.brrAvgAtEntry = entryMetrics?.brrAvg ?? averageBarQuality(barQualitySamples).brrAvg;
       trade.brrAvgIQRAtEntry = entryMetrics?.brrAvgIQR ?? averageBarQualityIQR(barQualitySamples).brrAvgIQR;
+      trade.rangeAvgAtEntry = entryMetrics?.rangeAvg ?? averageBarQuality(barQualitySamples).rangeAvg;
+      trade.rangeAvgIQRAtEntry = entryMetrics?.rangeAvgIQR ?? averageBarQualityIQR(barQualitySamples).rangeAvgIQR;
+      trade.bodyAvgAtEntry = entryMetrics?.bodyAvg ?? averageBarQuality(barQualitySamples).bodyAvg;
+      trade.bodyAvgIQRAtEntry = entryMetrics?.bodyAvgIQR ?? averageBarQualityIQR(barQualitySamples).bodyAvgIQR;
       trade.ema21SlopeAtEntry = entryMetrics?.ema21Slope ?? calculateEMASlope(candles, candleIndex, 21, config.ema21SlopeLookback ?? 10);
       trade.ema50SlopeAtEntry = entryMetrics?.ema50Slope ?? calculateEMASlope(candles, candleIndex, 50, config.ema50SlopeLookback ?? 20);
       trade.ema20GapBarRatioAtEntry = entryMetrics?.ema20GapBarRatio ?? emaInteractionFallback.gapBarRatio;
@@ -175,6 +181,9 @@ export function runBatchSimulation(
         config.legSequenceDetail ?? 'full'
       );
       if (legSequence.length) trade.legSequenceAtEntry = legSequence;
+      // Session-open context (open bar + gap up/down + bars into the session).
+      // Same helper the store-side path spreads, so both stamp identical values.
+      Object.assign(trade, buildSessionOpenFields(candles, candleIndex));
     }
 
     trades.push(trade);

@@ -12,6 +12,7 @@ import { calculatePivotPoints, calculateATR, calculateEMA, calculateAlBrooksLegs
 import { analyzeMarketStructure } from './pivotAnalysis';
 import { computeEntryMetrics, type AutoBacktestConfig, type EntryMetricsSnapshot } from './autoBacktestEngine';
 import { buildLegSequence } from './legSequence';
+import { buildSessionOpenFields } from './sessionDay';
 
 export interface EntryInstrumentation {
   /** Every `*AtEntry` field, ready to spread onto a Trade. */
@@ -65,7 +66,12 @@ export function buildEntryInstrumentation(
       (type === 'SELL' && ltMarket.startsWith('Bear')),
     fields: {
       atrDepthAtEntry,
+      brrAvgAtEntry: entryMetricsOverride?.brrAvg ?? fallback?.brrAvg,
       brrAvgIQRAtEntry: entryMetricsOverride?.brrAvgIQR ?? fallback?.brrAvgIQR,
+      rangeAvgAtEntry: entryMetricsOverride?.rangeAvg ?? fallback?.rangeAvg,
+      rangeAvgIQRAtEntry: entryMetricsOverride?.rangeAvgIQR ?? fallback?.rangeAvgIQR,
+      bodyAvgAtEntry: entryMetricsOverride?.bodyAvg ?? fallback?.bodyAvg,
+      bodyAvgIQRAtEntry: entryMetricsOverride?.bodyAvgIQR ?? fallback?.bodyAvgIQR,
       ema21SlopeAtEntry: entryMetricsOverride?.ema21Slope ?? fallback?.ema21Slope,
       ema50SlopeAtEntry: entryMetricsOverride?.ema50Slope ?? fallback?.ema50Slope,
       ema20GapBarRatioAtEntry: entryMetricsOverride?.ema20GapBarRatio ?? fallback?.ema20GapBarRatio,
@@ -74,6 +80,10 @@ export function buildEntryInstrumentation(
       pivotHighSeqAtEntry: pivotHighSeq.length ? pivotHighSeq.join('-') : undefined,
       pivotLowSeqAtEntry: pivotLowSeq.length ? pivotLowSeq.join('-') : undefined,
       pivotGapAvgBarsAtEntry: entryMetricsOverride?.pivotGapAvgBars ?? fallback?.pivotGapAvgBars,
+      // Session-open context (open bar + gap up/down + bars into the session).
+      // Deterministic from (candles, index) alone, so there is nothing for the
+      // auto engine to override.
+      ...buildSessionOpenFields(candles, index),
       legSequenceAtEntry: legSequence.length ? legSequence : undefined,
     },
   };

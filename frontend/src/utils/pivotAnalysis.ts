@@ -341,11 +341,13 @@ export interface BarQualitySample {
     clv: number; // close location value: (close-low) / (high-low) — near 1 = closed near high (bullish), near 0 = closed near low (bearish)
     uwr: number; // upper wick ratio: (high-max(open,close)) / (high-low) — large UWR on an up-close bar exposes rejection at highs (fakeout)
     lwr: number; // lower wick ratio: (min(open,close)-low) / (high-low) — large LWR on a down-close bar exposes rejection at lows (fakeout)
+    range: number; // high - low, actual points — the point-value counterpart to brr's denominator
+    body: number; // |close - open|, actual points — the point-value counterpart to brr's numerator
 }
 
 function barQualityOf(c: Candle): BarQualitySample {
     const range = c.high - c.low;
-    if (range <= 0) return { brr: 0, clv: 0, uwr: 0, lwr: 0 };
+    if (range <= 0) return { brr: 0, clv: 0, uwr: 0, lwr: 0, range: 0, body: 0 };
     const body = Math.abs(c.close - c.open);
     const upperWick = c.high - Math.max(c.open, c.close);
     const lowerWick = Math.min(c.open, c.close) - c.low;
@@ -354,6 +356,8 @@ function barQualityOf(c: Candle): BarQualitySample {
         clv: (c.close - c.low) / range,
         uwr: upperWick / range,
         lwr: lowerWick / range,
+        range,
+        body,
     };
 }
 
@@ -383,6 +387,8 @@ export function averageBarQuality(samples: BarQualitySample[]): {
     clvAvg?: number;
     uwrAvg?: number;
     lwrAvg?: number;
+    rangeAvg?: number;
+    bodyAvg?: number;
 } {
     if (samples.length === 0) return {};
     const mean = (xs: number[]) => xs.reduce((sum, x) => sum + x, 0) / xs.length;
@@ -391,6 +397,8 @@ export function averageBarQuality(samples: BarQualitySample[]): {
         clvAvg: mean(samples.map(s => s.clv)),
         uwrAvg: mean(samples.map(s => s.uwr)),
         lwrAvg: mean(samples.map(s => s.lwr)),
+        rangeAvg: mean(samples.map(s => s.range)),
+        bodyAvg: mean(samples.map(s => s.body)),
     };
 }
 
@@ -427,15 +435,22 @@ function iqrTrimmedMean(values: number[]): number | undefined {
 }
 
 /**
- * IQR-trimmed mean Body-to-Range Ratio from calculateBarQuality samples — a
- * robust variant of averageBarQuality's brrAvg. Undefined when the window is
- * empty, mirroring averageBarQuality's convention.
+ * IQR-trimmed mean Body-to-Range Ratio (plus point-value range/body counterparts)
+ * from calculateBarQuality samples — robust variants of averageBarQuality's
+ * brrAvg/rangeAvg/bodyAvg. Undefined when the window is empty, mirroring
+ * averageBarQuality's convention.
  */
 export function averageBarQualityIQR(samples: BarQualitySample[]): {
     brrAvgIQR?: number;
+    rangeAvgIQR?: number;
+    bodyAvgIQR?: number;
 } {
     if (samples.length === 0) return {};
-    return { brrAvgIQR: iqrTrimmedMean(samples.map(s => s.brr)) };
+    return {
+        brrAvgIQR: iqrTrimmedMean(samples.map(s => s.brr)),
+        rangeAvgIQR: iqrTrimmedMean(samples.map(s => s.range)),
+        bodyAvgIQR: iqrTrimmedMean(samples.map(s => s.body)),
+    };
 }
 
 /**

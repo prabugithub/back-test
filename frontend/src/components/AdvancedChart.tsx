@@ -1503,7 +1503,7 @@ export function AdvancedChart({
                             <button
                               key={i}
                               onClick={() => setSelectedSegment(isSel ? null : seg)}
-                              title={`${seg.kind} ${seg.direction} · bars ${seg.startIndex}–${seg.endIndex} (${seg.barCount}) · move ${seg.movePct.toFixed(2)}% · H ${seg.high.toFixed(2)} L ${seg.low.toFixed(2)} · BRR ${seg.brrAvg.toFixed(2)} CLV ${seg.clvAvg.toFixed(2)} UWR ${seg.uwrAvg.toFixed(2)} LWR ${seg.lwrAvg.toFixed(2)} · H/L breaks ${seg.highBreakCount}/${seg.lowBreakCount}${seg.bullBear ? ` · bull/bear ${seg.bullBear.join('')}` : ''}`}
+                              title={`${seg.kind} ${seg.direction} · bars ${seg.startIndex}–${seg.endIndex} (${seg.barCount}) · move ${seg.movePct.toFixed(2)}% · H ${seg.high.toFixed(2)} L ${seg.low.toFixed(2)} · BRR ${seg.brrAvg.toFixed(2)} CLV ${seg.clvAvg.toFixed(2)} UWR ${seg.uwrAvg.toFixed(2)} LWR ${seg.lwrAvg.toFixed(2)} · H/L breaks ${seg.highBreakCount}/${seg.lowBreakCount}${seg.bullBear ? ` · bull/bear ${seg.bullBear.join('')}` : ''}${seg.hlSeq ? ` · Brooks H/L ${seg.hlSeq}` : ''}`}
                               className={`shrink-0 rounded px-1.5 py-1 text-[9px] leading-tight text-center min-w-[3rem] cursor-pointer transition-all ${
                                 bull ? 'text-green-700' : 'text-red-700'
                               } ${
@@ -1542,14 +1542,25 @@ export function AdvancedChart({
                               <span>Bull/bear bars: <b>{Number.isFinite(s.bullCount) ? `${s.bullCount}/${s.barCount - s.bullCount}` : '—'}</b></span>
                               <span>Avg BRR {fmt(s.brrAvg)} · CLV {fmt(s.clvAvg)}</span>
                               <span>Avg UWR {fmt(s.uwrAvg)} · LWR {fmt(s.lwrAvg)}</span>
+                              {/* Al Brooks pullback labels — distinct from "H/L breaks" above.
+                                  typeof (not === undefined) because hlSeq is a required field:
+                                  it's only absent on trades restored from older sessions. */}
+                              <span className="col-span-2">Brooks H/L: <b>{typeof s.hlSeq === 'string' ? (s.hlSeq === '' ? 'none' : s.hlSeq) : '—'}</b></span>
                             </div>
+                            {/* overflow-auto + whitespace-nowrap: 11 columns (4 of them raw
+                                prices) don't fit the 26rem popup — scroll rather than wrap. */}
                             {s.brr && s.brr.length > 0 && (
-                              <div className="mt-1.5 max-h-40 overflow-y-auto">
-                                <table className="w-full text-[9px] tabular-nums">
+                              <div className="mt-1.5 max-h-40 overflow-auto">
+                                <table className="w-full text-[9px] tabular-nums whitespace-nowrap">
                                   <thead className="text-gray-400 sticky top-0 bg-inherit">
                                     <tr className="text-left">
                                       <th className="pr-2 font-semibold">Bar</th>
                                       <th className="pr-2 font-semibold">Dir</th>
+                                      <th className="pr-2 font-semibold">H/L</th>
+                                      <th className="pr-2 font-semibold">O</th>
+                                      <th className="pr-2 font-semibold">H</th>
+                                      <th className="pr-2 font-semibold">L</th>
+                                      <th className="pr-2 font-semibold">C</th>
                                       <th className="pr-2 font-semibold">BRR</th>
                                       <th className="pr-2 font-semibold">CLV</th>
                                       <th className="pr-2 font-semibold">UWR</th>
@@ -1563,6 +1574,17 @@ export function AdvancedChart({
                                         <td className={`pr-2 font-bold ${s.bullBear?.[k] === 1 ? 'text-green-600' : 'text-red-600'}`}>
                                           {s.bullBear === undefined ? '—' : s.bullBear[k] === 1 ? '▲' : '▼'}
                                         </td>
+                                        {/* Blank on the many bars with no signal — a dash on
+                                            every row would drown out the few that fired. */}
+                                        <td className={`pr-2 font-bold ${s.hl?.[k]?.startsWith('H') ? 'text-green-600' : 'text-red-600'}`}>
+                                          {s.hl === undefined ? '—' : (s.hl[k] ?? '')}
+                                        </td>
+                                        {/* Raw prices of the bar — dashes on segments
+                                            stored before o/h/l/c existed. */}
+                                        <td className="pr-2 text-gray-500">{fmt(s.o?.[k])}</td>
+                                        <td className="pr-2 text-gray-500">{fmt(s.h?.[k])}</td>
+                                        <td className="pr-2 text-gray-500">{fmt(s.l?.[k])}</td>
+                                        <td className="pr-2 text-gray-500">{fmt(s.c?.[k])}</td>
                                         <td className="pr-2">{fmt(s.brr?.[k])}</td>
                                         <td className="pr-2">{fmt(s.clv?.[k])}</td>
                                         <td className="pr-2">{fmt(s.uwr?.[k])}</td>

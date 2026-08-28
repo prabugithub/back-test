@@ -311,6 +311,18 @@ export interface AlBrooksLegsByBar {
  *  sequence. */
 export interface CompletedLeg extends AlBrooksLeg {
   direction: 'bull' | 'bear';
+  /** Bar at which this leg FROZE — the bar whose break confirmed the pullback had begun.
+   *
+   *  This is the only causal filter key, and it is NOT `endIndex`. `endIndex` is the swing
+   *  extreme, which can precede the freeze by many bars: a bull leg topping at bar 20 and
+   *  freezing on the lowBreak at bar 25 has `endIndex: 20, completedAt: 25`. Asking "which
+   *  legs existed as of bar 22" by testing `endIndex <= 22` would admit it — pure lookahead,
+   *  and it materialises as a completed impulse leg appearing where a run over the real
+   *  prefix would still show the forming trailing pullback.
+   *
+   *  Pushes happen inside the bar loop in bar order, so this is monotone non-decreasing
+   *  across `legHistory` and a binary search on it is valid. */
+  completedAt: number;
 }
 
 export interface AlBrooksMarker {
@@ -326,6 +338,21 @@ export interface AlBrooksMarker {
    *  first leg completes. */
   legStartIndex?: number;
   legEndIndex?: number;
+}
+
+/** Everything one runAlBrooks pass produces. Extracted because this exact shape is the
+ *  return type of runAlBrooks, the alBrooksCache value type and getFullAlBrooks' return —
+ *  three places that must stay in lockstep. */
+export interface AlBrooksRun {
+  markers: AlBrooksMarker[];
+  legs: AlBrooksLegsByBar;
+  legHistory: CompletedLeg[];
+  /** Dense per-bar H/L label, index-aligned with `candles`; null on bars where nothing
+   *  fired (including bars 0-20, which the state machine never reaches). At most one
+   *  label per bar — the outside-bar tiebreak makes H and L mutually exclusive.
+   *  UNFILTERED: records every signal the counter produced, including ones the
+   *  pullback-depth filter suppressed from `markers`, so the count never shows a hole. */
+  signalsByBar: (AlBrooksSignal | null)[];
 }
 
 /**
@@ -366,24 +393,29 @@ export function calculateAlBrooksLegs(candles: Candle[]): AlBrooksLegsByBar {
   return runAlBrooks(candles, false, 1.0).legs;
 }
 
-/** Chronological history of every completed leg (both sides), in the order they froze.
- *  See CompletedLeg. Depth filter is irrelevant to leg tracking, so no params. */
-export function calculateAlBrooksLegHistory(candles: Candle[]): CompletedLeg[] {
-  return runAlBrooks(candles, false, 1.0).legHistory;
+/** One full pass, all outputs — the chronological leg history (see CompletedLeg) plus
+ *  the dense per-bar H/L labels, so callers needing more than one of them don't run the
+ *  state machine twice. Fixed at (false, 1.0): only `markers` depends on the depth
+ *  filter, and these are the raw, unsuppressed signals. */
+export function calculateAlBrooksRun(candles: Candle[]): AlBrooksRun {
+  return runAlBrooks(candles, false, 1.0);
 }
 
 function runAlBrooks(
   candles: Candle[],
   usePullbackDepth: boolean,
   atrDepthMultiplier: number
-): { markers: AlBrooksMarker[]; legs: AlBrooksLegsByBar; legHistory: CompletedLeg[] } {
+): AlBrooksRun {
   const result: AlBrooksMarker[] = [];
   const bullLegs: (AlBrooksLeg | null)[] = new Array(candles?.length ?? 0).fill(null);
   const bearLegs: (AlBrooksLeg | null)[] = new Array(candles?.length ?? 0).fill(null);
   // Chronological log of completed legs (pushed as each freezes below). Purely
   // observational — never read back into the signal state machine.
   const legHistory: CompletedLeg[] = [];
-  const done = { markers: result, legs: { bull: bullLegs, bear: bearLegs }, legHistory };
+  // Per-bar H/L label — allocated before the short-input guard below so callers always
+  // get a correctly sized array. Also purely observational.
+  const signalsByBar: (AlBrooksSignal | null)[] = new Array(candles?.length ?? 0).fill(null);
+  const done = { markers: result, legs: { bull: bullLegs, bear: bearLegs }, legHistory, signalsByBar };
 
   if (!candles || candles.length < 22) return done;
 
@@ -473,7 +505,7 @@ function runAlBrooks(
     if (lowBreak) {
       if (hActiveStart !== null) {
         hCompletedLeg = { startIndex: hActiveStart, endIndex: hActiveMaxHighBar };
-        legHistory.push({ direction: 'bull', ...hCompletedLeg });
+        legHistory.push({ direction: 'bull', ...hCompletedLeg, completedAt: i });
         hActiveStart = null;
       }
       hCandidateStart = null;
@@ -481,7 +513,7 @@ function runAlBrooks(
     if (highBreak) {
       if (lActiveStart !== null) {
         lCompletedLeg = { startIndex: lActiveStart, endIndex: lActiveMinLowBar };
-        legHistory.push({ direction: 'bear', ...lCompletedLeg });
+        legHistory.push({ direction: 'bear', ...lCompletedLeg, completedAt: i });
         lActiveStart = null;
       }
       lCandidateStart = null;
@@ -531,11 +563,17 @@ function runAlBrooks(
       // active leg when hSwingHigh breaks.
       hCandidateStart = i;
 
+      // Recorded BEFORE the depth gate: hCount already advanced, so gating here would
+      // leave a hole (H1 → H3) in the very sequence that exists to show the count.
+      // A single slot per bar is lossless only because of the tiebreak above.
+      const signal = `H${hCount}`;
+      signalsByBar[i] = signal;
+
       const depthOk = c.low <= ema21 + getAtr(c.timestamp) * atrDepthMultiplier;
       if (!usePullbackDepth || depthOk) {
         result.push({
           time: c.timestamp,
-          signal: `H${hCount}`,
+          signal,
           legStartIndex: hCompletedLeg?.startIndex,
           legEndIndex: hCompletedLeg?.endIndex,
         });
@@ -550,11 +588,14 @@ function runAlBrooks(
 
       lCandidateStart = i;
 
+      const signal = `L${lCount}`;
+      signalsByBar[i] = signal; // unfiltered, same reasoning as the H side above
+
       const depthOk = c.high >= ema21 - getAtr(c.timestamp) * atrDepthMultiplier;
       if (!usePullbackDepth || depthOk) {
         result.push({
           time: c.timestamp,
-          signal: `L${lCount}`,
+          signal,
           legStartIndex: lCompletedLeg?.startIndex,
           legEndIndex: lCompletedLeg?.endIndex,
         });
@@ -700,13 +741,13 @@ export function getAtrValueAt(candles: Candle[], index: number, period: number =
   return i >= 0 && i < full.length ? full[i].value : 0;
 }
 
-const alBrooksCache = new WeakMap<Candle[], Map<string, { markers: AlBrooksMarker[]; legs: AlBrooksLegsByBar; legHistory: CompletedLeg[] }>>();
+const alBrooksCache = new WeakMap<Candle[], Map<string, AlBrooksRun>>();
 
 function getFullAlBrooks(
   candles: Candle[],
   usePullbackDepth: boolean,
   atrDepthMultiplier: number
-): { markers: AlBrooksMarker[]; legs: AlBrooksLegsByBar; legHistory: CompletedLeg[] } {
+): AlBrooksRun {
   const key = `${usePullbackDepth}|${atrDepthMultiplier}`;
   let byKey = alBrooksCache.get(candles);
   if (!byKey) {
@@ -739,6 +780,38 @@ export function getAlBrooksMarkersUpTo(
     if (full[mid].time <= maxTime) lo = mid + 1; else hi = mid;
   }
   return full.slice(0, lo);
+}
+
+/**
+ * The leg history + per-bar H/L labels visible as of `endIndex` (inclusive) — identical to
+ * `calculateAlBrooksRun(candles.slice(0, endIndex + 1))`'s two leg-sequence fields, but
+ * amortized O(log n) off the shared cache instead of a fresh O(n) state-machine pass.
+ *
+ * The filter key is `completedAt`, NOT `endIndex`. See the note on CompletedLeg: a leg's
+ * `endIndex` is its swing extreme and can precede its freeze bar by many bars, so an
+ * `endIndex <= i` filter would hand back legs that had not completed yet at bar `i`. That
+ * is lookahead, and its symptom — a completed impulse leg standing where the forming
+ * trailing pullback belongs — is exactly the shape leg-pattern rules key on.
+ *
+ * `signalsByBar` needs no filtering: it is dense, absolutely indexed, and written at fire
+ * time from bars <= i, so it is causal by construction. Callers reading past `endIndex`
+ * would be reading their own future, which `buildLegSequence` never does.
+ */
+export function getAlBrooksRunUpTo(
+  candles: Candle[],
+  endIndex: number
+): Pick<AlBrooksRun, 'legHistory' | 'signalsByBar'> {
+  const full = getFullAlBrooks(candles, false, 1.0);
+  if (endIndex < 0) return { legHistory: [], signalsByBar: full.signalsByBar };
+  // legHistory is pushed inside the bar loop in bar order, so completedAt is monotone
+  // non-decreasing — binary search for the first entry that froze after endIndex.
+  const h = full.legHistory;
+  let lo = 0, hi = h.length;
+  while (lo < hi) {
+    const mid = (lo + hi) >> 1;
+    if (h[mid].completedAt <= endIndex) lo = mid + 1; else hi = mid;
+  }
+  return { legHistory: h.slice(0, lo), signalsByBar: full.signalsByBar };
 }
 
 /** Per-bar completed-leg lookup as of `endIndex` — identical to reading

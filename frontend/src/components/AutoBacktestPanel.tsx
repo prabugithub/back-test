@@ -2,7 +2,7 @@ import { useMemo, useState, useEffect } from 'react';
 import { createPortal } from 'react-dom';
 import {
   Zap, TrendingUp, TrendingDown, Minus, RefreshCw, BarChart2, Save, Trash2, FolderOpen,
-  Settings2, Compass, LogIn, ShieldCheck, LogOut, ShieldAlert, Download, Calendar, X,
+  Settings2, Compass, LogIn, ShieldCheck, LogOut, ShieldAlert, Download, Calendar, X, Waves,
 } from 'lucide-react';
 import { useSessionStore } from '../stores/sessionStore';
 import { EntryMetricsDashboard } from './EntryMetricsDashboard';
@@ -23,7 +23,8 @@ import { FilterPreviewStrip } from './autobacktest-visuals/FilterPreviewStrip';
 import { Chip } from './autobacktest-visuals/Chip';
 import { ToggleSwitch } from './autobacktest-visuals/ToggleSwitch';
 import { AccordionSection } from './autobacktest-visuals/AccordionSection';
-import { StrategySummaryBar, countActiveConfirmationFilters } from './autobacktest-visuals/StrategySummaryBar';
+import { StrategySummaryBar, countActiveConfirmationFilters, countLegPatternSlots } from './autobacktest-visuals/StrategySummaryBar';
+import { LegPatternStep } from './autobacktest-visuals/legpattern/LegPatternStep';
 import { SessionSettingsPanel } from './autobacktest-visuals/SessionSettingsPanel';
 import {
   MarketStep, EntryStep, ConfirmationStep, ExitStep, RiskStep,
@@ -75,6 +76,7 @@ const WORKFLOW_STEPS: StepDef[] = [
   { key: 'market', label: 'Market', icon: <Compass size={14} /> },
   { key: 'entry', label: 'Entry', icon: <LogIn size={14} /> },
   { key: 'confirmation', label: 'Confirmation', icon: <ShieldCheck size={14} /> },
+  { key: 'pattern', label: 'Leg Pattern', icon: <Waves size={14} /> },
   { key: 'exit', label: 'Exit', icon: <LogOut size={14} /> },
   { key: 'risk', label: 'Risk', icon: <ShieldAlert size={14} /> },
 ];
@@ -85,6 +87,7 @@ const STEP_COMPONENTS: Record<WorkflowStep, React.ComponentType<RegimeStepProps>
   market: MarketStep,
   entry: EntryStep,
   confirmation: ConfirmationStep,
+  pattern: LegPatternStep,
   exit: ExitStep,
   risk: RiskStep,
 };
@@ -277,9 +280,11 @@ export function AutoBacktestPanel({ onNavigate, hidden }: AutoBacktestPanelProps
   const regimes: RegimeKey[] = ['uptrend', 'downtrend', 'range', 'reversal'];
   const confirmationCount = countActiveConfirmationFilters(activeRules);
   const exitMechanismCount = countActiveExitMechanisms(activeRules);
+  const patternSlotCount = countLegPatternSlots(activeRules);
   const stepsWithBadge: StepDef[] = WORKFLOW_STEPS.map(s =>
     s.key === 'confirmation' ? { ...s, badge: confirmationCount }
       : s.key === 'exit' ? { ...s, badge: exitMechanismCount }
+      : s.key === 'pattern' ? { ...s, badge: patternSlotCount }
       : s
   );
 
