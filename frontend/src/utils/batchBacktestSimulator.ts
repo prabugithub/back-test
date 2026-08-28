@@ -163,6 +163,10 @@ export function runBatchSimulation(
       const barQualitySamples = calculateBarQuality(candles, candleIndex, config.barQualityLookback ?? 20);
       trade.brrAvgAtEntry = entryMetrics?.brrAvg ?? averageBarQuality(barQualitySamples).brrAvg;
       trade.brrAvgIQRAtEntry = entryMetrics?.brrAvgIQR ?? averageBarQualityIQR(barQualitySamples).brrAvgIQR;
+      trade.rangeAvgAtEntry = entryMetrics?.rangeAvg ?? averageBarQuality(barQualitySamples).rangeAvg;
+      trade.rangeAvgIQRAtEntry = entryMetrics?.rangeAvgIQR ?? averageBarQualityIQR(barQualitySamples).rangeAvgIQR;
+      trade.bodyAvgAtEntry = entryMetrics?.bodyAvg ?? averageBarQuality(barQualitySamples).bodyAvg;
+      trade.bodyAvgIQRAtEntry = entryMetrics?.bodyAvgIQR ?? averageBarQualityIQR(barQualitySamples).bodyAvgIQR;
       trade.ema21SlopeAtEntry = entryMetrics?.ema21Slope ?? calculateEMASlope(candles, candleIndex, 21, config.ema21SlopeLookback ?? 10);
       trade.ema50SlopeAtEntry = entryMetrics?.ema50Slope ?? calculateEMASlope(candles, candleIndex, 50, config.ema50SlopeLookback ?? 20);
       trade.ema20GapBarRatioAtEntry = entryMetrics?.ema20GapBarRatio ?? emaInteractionFallback.gapBarRatio;

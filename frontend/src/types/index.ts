@@ -114,6 +114,10 @@ export interface Trade {
   atrDepthAtEntry?: number;
   brrAvgAtEntry?: number;    // plain mean body-to-range ratio over the same window as brrAvgIQRAtEntry — every bar counted, so a single freak doji/marubozu shows up here; read the pair together (a wide gap = outlier-skewed window)
   brrAvgIQRAtEntry?: number; // IQR-trimmed mean body-to-range ratio over the last N bars ending at entry — outliers outside [Q1-1.5*IQR, Q3+1.5*IQR] dropped before averaging; a robust variant of a plain brrAvg
+  rangeAvgAtEntry?: number;     // plain mean bar range (high-low, actual points) over the same window as brrAvgAtEntry
+  rangeAvgIQRAtEntry?: number;  // IQR-trimmed mean bar range (points) — robust variant of rangeAvgAtEntry
+  bodyAvgAtEntry?: number;      // plain mean bar body (|close-open|, actual points) over the same window as brrAvgAtEntry
+  bodyAvgIQRAtEntry?: number;   // IQR-trimmed mean bar body (points) — robust variant of bodyAvgAtEntry
   ema21SlopeAtEntry?: number; // EMA21 points-per-bar slope over the configured lookback ending at entry
   ema50SlopeAtEntry?: number; // EMA50 points-per-bar slope over the configured lookback ending at entry
   ema20GapBarRatioAtEntry?: number;      // fraction of bars in window not touching EMA20 (Brooks gap bar — strong trend)

@@ -554,6 +554,10 @@ export interface AutoSignal {
   regime: RegimeKey;
   ltMarket: string;
   htMarket: string;
+  rangeAvg?: number;
+  rangeAvgIQR?: number;
+  bodyAvg?: number;
+  bodyAvgIQR?: number;
   llhhPivot: string;
   entryMetrics?: EntryMetricsSnapshot;
 }
@@ -615,8 +619,8 @@ export function computeEntryMetrics(
   // Both BRR averages over the SAME window: the plain mean (every bar counted) and
   // the IQR-trimmed mean (Tukey-fence outliers dropped). Kept side by side so a
   // window skewed by one freak bar is visible as a gap between the two.
-  const { brrAvg } = averageBarQuality(barQualitySamples);
-  const { brrAvgIQR } = averageBarQualityIQR(barQualitySamples);
+  const { brrAvg, rangeAvg, bodyAvg } = averageBarQuality(barQualitySamples);
+  const { brrAvgIQR, rangeAvgIQR, bodyAvgIQR } = averageBarQualityIQR(barQualitySamples);
   const legInteraction = calculateEMAInteraction(candles, end, 20,
     windowBars ?? (config.emaInteractionLookback ?? 20));
   // Close-above bias is "always-in" context at the entry bar, not a leg-strength
@@ -667,6 +671,10 @@ export function evaluateAutoSignals(
 
   const currentCandle = candles[currentIndex];
   const currentTs = currentCandle.timestamp;
+    rangeAvg,
+    rangeAvgIQR,
+    bodyAvg,
+    bodyAvgIQR,
 
   // Pre-compute indicators (shared across every regime's evaluation below) —
   // cached lookups against the full candles array so a bar-by-bar auto-backtest
