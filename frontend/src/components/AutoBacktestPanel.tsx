@@ -236,7 +236,7 @@ export function AutoBacktestPanel({ onNavigate, hidden }: AutoBacktestPanelProps
   );
 
   const activeRules = config[activeRegime];
-  const previewBars = useFilterPreviewData(candles, currentIndex, activeRules, config);
+  const previewBars = useFilterPreviewData(candles, currentIndex, activeRules, config, activeRegime);
   const latestBar = previewBars[previewBars.length - 1];
 
   const updateGlobal = (patch: Partial<AutoBacktestConfig>) =>

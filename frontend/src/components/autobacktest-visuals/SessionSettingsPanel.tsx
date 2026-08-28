@@ -1,5 +1,10 @@
 import { X, Settings2 } from 'lucide-react';
 import { MULTI_TRADE_DEFAULT_CAP, type AutoBacktestConfig } from '../../utils/autoBacktestEngine';
+import {
+  DEFAULT_ENTRY_HOOK_LOOKBACK,
+  ENTRY_HOOK_LOOKBACK_MIN,
+  ENTRY_HOOK_LOOKBACK_MAX,
+} from '../../utils/entryHook';
 import { CardShell } from './CardShell';
 
 interface SessionSettingsPanelProps {
@@ -259,6 +264,18 @@ export function SessionSettingsPanel({ config, onChange, isOpen, onClose }: Sess
                   type="number" min={1} max={20} value={config.legSequenceCount ?? 10}
                   onChange={e => onChange({ legSequenceCount: Number(e.target.value) })}
                   className="w-12 px-1.5 py-1 text-xs border rounded text-center"
+                />
+              </div>
+              <div className="flex items-center justify-between gap-1">
+                <span className="text-[10px] text-gray-500" title="How many candles (ending at the trigger bar) a Custom Entry Hook receives as ctx.candles, so your algorithm never has to maintain its own history">Hook Candles</span>
+                <input
+                  type="number"
+                  min={ENTRY_HOOK_LOOKBACK_MIN}
+                  max={ENTRY_HOOK_LOOKBACK_MAX}
+                  step={50}
+                  value={config.entryHookLookback ?? DEFAULT_ENTRY_HOOK_LOOKBACK}
+                  onChange={e => onChange({ entryHookLookback: Number(e.target.value) })}
+                  className="w-16 px-1.5 py-1 text-xs border rounded text-center"
                 />
               </div>
             </div>

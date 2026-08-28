@@ -2,7 +2,8 @@
 
 import type { Candle, Trade, BacktestPosition, OpenPosition, ExitReason } from '../types';
 import type { TradeJournal } from '../types';
-import { type AutoBacktestConfig, type AutoSignal, type RegimeKey, MULTI_TRADE_DEFAULT_CAP, evaluateAutoSignals, evaluateTrailStop, evaluateAutoExitSignal } from './autoBacktestEngine';
+import { type AutoBacktestConfig, type AutoSignal, type RegimeKey, MULTI_TRADE_DEFAULT_CAP, evaluateAutoSignals, evaluateTrailStop, evaluateAutoExitSignal, resolveTradeQuantity } from './autoBacktestEngine';
+import { createHookRunState } from './entryHook';
 import { buildNetPositionMirror } from './netPosition';
 import { calculateMAPosition, calculateBarQuality, averageBarQuality, averageBarQualityIQR, calculateEMASlope, calculateEMAInteraction } from './pivotAnalysis';
 import { buildLegSequence } from './legSequence';
@@ -39,6 +40,15 @@ export interface BatchSimResult {
   finalRealizedPnL: number;
   tradeCount: number;   // completed round-trips (trades with pnl)
   totalPnL: number;
+  // Custom entry hook diagnostics for the run. Absent when no regime used a hook.
+  // A hook that throws or returns an invalid decision never aborts the run — it just takes
+  // no trade on that bar — so without this the failure would be completely silent.
+  hookDiagnostics?: {
+    errorCount: number;
+    error?: string;        // first trapped exception
+    rejectedCount: number;
+    rejectReason?: string; // first validation failure
+  };
 }
 
 function candleTimeMinutes(timestampSec: number): number {
@@ -71,9 +81,15 @@ export function runBatchSimulation(
   const reportEvery = Math.max(1, Math.floor(total / 20));
   // Mirrors isMultiTradeMode() in the store — the batch worker has no isLiveMode.
   const multi = config.enabled && config.skipIfPositionOpen === false;
+  // One per RUN, threaded through every bar: this is what makes ctx.state persist across
+  // bars so a hook can keep cooldowns and counters, and what collects trapped hook errors.
+  const hookRunState = createHookRunState();
 
   function enterPosition(candle: Candle, signal: AutoSignal, qty: number, candleIndex: number) {
-    const entryPrice = candle.close;
+    // signal.entryPrice IS candle.close for every built-in path — the engine sets it from
+    // the bar close. Reading it from the signal instead lets a custom entry hook name a fill
+    // price inside the bar (runEntryHook refuses one outside the bar's high/low).
+    const entryPrice = signal.entryPrice;
     // Multi-trade mode: a new signal sees no existing exposure — it opens its own
     // trade rather than blending. Single-position mode blends into the open one.
     const position: SimPosition | null = multi ? null : (openPositions[0] ?? null);
@@ -335,18 +351,13 @@ export function runBatchSimulation(
       candleMin > parseHHMM(config.tradeEndTime)
     ) continue;
 
-    const signal = evaluateAutoSignals(candles, i, config);
+    const signal = evaluateAutoSignals(candles, i, config, hookRunState);
     if (!signal) continue;
 
-    // Qty calculation — mirrors runAutoBacktestCheck (autoBacktestActions.ts lines 56-67)
-    let qty: number;
-    if (config.useAutoQty) {
-      const riskPoints = Math.abs(signal.entryPrice - signal.sl);
-      qty = riskPoints > 0 ? Math.floor(config.riskPerTrade / riskPoints) : 0;
-      if (qty < config.minQuantity) continue;
-    } else {
-      qty = tradeQuantity;
-    }
+    // Sizing lives in resolveTradeQuantity, shared with the store path so the two can't
+    // drift — and so a custom entry hook's explicit quantity is honoured identically here.
+    const { qty, skipReason } = resolveTradeQuantity(signal, config, tradeQuantity);
+    if (skipReason) continue;
 
     enterPosition(candle, signal, qty, i);
   }
@@ -371,5 +382,13 @@ export function runBatchSimulation(
     finalRealizedPnL: multiRealizedPnL,
     tradeCount: trades.filter(t => t.pnl !== undefined).length,
     totalPnL,
+    hookDiagnostics: hookRunState.errorCount > 0 || hookRunState.rejectedCount > 0
+      ? {
+          errorCount: hookRunState.errorCount,
+          error: hookRunState.error,
+          rejectedCount: hookRunState.rejectedCount,
+          rejectReason: hookRunState.rejectReason,
+        }
+      : undefined,
   };
 }

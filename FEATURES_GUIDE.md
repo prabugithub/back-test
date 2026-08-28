@@ -401,6 +401,59 @@ That ordered shape is what the **Leg Pattern** step (its own accordion section, 
 
 The **Retrace at the current bar** gate is a separate, whole-structure question: how far back into the recent range price has come, regardless of any single pullback's depth. Its ceiling is capped at 50% — beyond that it stops being a filter.
 
+### Custom Entry Hook — writing the entry logic in code
+
+The Leg Pattern above describes a shape *declaratively*. The **Custom Entry Hook** (last card in the **Entry** step, per regime) goes one step further: it hands a bar to a **TypeScript function you write** and lets that function decide. It exists for the strategy that no combination of thresholds and shapes can state — "if the last three legs did X *and* the session opened above Y *and* my own indicator says Z, go short with double size and a stop under the pullback low".
+
+**Where you write it.** Add a file to `frontend/src/strategies/`, export a function, and register it under an id in `strategies/index.ts`. `strategies/example.ts` is a worked reference with two hooks already registered. Vite hot-reloads on save. The full context type is documented in `utils/entryHook/types.ts`.
+
+```ts
+export const myEntry: EntryHook = ctx => {
+  if (ctx.trigger.count < 3) return false;              // H3+/L3+ only
+  if ((ctx.metrics.efficiencyRatio ?? 0) < 0.4) return false;
+  return { side: 'short', quantity: 50, slPoints: 30, targetRR: 2.5 };
+};
+```
+
+**It fires on every H/L signal, at any count.** This is the headline difference from everything else in the panel. The built-in chain can only ever enter on **H1/H2/L1/L2** — the H1/H2 checkboxes are the whole vocabulary. The signal detector labels H3, H4, L5 and beyond all the same; a hook sees them all. **While a hook is on, those checkboxes stop gating** and your own code does the trigger filtering (`ctx.trigger.count`).
+
+**Two modes**, chosen per regime:
+
+| Mode | Behaviour |
+|---|---|
+| **Off** | Not consulted. This is the default, and selecting a hook without leaving Off changes nothing. |
+| **Gate** | The whole built-in filter chain runs first, SL and TP are computed, and *then* your hook gets the final say — so it can see the engine's own stop and target before deciding whether to veto or override them. |
+| **Replace** | Every filter is skipped. Each H/L signal bar goes straight to your code, behind only the regime's **enabled** switch and its **market-structure** gates. The summary bar says *"Confirmation filters bypassed by hook"* so the chips can't mislead you. |
+
+**What your function receives.** Everything the engine already computed at that bar, so nothing has to be recalculated or maintained:
+
+- `ctx.candles` — **the last 1200 candles** ending at the trigger bar, oldest-first. The count is **Session Settings → Instrumentation Lookbacks → Hook Candles** (50–5000). This is why a hook never keeps its own history.
+- `ctx.trigger` — `{ label: 'H3', side: 'long', count: 3, barIndex }`.
+- `ctx.metrics` — the same instrumentation snapshot the built-in filters gate on and the trade record is stamped from: efficiency ratio, bar overlap, break counts, BRR averages, EMA slopes, pivot sequences.
+- `ctx.pivots`, `ctx.ema21`, `ctx.ema60`, `ctx.atr`, `ctx.ltMarket`, `ctx.htMarket`, `ctx.pivotSeq`, `ctx.regime`.
+- `ctx.legWindow` — bar bounds of the completed breakout leg on the trigger's side.
+- `ctx.signals` — the recent H/L label history, aligned with `ctx.candles`, for questions like *"was there an L2 in the last 20 bars?"*.
+- `ctx.legs()` and `ctx.legFeatures()` — the leg sequence and its derived features, built **only if you ask** so an unused one costs nothing.
+- `ctx.state` — a scratch object that **persists across bars for the whole run** and starts empty on the next one. This is where cooldowns, counters and accumulators live.
+- `ctx.log(msg)` — a note appended to the trade's reason string.
+
+Nothing reachable from `ctx` describes a bar after the trigger, so a hook cannot accidentally look ahead.
+
+**What it can return.** `false` (skip), `true` (take it exactly as the engine would), or an object overriding any of: `side`, `quantity`, `sl` / `slPoints`, `target` / `targetRR`, `entryPrice`, `reason`.
+
+**It fails closed, on purpose.** Unlike the threshold filters — which pass a bar through when their metric could not be measured — a hook that misbehaves takes *no* trade rather than a wrong one:
+
+- A long stop above entry (or a short stop below), a quantity that floors below 1, or a fill price the trigger bar never traded through → **no trade**, and the reason is recorded.
+- A hook that **throws** → no trade on that bar, but the run continues; the first error message and a count are reported.
+- A **hook id that isn't registered** (renamed or deleted) → the regime takes no trades, rather than quietly reverting to the built-in chain and running a strategy the config no longer describes.
+- A regime's **direction** setting still wins: a `LONG_ONLY` regime will not take a hook's short.
+
+**One combination that trades nothing:** a hook fires on H/L signal bars, and **Pivot** entry mode has no such signal — so a hook plus `Entry Signal: Pivot` rejects every bar. The card warns you when both are set. Use **H/L Signal** or **Confluence**.
+
+The **Live Preview Strip** shows a hook column, but only on bars that actually carry an H/L signal. Note that each previewed bar is evaluated with fresh `ctx.state`, so a hook built around a cooldown will preview differently from how it behaves inside a real run.
+
+Run `npm run backtest:entryhook` for the acceptance suite covering the window contract, causality, the overrides and the fail-closed paths.
+
 ### Pivot Sequence History & Pivot Gap
 
 Two per-regime filters alongside the single most-recent Pivot Seq filter above, both configured in the **Pivot Sequence History (last 4)** section:

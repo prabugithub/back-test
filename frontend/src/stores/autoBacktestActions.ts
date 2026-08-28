@@ -5,7 +5,10 @@ import {
   type AutoBacktestConfig, type AutoSignal,
   MULTI_TRADE_DEFAULT_CAP, isMultiTradeMode,
   evaluateAutoSignals, evaluateTrailStop, evaluateAutoExitSignal,
+  resolveTradeQuantity,
 } from '../utils/autoBacktestEngine';
+import { createHookRunState, type HookRunState } from '../utils/entryHook';
+import type { Candle } from '../types';
 import { useNotificationStore } from './notificationStore';
 import type { ExitReason, OpenPosition, Trade, TradeJournal } from '../types';
 import { calculateMAPosition } from '../utils/pivotAnalysis';
@@ -31,6 +34,21 @@ function parseHHMM(hhmm: string): number {
 let _openPositionSeq = 0;
 const nextOpenPositionId = () =>
   `op-${Date.now().toString(36)}-${(_openPositionSeq++).toString(36)}`;
+
+// Custom entry hook run state for the INTERACTIVE path. The batch simulator has an obvious
+// run boundary and makes one per call; playback has none, so the state is keyed on the
+// candle array's identity instead — loading or reloading candles replaces that array, which
+// is exactly when a hook's cooldowns and counters should start over. Same WeakMap-on-array
+// discipline the indicator caches use.
+const _hookStates = new WeakMap<Candle[], HookRunState>();
+function hookStateFor(candles: Candle[]): HookRunState {
+  let s = _hookStates.get(candles);
+  if (!s) {
+    s = createHookRunState();
+    _hookStates.set(candles, s);
+  }
+  return s;
+}
 
 export function createAutoBacktestActions(set: StoreSet, get: StoreGet) {
   // Rebuilds `position` from `openPositions`. Every multi-trade mutation must end
@@ -112,7 +130,10 @@ export function createAutoBacktestActions(set: StoreSet, get: StoreGet) {
       const candle = state.candles[index];
       if (!candle || quantity <= 0) return;
 
-      const entryPrice = candle.close;
+      // Identical to candle.close for every built-in path; reading it from the signal is
+      // what lets a custom entry hook name a fill price inside the bar. Mirrors the same
+      // read in batchBacktestSimulator's enterPosition.
+      const entryPrice = signal.entryPrice;
       const id = nextOpenPositionId();
       const { fields, isInitialWith } = buildEntryInstrumentation(
         state.candles, index, signal.type, entryPrice, state.autoBacktestConfig, signal.entryMetrics
@@ -325,23 +346,18 @@ export function createAutoBacktestActions(set: StoreSet, get: StoreGet) {
         return;
       }
 
-      const signal = evaluateAutoSignals(candles, index, autoBacktestConfig);
+      const signal = evaluateAutoSignals(candles, index, autoBacktestConfig, hookStateFor(candles));
 
       if (!signal) {
         return;
       }
 
-      // Quantity calculation
-      let qty: number;
-      if (autoBacktestConfig.useAutoQty) {
-        const riskPoints = Math.abs(signal.entryPrice - signal.sl);
-        qty = riskPoints > 0 ? Math.floor(autoBacktestConfig.riskPerTrade / riskPoints) : 0;
-        if (qty < autoBacktestConfig.minQuantity) {
-          set({ lastAutoSignalReason: `Skipped: qty ${qty} < min ${autoBacktestConfig.minQuantity} (SL ${riskPoints.toFixed(1)} pts too wide)` });
-          return;
-        }
-      } else {
-        qty = tradeQuantity;
+      // Sizing lives in resolveTradeQuantity, shared with the batch simulator so the two
+      // can't drift — and so a custom entry hook's explicit quantity is honoured here too.
+      const { qty, skipReason } = resolveTradeQuantity(signal, autoBacktestConfig, tradeQuantity);
+      if (skipReason) {
+        set({ lastAutoSignalReason: skipReason });
+        return;
       }
 
       set({ lastAutoSignalReason: signal.reason });
@@ -373,7 +389,7 @@ export function createAutoBacktestActions(set: StoreSet, get: StoreGet) {
         qty,
         signal.sl,
         signal.tp,
-        undefined,        // priceOverride — use candle close
+        signal.entryPrice, // == candle close on every built-in path; a hook may name a fill inside the bar
         'MANUAL',
         journal,
         signal.entryMetrics,

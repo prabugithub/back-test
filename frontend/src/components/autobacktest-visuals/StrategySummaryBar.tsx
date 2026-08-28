@@ -1,5 +1,6 @@
 import type { RegimeKey, RegimeRules } from '../../utils/autoBacktestEngine';
 import { Chip, type ChipTone } from './Chip';
+import { getEntryHookLabel } from '../../strategies';
 import type { WorkflowStep } from './RegimeWorkflowSteps';
 
 interface StrategySummaryBarProps {
@@ -82,6 +83,12 @@ export function StrategySummaryBar({ regime, rules, onJumpToStep }: StrategySumm
 
   const maLabel = formatMaFilterLabel(rules);
   const confirmationCount = countActiveConfirmationFilters(rules);
+  const hookMode = rules.entryHookMode ?? 'off';
+  const hookId = rules.entryHookId;
+  const hookOn = hookMode !== 'off' && !!hookId;
+  // In 'replace' mode none of the filters below the hook actually run, so reporting a count
+  // of them would be actively misleading — say they are bypassed instead.
+  const bypassed = hookOn && hookMode === 'replace';
 
   return (
     <div className="flex flex-wrap items-center gap-1.5 px-3 py-1.5">
@@ -89,15 +96,22 @@ export function StrategySummaryBar({ regime, rules, onJumpToStep }: StrategySumm
         {directionLabel}
       </Chip>
       <Chip tone="indigo" onClick={jump('entry')}>
-        {entryLabel}
+        {bypassed ? 'Entry: Every H/L signal' : entryLabel}
       </Chip>
-      {maLabel && (
+      {hookOn && (
+        <Chip tone="purple" onClick={jump('entry')}>
+          Hook: {getEntryHookLabel(hookId) ?? hookId} ({hookMode})
+        </Chip>
+      )}
+      {maLabel && !bypassed && (
         <Chip tone="indigo" onClick={jump('entry')}>
           {maLabel}
         </Chip>
       )}
-      <Chip tone={confirmationCount > 0 ? 'amber' : 'gray-muted'} onClick={jump('confirmation')}>
-        {confirmationCount} confirmation filter{confirmationCount === 1 ? '' : 's'} active
+      <Chip tone={bypassed ? 'gray-muted' : confirmationCount > 0 ? 'amber' : 'gray-muted'} onClick={jump('confirmation')}>
+        {bypassed
+          ? 'Confirmation filters bypassed by hook'
+          : `${confirmationCount} confirmation filter${confirmationCount === 1 ? '' : 's'} active`}
       </Chip>
       <Chip tone="neutral" onClick={jump('risk')}>
         {formatSlLabel(rules)}

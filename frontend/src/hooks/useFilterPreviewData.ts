@@ -20,7 +20,9 @@ import {
   getEmaAt,
   getAtrAt,
   passesLegPattern,
+  previewEntryHook,
   type LegPatternCtx,
+  type RegimeKey,
 } from '../utils/autoBacktestEngine';
 import { calculateAlBrooks } from '../utils/indicators';
 import { buildLegWindow as buildLegPatternWindow, type LegWindow as LegPatternWindow } from '../utils/legPattern';
@@ -41,7 +43,8 @@ export type PreviewFilterKey =
   | 'highSeq'
   | 'lowSeq'
   | 'pivotGap'
-  | 'legPattern';
+  | 'legPattern'
+  | 'entryHook';
 
 export interface FilterPreviewBar {
   candle: Candle;
@@ -70,7 +73,10 @@ export function useFilterPreviewData(
   candles: Candle[],
   currentIndex: number,
   rules: RegimeRules,
-  config: AutoBacktestConfig
+  config: AutoBacktestConfig,
+  // Which rule-set is being previewed. Only reaches a custom entry hook as ctx.regime —
+  // every built-in filter is regime-agnostic.
+  regime: RegimeKey
 ): FilterPreviewBar[] {
   return useMemo(() => {
     if (candles.length === 0) return [];
@@ -137,6 +143,12 @@ export function useFilterPreviewData(
         // so an unconfigured regime pays nothing for it.
         legPattern: passesLegPattern(rules, legPatternCtxFor(i), isLong),
       };
+      // Custom entry hook. Unlike every key above, this one is CONDITIONAL: the hook is only
+      // consulted on bars that carry an H/L signal, so writing `false` on the other bars
+      // would drag overallPass down for bars the engine never even asked about. undefined
+      // means "not consulted here" and the key is left off entirely.
+      const hookPass = previewEntryHook(candles, i, config, rules, regime, metrics);
+      if (hookPass !== undefined) pass.entryHook = hookPass;
       bars.push({
         candle: candles[i],
         pass,
@@ -146,5 +158,5 @@ export function useFilterPreviewData(
       });
     }
     return bars;
-  }, [candles, currentIndex, rules, config]);
+  }, [candles, currentIndex, rules, config, regime]);
 }

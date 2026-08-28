@@ -13,6 +13,7 @@
     "deploy": "gh-pages -d dist",
     "backtest:eval": "tsx scripts/backtestEval.ts",
     "backtest:exit-smoke": "tsx scripts/exitEngineSmoke.ts",
+    "backtest:entryhook": "tsx scripts/entryHookSmoke.ts",
     "backtest:legpattern": "tsx scripts/legPatternSmoke.ts",
     "backtest:legseq-verify": "tsx scripts/legSequenceVerify.ts"
   },

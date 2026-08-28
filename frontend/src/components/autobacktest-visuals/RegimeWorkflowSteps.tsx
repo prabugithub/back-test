@@ -1,6 +1,7 @@
 import type { ReactNode } from 'react';
 import { TrendingUp, TrendingDown, Minus, RefreshCw, Settings2 } from 'lucide-react';
 import { type RegimeRules, type AutoBacktestConfig, generateBinaryPatterns } from '../../utils/autoBacktestEngine';
+import { ENTRY_HOOK_OPTIONS } from '../../strategies';
 import type { FilterPreviewBar, PreviewFilterKey } from '../../hooks/useFilterPreviewData';
 import { CardShell } from './CardShell';
 import { SegmentedControl } from './SegmentedControl';
@@ -226,7 +227,88 @@ export function EntryStep({ rules, up, isShort, isBoth }: RegimeStepProps) {
           diagram={m => (m === 'any' ? null : <PivotSeqDiagram pattern={m as 'HH-HL' | 'LH-HL' | 'HH-LL' | 'LH-LL'} />)}
         />
       </div>
+
+      <CustomEntryHookCard rules={rules} up={up} />
     </div>
+  );
+}
+
+// ─── Custom Entry Hook ──────────────────────────────────────────────────────
+// Picks a user-authored algorithm from src/strategies and says how it participates.
+// Deliberately the last card in the Entry step rather than a workflow step of its own: it
+// is a variant of "what triggers an entry", not a separate stage.
+function CustomEntryHookCard({ rules, up }: Pick<RegimeStepProps, 'rules' | 'up'>) {
+  const mode = rules.entryHookMode ?? 'off';
+  const hookId = rules.entryHookId ?? '';
+  const known = hookId === '' || ENTRY_HOOK_OPTIONS.some(o => o.id === hookId);
+  const selected = ENTRY_HOOK_OPTIONS.find(o => o.id === hookId);
+
+  return (
+    <CardShell title="Custom Entry Hook">
+      <SegmentedControl
+        value={mode}
+        onChange={m => up({ entryHookMode: m })}
+        options={[
+          { value: 'off' as const, label: 'Off' },
+          { value: 'gate' as const, label: 'Gate' },
+          { value: 'replace' as const, label: 'Replace' },
+        ]}
+        className="mb-2"
+      />
+
+      {mode !== 'off' && (
+        <>
+          <select
+            value={hookId}
+            onChange={e => up({ entryHookId: e.target.value || undefined })}
+            className="w-full px-2 py-1 text-xs border rounded-lg"
+          >
+            <option value="">— no hook selected —</option>
+            {ENTRY_HOOK_OPTIONS.map(o => (
+              <option key={o.id} value={o.id}>{o.label}</option>
+            ))}
+          </select>
+
+          {selected?.description && (
+            <p className="mt-1.5 text-[10px] text-gray-500 leading-snug">{selected.description}</p>
+          )}
+
+          {/* A configured-but-unresolvable hook takes NO trades rather than quietly falling
+              back to the built-in chain, so this has to be loud. */}
+          {!known && (
+            <p className="mt-1.5 text-[10px] text-red-600 leading-snug">
+              No hook registered under <span className="font-mono">{hookId}</span>. This regime
+              will take no trades until you pick one or register it in src/strategies.
+            </p>
+          )}
+
+          {hookId === '' && (
+            <p className="mt-1.5 text-[10px] text-amber-600 leading-snug">
+              No hook selected — this setting has no effect until you pick one.
+            </p>
+          )}
+
+          {/* A hook is driven by the H/L signal on the bar. Pivot entries have no such
+              signal, so the hook has no trigger and (failing closed) rejects every bar —
+              a dead configuration unless it is called out here. */}
+          {rules.entryMode === 'PIVOT' && (
+            <p className="mt-1.5 text-[10px] text-amber-600 leading-snug">
+              Entry Signal is set to <strong>Pivot</strong>. A hook only fires on H/L signal
+              bars, so this regime will take no trades. Switch Entry Signal to H/L Signal or
+              Confluence.
+            </p>
+          )}
+
+          <p className="mt-2 text-[10px] text-gray-500 leading-snug">
+            {mode === 'gate'
+              ? 'Runs after every filter above and after SL/TP are computed. It can veto the entry or override side, quantity, SL and target.'
+              : 'Skips every filter above. Your code alone decides, behind the regime\'s enabled + market-structure gates.'}
+            {' '}Every H/L signal reaches it at <em>any</em> count — H3, H4, L5 included —
+            so the H1/H2 checkboxes above stop gating while a hook is on.
+          </p>
+        </>
+      )}
+    </CardShell>
   );
 }
 
