@@ -26,6 +26,18 @@ import {
   getPivotSequenceStats,
   averagePivotGapBars,
 } from './pivotAnalysis';
+import {
+  buildLegWindow,
+  getMatcher,
+  legPatternActive,
+  // NOTE the alias: this module already exports its OWN `LegWindow` (a completed
+  // breakout leg's {startIndex, endIndex} bounds, used to window the flat quality
+  // metrics). The leg-pattern engine's LegWindow is a whole derived feature window over
+  // many segments. Two different things, one name — keep them visibly distinct here.
+  type LegWindow as LegPatternWindow,
+  type LegPatternConfig,
+  type Matcher,
+} from './legPattern';
 
 // Enumerates every length-`length` combination of the two labels, dash-joined
 // (e.g. generateBinaryPatterns('HH','LH') -> 16 strings like 'HH-HH-HH-HH').
@@ -196,6 +208,19 @@ export interface RegimeRules {
   exitDecayEma21SlopeThreshold?: number;  // default 0
   exitDecayGapBarFilter?: 'none' | 'min' | 'max';
   exitDecayGapBarThreshold?: number;      // default 0.3
+
+  // ── Leg-pattern rule engine (utils/legPattern) ──────────────────────────────
+  // An ORDERED, POSITIONAL shape over the recent leg sequence — "three bull legs of
+  // 3-10 candles each, each followed by a shallow retrace" — which none of the flat
+  // filters above can express, because a per-window average is precisely the thing that
+  // averages a sequence away. Each leg slot carries the conditions on the pullback that
+  // FOLLOWED it, nested inside the slot rather than configured separately.
+  //
+  // Optional and undefined by default — deliberately absent from defaultLongRules /
+  // defaultShortRules / defaultRangeRules / AUTO_BT_PRESETS, because undefined IS the
+  // identity state and there is no config-migration layer to backfill it. Read it only
+  // through passesLegPattern, which treats undefined and enabled:false as a strict no-op.
+  legPattern?: LegPatternConfig;
 }
 
 // ─── Global config ────────────────────────────────────────────────────────────
@@ -529,6 +554,10 @@ export interface EntryMetricsSnapshot {
   lowBreakCount?: number;
   brrAvg?: number;
   brrAvgIQR?: number;
+  rangeAvg?: number;
+  rangeAvgIQR?: number;
+  bodyAvg?: number;
+  bodyAvgIQR?: number;
   ema21Slope?: number;
   ema50Slope?: number;
   ema20GapBarRatio?: number;
@@ -554,10 +583,6 @@ export interface AutoSignal {
   regime: RegimeKey;
   ltMarket: string;
   htMarket: string;
-  rangeAvg?: number;
-  rangeAvgIQR?: number;
-  bodyAvg?: number;
-  bodyAvgIQR?: number;
   llhhPivot: string;
   entryMetrics?: EntryMetricsSnapshot;
 }
@@ -646,6 +671,10 @@ export function computeEntryMetrics(
     lowBreakCount,
     brrAvg,
     brrAvgIQR,
+    rangeAvg,
+    rangeAvgIQR,
+    bodyAvg,
+    bodyAvgIQR,
     ema21Slope: calculateEMASlope(candles, end, 21, config.ema21SlopeLookback ?? 10),
     ema50Slope: calculateEMASlope(candles, end, 50, config.ema50SlopeLookback ?? 20),
     ema20GapBarRatio: gapBarRatio,
@@ -671,10 +700,6 @@ export function evaluateAutoSignals(
 
   const currentCandle = candles[currentIndex];
   const currentTs = currentCandle.timestamp;
-    rangeAvg,
-    rangeAvgIQR,
-    bodyAvg,
-    bodyAvgIQR,
 
   // Pre-compute indicators (shared across every regime's evaluation below) —
   // cached lookups against the full candles array so a bar-by-bar auto-backtest
@@ -721,6 +746,30 @@ export function evaluateAutoSignals(
     return cached;
   };
 
+  // Leg-pattern feature window — same per-bar-cache reasoning as entryMetrics above, but
+  // built LAZILY: it is the single most expensive thing on this path, and a session with
+  // no pattern configured must never pay for it. Nothing here runs unless some enabled
+  // regime's pattern gate actually asks. Keyed on detail because the up-to-4 regimes tried
+  // per bar may differ in whether they need the per-candle arrays.
+  //
+  // legSequenceCount / barRangeLookback / barOverlapLookback all come from Session
+  // Settings — no metric window is a literal at this call site.
+  const legWindowCache = new Map<string, LegPatternWindow>();
+  const legPatternCtx: LegPatternCtx = needsPerCandle => {
+    const key = needsPerCandle ? 'full' : 'avg';
+    let cached = legWindowCache.get(key);
+    if (!cached) {
+      cached = buildLegWindow(candles, currentIndex, {
+        windowLegs: config.legSequenceCount ?? 10,
+        needsPerCandle,
+        baselineLookback: config.barRangeLookback,
+        overlapLookback: config.barOverlapLookback,
+      });
+      legWindowCache.set(key, cached);
+    }
+    return cached;
+  };
+
   for (const regime of regimeOrder) {
     const regimeRules = config[regime];
     if (!regimeRules.enabled) continue;
@@ -750,12 +799,12 @@ export function evaluateAutoSignals(
       && (!legWindow || entryMetrics.legTooShort)) continue;
 
     if (regimeRules.direction !== 'SHORT_ONLY') {
-      const signal = evalLong(regimeRules, currentCandle, currentPivot, currentAbMarker, pivots, ema21, ema60, atr, currentIndex, candles, pivotSeq, ltMarket, htMarket, regime, entryMetrics);
+      const signal = evalLong(regimeRules, currentCandle, currentPivot, currentAbMarker, pivots, ema21, ema60, atr, currentIndex, candles, pivotSeq, ltMarket, htMarket, regime, entryMetrics, legPatternCtx);
       if (signal) return signal;
     }
 
     if (regimeRules.direction !== 'LONG_ONLY') {
-      const signal = evalShort(regimeRules, currentCandle, currentPivot, currentAbMarker, pivots, ema21, ema60, atr, currentIndex, candles, pivotSeq, ltMarket, htMarket, regime, entryMetrics);
+      const signal = evalShort(regimeRules, currentCandle, currentPivot, currentAbMarker, pivots, ema21, ema60, atr, currentIndex, candles, pivotSeq, ltMarket, htMarket, regime, entryMetrics, legPatternCtx);
       if (signal) return signal;
     }
   }
@@ -780,7 +829,8 @@ function evalLong(
   ltMarket: string,
   htMarket: string,
   regime: RegimeKey,
-  entryMetrics: EntryMetricsSnapshot
+  entryMetrics: EntryMetricsSnapshot,
+  legPatternCtx: LegPatternCtx | null
 ): AutoSignal | null {
   const allowed = new Set<string>();
   if (rules.allowH1) allowed.add('H1');
@@ -824,6 +874,9 @@ function evalLong(
   if (!passesSeqFilter(rules.highSeqFilter, rules.highSeqPatterns, entryMetrics.pivotHighSeq ?? [])) return null;
   if (!passesSeqFilter(rules.lowSeqFilter, rules.lowSeqPatterns, entryMetrics.pivotLowSeq ?? [])) return null;
   if (!passesPivotGap(rules, entryMetrics.pivotGapAvgBars)) return null;
+  // Last in the chain, so only the few bars that survived everything above ever build a
+  // leg window. Unconfigured regimes never reach the builder at all.
+  if (!passesLegPattern(rules, legPatternCtx, true)) return null;
 
   const sl = slLong(rules, entry, pivotForSl, atr);
   if (sl <= 0 || sl >= entry) return null;
@@ -852,7 +905,8 @@ function evalShort(
   ltMarket: string,
   htMarket: string,
   regime: RegimeKey,
-  entryMetrics: EntryMetricsSnapshot
+  entryMetrics: EntryMetricsSnapshot,
+  legPatternCtx: LegPatternCtx | null
 ): AutoSignal | null {
   const allowed = new Set<string>();
   if (rules.allowL1) allowed.add('L1');
@@ -901,6 +955,7 @@ function evalShort(
   if (!passesSeqFilter(rules.highSeqFilter, rules.highSeqPatterns, entryMetrics.pivotHighSeq ?? [])) return null;
   if (!passesSeqFilter(rules.lowSeqFilter, rules.lowSeqPatterns, entryMetrics.pivotLowSeq ?? [])) return null;
   if (!passesPivotGap(rules, entryMetrics.pivotGapAvgBars)) return null;
+  if (!passesLegPattern(rules, legPatternCtx, false)) return null;
 
   const sl = slShort(rules, entry, pivotForSl, atr);
   if (sl <= 0 || sl <= entry) return null;
@@ -1187,6 +1242,40 @@ export function passesMinMax(
   if (mode === 'none' || value === undefined) return true;
   if (mode === 'min') return value >= threshold;
   return value <= threshold;
+}
+
+/** Supplies the leg-pattern feature window for the current bar, built at most once per
+ *  bar and shared across every regime that asks. See evaluateAutoSignals. */
+export type LegPatternCtx = (needsPerCandle: boolean) => LegPatternWindow;
+
+/** True when this regime has a leg pattern that would actually filter something. */
+export function legPatternRuleActive(rules: RegimeRules): boolean {
+  return legPatternActive(rules.legPattern);
+}
+
+/**
+ * The leg-pattern entry gate.
+ *
+ * Deliberately the LAST gate in the chain: it is by far the most expensive one, and the
+ * flat scalar filters ahead of it already reject most bars, so the window is built only
+ * for the few bars that survive everything else. (Spec §6.1's cheapest-first ordering
+ * applies *within* the pattern's own tree — window aggregates before the matcher — which
+ * is handled inside the engine. Both orderings hold, at their own levels.)
+ *
+ * Unconfigured is a strict no-op that never builds a window, so a regime without a
+ * pattern pays literally nothing.
+ */
+export function passesLegPattern(
+  rules: RegimeRules,
+  legPatternCtx: LegPatternCtx | null,
+  isLong: boolean
+): boolean {
+  const matcher: Matcher | null = getMatcher(rules.legPattern);
+  if (!matcher) return true;
+  // No context supplied (e.g. a caller that cannot build windows) — the pattern cannot be
+  // honoured, and a filter the user switched on must not be silently skipped.
+  if (!legPatternCtx) return false;
+  return matcher.test(legPatternCtx(matcher.needsPerCandle), isLong);
 }
 
 const resolveExitRules = (

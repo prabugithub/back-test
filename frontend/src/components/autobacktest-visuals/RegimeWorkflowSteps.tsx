@@ -22,7 +22,7 @@ import { PivotGapDiagram } from './PivotGapDiagram';
 const HIGH_SEQ_PATTERNS = generateBinaryPatterns('HH', 'LH');
 const LOW_SEQ_PATTERNS = generateBinaryPatterns('HL', 'LL');
 
-export type WorkflowStep = 'market' | 'entry' | 'confirmation' | 'exit' | 'risk';
+export type WorkflowStep = 'market' | 'entry' | 'confirmation' | 'pattern' | 'exit' | 'risk';
 
 export interface StepDef {
   key: WorkflowStep;

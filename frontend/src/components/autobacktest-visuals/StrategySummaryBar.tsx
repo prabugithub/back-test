@@ -29,6 +29,15 @@ function isActive(mode: string | undefined, offValue = 'none'): boolean {
   return mode !== undefined && mode !== offValue;
 }
 
+/** Slots the leg pattern actually pins down, for the Leg Pattern step's badge. Kept
+ *  separate from countActiveConfirmationFilters because that one is a flat on/off tally
+ *  and a slot list would make its number mean something different. */
+export function countLegPatternSlots(rules: RegimeRules): number {
+  const cfg = rules.legPattern;
+  if (!cfg?.enabled) return 0;
+  return cfg.legs?.length ?? 0;
+}
+
 export function countActiveConfirmationFilters(rules: RegimeRules): number {
   let count = 0;
   if (isActive(rules.atrDepthFilter)) count++;

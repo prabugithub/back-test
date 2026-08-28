@@ -311,6 +311,18 @@ export interface AlBrooksLegsByBar {
  *  sequence. */
 export interface CompletedLeg extends AlBrooksLeg {
   direction: 'bull' | 'bear';
+  /** Bar at which this leg FROZE — the bar whose break confirmed the pullback had begun.
+   *
+   *  This is the only causal filter key, and it is NOT `endIndex`. `endIndex` is the swing
+   *  extreme, which can precede the freeze by many bars: a bull leg topping at bar 20 and
+   *  freezing on the lowBreak at bar 25 has `endIndex: 20, completedAt: 25`. Asking "which
+   *  legs existed as of bar 22" by testing `endIndex <= 22` would admit it — pure lookahead,
+   *  and it materialises as a completed impulse leg appearing where a run over the real
+   *  prefix would still show the forming trailing pullback.
+   *
+   *  Pushes happen inside the bar loop in bar order, so this is monotone non-decreasing
+   *  across `legHistory` and a binary search on it is valid. */
+  completedAt: number;
 }
 
 export interface AlBrooksMarker {
@@ -493,7 +505,7 @@ function runAlBrooks(
     if (lowBreak) {
       if (hActiveStart !== null) {
         hCompletedLeg = { startIndex: hActiveStart, endIndex: hActiveMaxHighBar };
-        legHistory.push({ direction: 'bull', ...hCompletedLeg });
+        legHistory.push({ direction: 'bull', ...hCompletedLeg, completedAt: i });
         hActiveStart = null;
       }
       hCandidateStart = null;
@@ -501,7 +513,7 @@ function runAlBrooks(
     if (highBreak) {
       if (lActiveStart !== null) {
         lCompletedLeg = { startIndex: lActiveStart, endIndex: lActiveMinLowBar };
-        legHistory.push({ direction: 'bear', ...lCompletedLeg });
+        legHistory.push({ direction: 'bear', ...lCompletedLeg, completedAt: i });
         lActiveStart = null;
       }
       lCandidateStart = null;
@@ -768,6 +780,38 @@ export function getAlBrooksMarkersUpTo(
     if (full[mid].time <= maxTime) lo = mid + 1; else hi = mid;
   }
   return full.slice(0, lo);
+}
+
+/**
+ * The leg history + per-bar H/L labels visible as of `endIndex` (inclusive) — identical to
+ * `calculateAlBrooksRun(candles.slice(0, endIndex + 1))`'s two leg-sequence fields, but
+ * amortized O(log n) off the shared cache instead of a fresh O(n) state-machine pass.
+ *
+ * The filter key is `completedAt`, NOT `endIndex`. See the note on CompletedLeg: a leg's
+ * `endIndex` is its swing extreme and can precede its freeze bar by many bars, so an
+ * `endIndex <= i` filter would hand back legs that had not completed yet at bar `i`. That
+ * is lookahead, and its symptom — a completed impulse leg standing where the forming
+ * trailing pullback belongs — is exactly the shape leg-pattern rules key on.
+ *
+ * `signalsByBar` needs no filtering: it is dense, absolutely indexed, and written at fire
+ * time from bars <= i, so it is causal by construction. Callers reading past `endIndex`
+ * would be reading their own future, which `buildLegSequence` never does.
+ */
+export function getAlBrooksRunUpTo(
+  candles: Candle[],
+  endIndex: number
+): Pick<AlBrooksRun, 'legHistory' | 'signalsByBar'> {
+  const full = getFullAlBrooks(candles, false, 1.0);
+  if (endIndex < 0) return { legHistory: [], signalsByBar: full.signalsByBar };
+  // legHistory is pushed inside the bar loop in bar order, so completedAt is monotone
+  // non-decreasing — binary search for the first entry that froze after endIndex.
+  const h = full.legHistory;
+  let lo = 0, hi = h.length;
+  while (lo < hi) {
+    const mid = (lo + hi) >> 1;
+    if (h[mid].completedAt <= endIndex) lo = mid + 1; else hi = mid;
+  }
+  return { legHistory: h.slice(0, lo), signalsByBar: full.signalsByBar };
 }
 
 /** Per-bar completed-leg lookup as of `endIndex` — identical to reading

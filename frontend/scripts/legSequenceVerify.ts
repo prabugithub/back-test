@@ -7,7 +7,7 @@ import { fileURLToPath } from 'node:url';
 import Database from 'better-sqlite3';
 import { runBatchSimulation } from '../src/utils/batchBacktestSimulator';
 import { buildLegSequence } from '../src/utils/legSequence';
-import { calculateAlBrooks, calculateAlBrooksRun } from '../src/utils/indicators';
+import { calculateAlBrooks, calculateAlBrooksRun, getAlBrooksRunUpTo } from '../src/utils/indicators';
 import { defaultAutoBacktestConfig, type AutoBacktestConfig } from '../src/utils/autoBacktestEngine';
 import type { Candle, LegSegment } from '../src/types';
 
@@ -218,11 +218,56 @@ for (const detail of ['full', 'avg'] as const) {
   else console.log(`  hl matches the calculateAlBrooks marker stream on all ${checked} bars ✓`);
 
   // Causality: building over the FULL array (what batchBacktestSimulator does) must equal
-  // building over a 0-based prefix (what entryInstrumentation does). Guards against lookahead.
+  // building over a 0-based prefix (what entryInstrumentation does).
+  //
+  // NOTE this particular assertion is weak by construction and is kept only as a
+  // regression guard on the argument plumbing: buildLegSequence slices internally when no
+  // `run` is supplied, so BOTH calls below compute over byte-identical prefixes and the
+  // comparison cannot fail. The assertion with actual teeth is the getAlBrooksRunUpTo one
+  // further down — that is the path where lookahead can really enter.
   const sliced = buildLegSequence(prefix, idx, 10, 'full');
   const same = sliced.length === seq.length && seq.every((s, i) => s.hlSeq === sliced[i].hlSeq && s.startIndex === sliced[i].startIndex);
   if (!same) fail('direct: full-array vs sliced-array build disagree (lookahead!)');
   else console.log(`  full-array and sliced-array builds produce identical hlSeq ✓`);
+
+  // THE REAL CAUSALITY TEST. getAlBrooksRunUpTo serves legHistory off a cache built over
+  // the WHOLE array, so it must hand back exactly what a state-machine pass over the
+  // prefix would have produced — no more. This is what fails if the history is ever
+  // filtered by `endIndex` (the swing-extreme bar) instead of `completedAt` (the freeze
+  // bar): a leg that tops at bar 20 but does not freeze until bar 25 would be visible from
+  // bar 20 onward, which the prefix run does not know.
+  const upTo = getAlBrooksRunUpTo(candles, idx).legHistory;
+  const truth = calculateAlBrooksRun(prefix).legHistory;
+  const legEq = (a: typeof truth[number], b: typeof truth[number]) =>
+    a.direction === b.direction && a.startIndex === b.startIndex && a.endIndex === b.endIndex;
+  if (upTo.length !== truth.length || !truth.every((l, i) => legEq(l, upTo[i]))) {
+    fail(
+      `direct: getAlBrooksRunUpTo(${idx}) returned ${upTo.length} legs, prefix run has ${truth.length} — LOOKAHEAD`
+    );
+  } else {
+    console.log(`  getAlBrooksRunUpTo matches the prefix run exactly (${truth.length} legs) ✓`);
+  }
+
+  // completedAt must be monotone non-decreasing, or the binary search above is invalid.
+  const fullHistory = calculateAlBrooksRun(candles).legHistory;
+  let monotone = true;
+  for (let i = 1; i < fullHistory.length; i++) {
+    if (fullHistory[i].completedAt < fullHistory[i - 1].completedAt) { monotone = false; break; }
+  }
+  if (!monotone) fail('direct: legHistory completedAt is not monotone — binary search invalid');
+  else console.log(`  legHistory completedAt is monotone non-decreasing ✓`);
+
+  // And the reason endIndex is NOT a safe filter key, stated as data rather than prose:
+  // at least some legs must freeze strictly after their swing extreme, or the distinction
+  // this whole fix rests on would be vacuous.
+  const lagged = fullHistory.filter(l => l.completedAt > l.endIndex).length;
+  console.log(
+    `  ${lagged}/${fullHistory.length} legs froze after their swing extreme ` +
+    `(why endIndex is not a causal filter key)`
+  );
+  if (fullHistory.length > 0 && lagged === 0) {
+    fail('direct: no leg freezes after its extreme — completedAt/endIndex distinction looks vacuous, re-check');
+  }
 
   // A precomputed run must give the same answer as the internal recompute.
   const viaRun = buildLegSequence(candles, idx, 10, 'full', calculateAlBrooksRun(prefix));

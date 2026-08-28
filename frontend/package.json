@@ -12,7 +12,9 @@
     "predeploy": "npm run build",
     "deploy": "gh-pages -d dist",
     "backtest:eval": "tsx scripts/backtestEval.ts",
-    "backtest:exit-smoke": "tsx scripts/exitEngineSmoke.ts"
+    "backtest:exit-smoke": "tsx scripts/exitEngineSmoke.ts",
+    "backtest:legpattern": "tsx scripts/legPatternSmoke.ts",
+    "backtest:legseq-verify": "tsx scripts/legSequenceVerify.ts"
   },
   "dependencies": {
     "@tanstack/react-query": "^5.90.12",

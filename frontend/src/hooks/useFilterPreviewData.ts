@@ -19,8 +19,11 @@ import {
   passesPivotGap,
   getEmaAt,
   getAtrAt,
+  passesLegPattern,
+  type LegPatternCtx,
 } from '../utils/autoBacktestEngine';
 import { calculateAlBrooks } from '../utils/indicators';
+import { buildLegWindow as buildLegPatternWindow, type LegWindow as LegPatternWindow } from '../utils/legPattern';
 
 // One entry per Quality Setup Filter that has a live-preview diagram. Extend this list
 // as more filters get their own ThresholdFilterControl (see plan phases 2-4).
@@ -37,7 +40,8 @@ export type PreviewFilterKey =
   | 'atrDepth'
   | 'highSeq'
   | 'lowSeq'
-  | 'pivotGap';
+  | 'pivotGap'
+  | 'legPattern';
 
 export interface FilterPreviewBar {
   candle: Candle;
@@ -79,6 +83,25 @@ export function useFilterPreviewData(
     // never disagrees with what the real engine would compute for a pullback entry.
     const alBrooks = calculateAlBrooks(candles.slice(0, end + 1));
 
+    // Leg-pattern windows for the previewed bars. Built on demand and memoized per
+    // (bar, detail) so a two-slot pattern doesn't rebuild the same window twice, and
+    // never built at all when the regime has no active pattern.
+    const legWindows = new Map<string, LegPatternWindow>();
+    const legPatternCtxFor = (bar: number): LegPatternCtx => needsPerCandle => {
+      const key = `${bar}|${needsPerCandle ? 'full' : 'avg'}`;
+      let w = legWindows.get(key);
+      if (!w) {
+        w = buildLegPatternWindow(candles, bar, {
+          windowLegs: config.legSequenceCount ?? 10,
+          needsPerCandle,
+          baselineLookback: config.barRangeLookback,
+          overlapLookback: config.barOverlapLookback,
+        });
+        legWindows.set(key, w);
+      }
+      return w;
+    };
+
     const bars: FilterPreviewBar[] = [];
     for (let i = start; i <= end; i++) {
       const marker = alBrooks.find(m => m.time === candles[i].timestamp) ?? null;
@@ -108,6 +131,11 @@ export function useFilterPreviewData(
         highSeq: passesSeqFilter(rules.highSeqFilter, rules.highSeqPatterns, metrics.pivotHighSeq ?? []),
         lowSeq: passesSeqFilter(rules.lowSeqFilter, rules.lowSeqPatterns, metrics.pivotLowSeq ?? []),
         pivotGap: passesPivotGap(rules, metrics.pivotGapAvgBars),
+        // Uses the SAME passesLegPattern the engine calls, so the strip can never drift
+        // from the real gate. The window is built per previewed bar and cached for the
+        // duration of this call; the whole column is skipped when no pattern is active,
+        // so an unconfigured regime pays nothing for it.
+        legPattern: passesLegPattern(rules, legPatternCtxFor(i), isLong),
       };
       bars.push({
         candle: candles[i],
