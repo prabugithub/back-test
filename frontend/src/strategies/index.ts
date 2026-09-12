@@ -36,8 +36,14 @@
  */
 import type { EntryHook, EntryHookEntry } from '../utils/entryHook';
 import { deepPullbackContinuation, takeEverySignal } from './example';
+import { higherHighShallowPullback } from './higherHighShallowPullback';
 
 export const ENTRY_HOOKS: Record<string, EntryHookEntry> = {
+  'hh-shallow-pullback': {
+    label: 'Higher-High Shallow Pullback',
+    description: 'Long only. H2+, higher high, bear pullback holding above the previous leg\'s high and retracing at most 50%.',
+    hook: higherHighShallowPullback,
+  },
   'deep-pullback': {
     label: 'Deep Pullback Continuation',
     description: 'H2+/L2+ with the structure, clean breakout leg, stop beyond the pullback extreme.',

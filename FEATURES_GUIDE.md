@@ -448,9 +448,51 @@ Nothing reachable from `ctx` describes a bar after the trigger, so a hook cannot
 - A **hook id that isn't registered** (renamed or deleted) → the regime takes no trades, rather than quietly reverting to the built-in chain and running a strategy the config no longer describes.
 - A regime's **direction** setting still wins: a `LONG_ONLY` regime will not take a hook's short.
 
-**One combination that trades nothing:** a hook fires on H/L signal bars, and **Pivot** entry mode has no such signal — so a hook plus `Entry Signal: Pivot` rejects every bar. The card warns you when both are set. Use **H/L Signal** or **Confluence**.
+**If the hook seems never to fire, check HT/LT Structure first.** Both structure gates live in the **Market** step and run *before* the hook — a signal outside that structure never reaches your code at all, and nothing in the trade log shows why. They matter because `bull_trend` / `bear_trend` are **shipped defaults** on the Uptrend/Downtrend regimes: measured over real 5-minute NSE data, the default HT Structure alone silences about **65% of signal bars** (691 of 1960 reach the hook). Set both to **Any** if the hook should judge every signal itself. The card warns when either is filtered.
+
+Two smaller things in the same vein: a regime that is **disabled** never runs its hook, and the regime's **direction** still wins — a `LONG_ONLY` regime discards a hook's short. Entry mode is *not* a factor in Replace mode (it is ignored entirely); in Gate mode, `Pivot` narrows the hook to bars that are both a pivot and an H/L signal.
 
 The **Live Preview Strip** shows a hook column, but only on bars that actually carry an H/L signal. Note that each previewed bar is evaluated with fresh `ctx.state`, so a hook built around a cooldown will preview differently from how it behaves inside a real run.
+
+**Debugging a hook — the "Run on main thread" switch.** **Run Full Backtest** normally runs the simulation in a **Web Worker**, so a breakpoint inside your hook executes on the worker thread and never pauses the main-thread devtools. That is the "my breakpoint never hits" symptom, and it is why there is a switch.
+
+Turn on **Run on main thread**, in the Custom Entry Hook card and again in the panel footer beside the Run button. The run then executes inline, breakpoints behave normally, and the button relabels to **Run Full Backtest (main thread)** so the active path is never ambiguous. The UI freezes while it runs — expected, and why this is not the default. The setting is remembered in this browser and **never travels with a saved strategy** (it is not part of the auto-backtest config). `?debugHook` in the URL still forces it on, and greys the switch out while present.
+
+**A trap worth knowing.** A breakpoint set through the DevTools **Sources** panel can attach to the *worker's* copy of your strategy file — Vite serves it to both threads as separate module instances. With main-thread mode on, the worker never runs, so a breakpoint bound there silently stops firing. Use `pauseWhen(...)` or a literal `debugger` in the source instead: those live in whichever copy actually executes, so they are immune to this.
+
+**Every hooked run now tells you what happened**, e.g. `Entry hook: main thread · called 1960× · 2 rejected — …`. The call count is the thing to read first:
+
+| It says | It means |
+|---|---|
+| `called 0×` | Your hook was never reached. A configuration problem, not a debugger problem — check HT/LT Structure in the Market step, the regime's enabled toggle, and (in Gate mode) that Entry Signal isn't Pivot. |
+| `called N×` with no trades | Your hook ran and declined every bar. The logic is the thing to look at. |
+| `worker` when you expected `main thread` | The switch is off, so no breakpoint will pause. |
+
+`console.log` works on either thread.
+
+**Exploring the data to frame your logic.** `src/strategies/debug.ts` ships two helpers for exactly this:
+
+```ts
+import { probe, pauseWhen } from './debug';
+
+export const myHook: EntryHook = ctx => {
+  probe(ctx, { myScore: whatever });                       // record one row per trigger bar
+  pauseWhen(ctx.trigger.count === 3 && ctx.atr > 5, ctx);  // conditional breakpoint
+  return false;                                            // take no trades while exploring
+};
+```
+
+Run the backtest, then work in the console against `__hook`:
+
+| Call | What you get |
+|---|---|
+| `__hook.table()` | every trigger bar as a sortable table — label, count, side, structure, close, ATR, EMA gap, leg bars, BRR, efficiency ratio, overlap, EMA slope, plus your own columns |
+| `__hook.stats('brrAvg')` | `{n, min, p25, median, p75, max}` — pick a threshold from the real distribution instead of guessing |
+| `__hook.where(r => r.count >= 3).length` | how many bars a candidate condition would keep |
+| `__hook.ctx` | the last full context object, live — drill into `legs()`, `signals`, `metrics` |
+| `copy(__hook.csv())` | the whole run on the clipboard, tab-separated for a spreadsheet |
+
+Rows reset automatically at the start of each run (they key off the run's `ctx.state` identity), so you can iterate without stale data piling up. A bare `debugger` stops on the very first trigger bar out of thousands — `pauseWhen` is what makes stepping usable. And if a hook throws or returns something invalid, the run no longer swallows it silently — the count and first message surface as a notification and a `console.warn`.
 
 Run `npm run backtest:entryhook` for the acceptance suite covering the window contract, causality, the overrides and the fail-closed paths.
 

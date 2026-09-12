@@ -2,11 +2,12 @@
 
 import type { StoreSet, StoreGet } from './sessionStore';
 import {
-  type AutoBacktestConfig, type AutoSignal,
+  type AutoBacktestConfig, type AutoSignal, type RegimeKey,
   MULTI_TRADE_DEFAULT_CAP, isMultiTradeMode,
   evaluateAutoSignals, evaluateTrailStop, evaluateAutoExitSignal,
-  resolveTradeQuantity,
+  resolveTradeQuantity, resolveEntryHook,
 } from '../utils/autoBacktestEngine';
+import { runBatchSimulation, type BatchSimResult } from '../utils/batchBacktestSimulator';
 import { createHookRunState, type HookRunState } from '../utils/entryHook';
 import type { Candle } from '../types';
 import { useNotificationStore } from './notificationStore';
@@ -48,6 +49,73 @@ function hookStateFor(candles: Candle[]): HookRunState {
     _hookStates.set(candles, s);
   }
   return s;
+}
+
+// Reports on EVERY run that had a hook configured, not just failing ones.
+//
+// The reason is diagnostic, not cosmetic. Three very different situations used to look
+// identical from the UI — "the run finished and nothing happened":
+//   • the hook was never called (blocked upstream by the regime's structure filters)
+//   • the hook ran and declined every bar
+//   • the hook ran on the WORKER while the breakpoint was attached to the main thread
+// The call count and the thread name separate all three at a glance.
+function reportHookDiagnostics(result: BatchSimResult, onMainThread: boolean): void {
+  const d = result.hookDiagnostics;
+  if (!d) return; // no hook configured — nothing to say
+
+  const parts = [`${onMainThread ? 'main thread' : 'worker'}`, `called ${d.callCount}×`];
+  if (d.errorCount > 0) parts.push(`${d.errorCount} error${d.errorCount === 1 ? '' : 's'} — ${d.error}`);
+  if (d.rejectedCount > 0) parts.push(`${d.rejectedCount} rejected — ${d.rejectReason}`);
+  // Zero calls is a configuration problem every time, and naming the usual causes here saves
+  // the hunt — the shipped bull_trend/bear_trend structure defaults are the common one.
+  if (d.callCount === 0) {
+    parts.push('hook never reached — check HT/LT Structure (Market step), the regime\'s enabled toggle, and that Entry Signal is not Pivot in Gate mode');
+  }
+
+  const msg = `Entry hook: ${parts.join(' · ')}`;
+  const tone = d.errorCount > 0 ? 'error' : (d.callCount === 0 || d.rejectedCount > 0) ? 'warning' : 'info';
+  if (tone === 'info') console.info(msg, d); else console.warn(msg, d);
+  useNotificationStore.getState().notify(msg, tone);
+}
+
+/**
+ * Warns when a regime has a hook MODE set but no usable hook behind it.
+ *
+ * `resolveEntryHook` returns null for an empty id, and the engine then runs the built-in
+ * chain — so the run completes with results byte-identical to having no hook at all. That is
+ * the single most confusing failure this feature has: you configured something, pressed Run,
+ * and nothing about the output changed. Identity is the correct behaviour; being silent
+ * about it is not.
+ */
+function warnUnusableHookConfig(config: AutoBacktestConfig): void {
+  const keys = ['uptrend', 'downtrend', 'range', 'reversal'] as RegimeKey[];
+  const notify = useNotificationStore.getState().notify;
+
+  // (a) A mode with no hook behind it.
+  const unusable = keys.filter(k => {
+    const r = config[k];
+    return r.enabled && (r.entryHookMode ?? 'off') !== 'off' && resolveEntryHook(r) === null;
+  });
+  if (unusable.length > 0) {
+    const msg = `Entry hook: mode is set on ${unusable.join(', ')} but no hook is selected — `
+      + 'ran the built-in filters instead, so results are unchanged. Pick a hook in the Entry step.';
+    console.warn(msg);
+    notify(msg, 'warning');
+  }
+
+  // (b) Hooks are PER-REGIME. Configuring one on `uptrend` leaves the other enabled regimes
+  // running the built-in chain, and their trades land in the same log looking like the
+  // hook's — measured on real data, a hook on uptrend alone still produced 5 downtrend
+  // shorts out of 12 total. That reads as "my filter barely changed anything".
+  const hooked = keys.filter(k => config[k].enabled && resolveEntryHook(config[k]) !== null);
+  const unhooked = keys.filter(k => config[k].enabled && resolveEntryHook(config[k]) === null);
+  if (hooked.length > 0 && unhooked.length > 0) {
+    const msg = `Entry hook: only ${hooked.join(', ')} ${hooked.length === 1 ? 'uses' : 'use'} a hook — `
+      + `${unhooked.join(', ')} still ${unhooked.length === 1 ? 'runs' : 'run'} the built-in filters `
+      + 'and will add trades of their own. Disable them, or set the hook on them too.';
+    console.warn(msg);
+    notify(msg, 'warning');
+  }
 }
 
 export function createAutoBacktestActions(set: StoreSet, get: StoreGet) {
@@ -479,17 +547,13 @@ export function createAutoBacktestActions(set: StoreSet, get: StoreGet) {
 
       const { candles, autoBacktestConfig, instrument, tradeQuantity, sessionConfig } = get();
 
-      const worker = new Worker(
-        new URL('../utils/batchBacktestWorker.ts', import.meta.url),
-        { type: 'module' }
-      );
+      const mainThread = state.hookDebugMode;
+      // Before anything runs: a mode set with no hook behind it produces results identical to
+      // no hook at all, which reads as "my filter did nothing".
+      warnUnusableHookConfig(autoBacktestConfig);
 
-      worker.onmessage = (e: MessageEvent) => {
-        if (e.data.type === 'progress') {
-          set({ batchBacktestProgress: e.data.percent });
-          return;
-        }
-        const result = e.data.result;
+      // Applies the finished result identically whichever thread produced it.
+      const applyResult = (result: BatchSimResult) => {
         set({
           trades: result.trades,
           position: result.finalPosition,
@@ -500,7 +564,49 @@ export function createAutoBacktestActions(set: StoreSet, get: StoreGet) {
           isBatchBacktestRunning: false,
           batchBacktestProgress: 100,
           lastAutoSignalReason: `Batch complete: ${result.tradeCount} trades, P&L ₹${result.totalPnL.toFixed(2)}`,
+          lastHookDiagnostics: result.hookDiagnostics ?? null,
         });
+        reportHookDiagnostics(result, mainThread);
+      };
+
+      // ── Main-thread mode ─────────────────────────────────────────────────────
+      // The batch run normally happens in a Web Worker, which is right for a 20 000-bar
+      // sweep but makes a custom entry hook undebuggable: the hook executes on the WORKER
+      // thread, so a breakpoint or `debugger` inside it never pauses the main thread's
+      // devtools. With this on the simulation runs inline instead — breakpoints land
+      // normally, at the cost of freezing the UI for the duration. See utils/hookDebugMode.
+      if (mainThread) {
+        // Deferred a turn so React paints the "Running…" state first. Without this the
+        // synchronous run starts before the render lands and the app simply freezes with no
+        // indication anything is happening. Breakpoints are unaffected.
+        setTimeout(() => {
+          try {
+            const result = runBatchSimulation(
+              candles, autoBacktestConfig, 0, instrument, tradeQuantity, sessionConfig?.interval
+            );
+            applyResult(result);
+          } catch (err) {
+            console.error('Batch backtest (main thread) failed:', err);
+            set({ isBatchBacktestRunning: false });
+            useNotificationStore.getState().notify(
+              `Batch backtest failed: ${err instanceof Error ? err.message : String(err)}`, 'error'
+            );
+          }
+        }, 0);
+        return;
+      }
+
+      const worker = new Worker(
+        new URL('../utils/batchBacktestWorker.ts', import.meta.url),
+        { type: 'module' }
+      );
+
+      worker.onmessage = (e: MessageEvent) => {
+        if (e.data.type === 'progress') {
+          set({ batchBacktestProgress: e.data.percent });
+          return;
+        }
+        applyResult(e.data.result as BatchSimResult);
         worker.terminate();
       };
 

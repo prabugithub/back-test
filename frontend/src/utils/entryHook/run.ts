@@ -22,6 +22,13 @@ import type {
 export interface HookRunState {
   /** Handed to every hook as `ctx.state`; persists across bars within one run. */
   state: Record<string, unknown>;
+  /** How many bars actually reached the hook.
+   *
+   *  Load-bearing for debugging, not just telemetry: a hook silenced by the regime's
+   *  structure filters and a hook whose breakpoint is not attached look identical from the
+   *  outside — both are "the run finished and nothing happened". This number separates them,
+   *  and 0 says the problem is the configuration rather than the debugger. */
+  callCount: number;
   /** First trapped exception message, recorded once. */
   error?: string;
   /** How many bars threw. A hook that throws on every bar must not spam or abort the run. */
@@ -32,7 +39,7 @@ export interface HookRunState {
 }
 
 export function createHookRunState(): HookRunState {
-  return { state: {}, errorCount: 0, rejectedCount: 0 };
+  return { state: {}, callCount: 0, errorCount: 0, rejectedCount: 0 };
 }
 
 /** The engine's own stop/target for a given side, used as the base a decision overrides. */
@@ -73,6 +80,10 @@ export interface RunEntryHookArgs {
  */
 export function runEntryHook(args: RunEntryHookArgs): NormalizedDecision | null {
   const { hook, ctx, rules, defaults, logs, runState } = args;
+
+  // Counted before the call, so a hook that throws on its very first bar still registers as
+  // having been reached — otherwise "0 calls" would wrongly point at the configuration.
+  runState.callCount += 1;
 
   let result: EntryHookResult;
   try {

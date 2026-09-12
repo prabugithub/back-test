@@ -20,6 +20,7 @@ import {
 } from '../utils/autoBacktestEngine';
 import { useFilterPreviewData, type PreviewFilterKey } from '../hooks/useFilterPreviewData';
 import { FilterPreviewStrip } from './autobacktest-visuals/FilterPreviewStrip';
+import { HookDebugToggle } from './autobacktest-visuals/HookDebugToggle';
 import { Chip } from './autobacktest-visuals/Chip';
 import { ToggleSwitch } from './autobacktest-visuals/ToggleSwitch';
 import { AccordionSection } from './autobacktest-visuals/AccordionSection';
@@ -153,6 +154,7 @@ export function AutoBacktestPanel({ onNavigate, hidden }: AutoBacktestPanelProps
   const currentIndex = useSessionStore(s => s.currentIndex);
   const runBatchAutoBacktest = useSessionStore(s => s.runBatchAutoBacktest);
   const isBatchRunning = useSessionStore(s => s.isBatchBacktestRunning);
+  const hookDebugMode = useSessionStore(s => s.hookDebugMode);
   const batchProgress = useSessionStore(s => s.batchBacktestProgress);
   const trades = useSessionStore(s => s.trades);
   const sessionConfig = useSessionStore(s => s.sessionConfig);
@@ -248,7 +250,7 @@ export function AutoBacktestPanel({ onNavigate, hidden }: AutoBacktestPanelProps
   const applyPreset = (name: string) => {
     const preset = AUTO_BT_PRESETS[name];
     if (!preset) return;
-    setAutoBacktestConfig({
+    const next: AutoBacktestConfig = {
       ...defaultAutoBacktestConfig,
       ...preset,
       enabled: config.enabled,
@@ -258,7 +260,19 @@ export function AutoBacktestPanel({ onNavigate, hidden }: AutoBacktestPanelProps
       useAutoQty: config.useAutoQty,
       riskPerTrade: config.riskPerTrade,
       minQuantity: config.minQuantity,
-    });
+    };
+    // Carry the custom entry hook across. No preset defines one, so spreading
+    // defaultAutoBacktestConfig would silently switch a configured hook off — the run would
+    // then quietly go back to the built-in chain with no indication the strategy had been
+    // dropped. Presets describe filter thresholds; they have no opinion on your hook.
+    for (const k of ['uptrend', 'downtrend', 'range', 'reversal'] as RegimeKey[]) {
+      next[k] = {
+        ...next[k],
+        entryHookId: config[k].entryHookId,
+        entryHookMode: config[k].entryHookMode,
+      };
+    }
+    setAutoBacktestConfig(next);
   };
 
   const handleExportConfig = () => {
@@ -622,10 +636,12 @@ export function AutoBacktestPanel({ onNavigate, hidden }: AutoBacktestPanelProps
             </div>
           )}
 
+          <HookDebugToggle />
+
           <button
             onClick={runBatchAutoBacktest}
             disabled={isBatchRunning || candles.length === 0 || !config.enabled}
-            className="w-full py-2.5 px-3 bg-indigo-600 hover:bg-indigo-700 disabled:opacity-50 disabled:cursor-not-allowed text-white text-xs font-bold rounded-lg flex items-center justify-center gap-2 transition-all duration-150 active:scale-[0.99] shadow-sm hover:shadow-md"
+            className={`w-full py-2.5 px-3 ${hookDebugMode ? 'bg-amber-600 hover:bg-amber-700' : 'bg-indigo-600 hover:bg-indigo-700'} disabled:opacity-50 disabled:cursor-not-allowed text-white text-xs font-bold rounded-lg flex items-center justify-center gap-2 transition-all duration-150 active:scale-[0.99] shadow-sm hover:shadow-md`}
           >
             {isBatchRunning ? (
               <>
@@ -633,12 +649,12 @@ export function AutoBacktestPanel({ onNavigate, hidden }: AutoBacktestPanelProps
                   <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
                   <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8z" />
                 </svg>
-                Running...
+                {hookDebugMode ? 'Running on main thread…' : 'Running...'}
               </>
             ) : (
               <>
                 <Zap size={13} />
-                Run Full Backtest (instant)
+                {hookDebugMode ? 'Run Full Backtest (main thread)' : 'Run Full Backtest (instant)'}
               </>
             )}
           </button>

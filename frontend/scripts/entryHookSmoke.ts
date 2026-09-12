@@ -8,13 +8,14 @@ import {
   type RegimeRules,
 } from '../src/utils/autoBacktestEngine';
 import { runBatchSimulation } from '../src/utils/batchBacktestSimulator';
-import { registerEntryHook } from '../src/strategies';
+import { registerEntryHook, getEntryHook } from '../src/strategies';
 import {
   DEFAULT_ENTRY_HOOK_LOOKBACK,
   resolveHookLookback,
   type EntryHook,
   type EntryHookContext,
 } from '../src/utils/entryHook';
+import { probe, hookProbeStore } from '../src/strategies/debug';
 import { getAlBrooksRunUpTo } from '../src/utils/indicators';
 import type { Candle, Trade } from '../src/types';
 
@@ -364,6 +365,139 @@ const allReplace = entries(replaceRun.trades);
 assert(cooled.length > 0 && cooled.length < allReplace.length,
   `a stateful cooldown thinned the set (${cooled.length} < ${allReplace.length})`);
 
+// ─── 9b. What silences a hook ─────────────────────────────────────────────────
+
+console.log('\n[9b] the gates that sit ABOVE the hook');
+let callCount = 0;
+registerEntryHook('smoke-count', {
+  label: 'call counter',
+  hook: () => { callCount++; return false; },
+});
+const countCalls = (over: Partial<RegimeRules>, global: Partial<AutoBacktestConfig> = {}) => {
+  callCount = 0;
+  run(cfg({ entryHookMode: 'replace', entryHookId: 'smoke-count', ...over }, global));
+  return callCount;
+};
+
+const allSignals = countCalls({});
+assert(allSignals > 0, `hook sees every signal bar with structure filters open (${allSignals})`);
+
+// The structure filters run in the regime loop BEFORE resolveEntryHook, so they silence the
+// hook without it ever being called — and bull_trend/bear_trend are SHIPPED DEFAULTS on the
+// uptrend/downtrend regimes. This is the most common "my hook never fires" cause.
+const htGated = countCalls({ htStructureFilter: 'bull_trend' });
+assert(htGated < allSignals,
+  `htStructureFilter silences the hook before it is called (${htGated} < ${allSignals})`);
+const ltGated = countCalls({ ltStructureFilter: 'bull_trend' });
+assert(ltGated < allSignals,
+  `ltStructureFilter does the same (${ltGated} < ${allSignals})`);
+
+// A disabled regime never runs its hook.
+callCount = 0;
+run(cfg({ entryHookMode: 'replace', entryHookId: 'smoke-count', enabled: false }));
+assert(callCount === 0, 'a disabled regime never calls its hook');
+
+// entryMode: 'replace' ignores it entirely; 'gate' narrows to pivot ∩ H/L, never to zero.
+assert(countCalls({ entryMode: 'PIVOT' }) === allSignals,
+  'replace mode ignores entryMode — PIVOT sees exactly the same bars as H_SIGNAL');
+
+callCount = 0;
+run(cfg({ entryHookMode: 'gate', entryHookId: 'smoke-count', entryMode: 'PIVOT' }));
+const gatePivot = callCount;
+callCount = 0;
+run(cfg({ entryHookMode: 'gate', entryHookId: 'smoke-count', entryMode: 'H_SIGNAL' }));
+// Not zero, and never more than the H_SIGNAL set. How MUCH it narrows is data-dependent
+// (774 of 1960 on real NSE 5m; this synthetic wave has a pivot on every signal bar, so it
+// narrows not at all) — the invariant that matters is that PIVOT does not kill the hook,
+// which an earlier revision of the UI and docs wrongly claimed it did.
+assert(gatePivot > 0 && gatePivot <= callCount,
+  `gate + PIVOT restricts to pivot bars carrying an H/L signal, it does NOT kill the hook (${gatePivot} of ${callCount})`);
+
+// ─── 9c. callCount — what turns "nothing happened" into a diagnosis ───────────
+
+console.log('\n[9c] hookDiagnostics.callCount');
+
+// A configured hook that ran cleanly still reports, so the UI can say which thread ran and
+// how many bars reached the hook. Previously diagnostics appeared only on failure.
+const cleanRun = run(cfg({ entryHookMode: 'replace', entryHookId: 'smoke-count' }));
+assert(cleanRun.hookDiagnostics !== undefined,
+  'a clean hooked run still reports diagnostics');
+assert(cleanRun.hookDiagnostics?.callCount === allSignals,
+  `callCount matches the observed invocations (${cleanRun.hookDiagnostics?.callCount} === ${allSignals})`);
+assert(cleanRun.hookDiagnostics?.errorCount === 0 && cleanRun.hookDiagnostics?.rejectedCount === 0,
+  'a clean run reports zero errors and zero rejections');
+
+// The case the whole field exists for: hook configured, never reached. This must NOT
+// collapse to undefined, or a structure filter silencing the hook is indistinguishable from
+// a debugger that never attached.
+const blocked = run(cfg({
+  entryHookMode: 'replace', entryHookId: 'smoke-count', ltStructureFilter: 'reversal',
+}));
+assert(blocked.hookDiagnostics !== undefined,
+  'a hook that was configured but never called still reports diagnostics');
+assert(blocked.hookDiagnostics?.callCount === 0,
+  `callCount is 0 when a structure filter blocks the hook upstream (${blocked.hookDiagnostics?.callCount})`);
+
+// No hook configured at all stays undefined — an unhooked run's result shape is unchanged.
+assert(run(cfg()).hookDiagnostics === undefined,
+  'no hook configured still reports no diagnostics at all');
+
+// A throwing hook is counted as reached, not as blocked — the count is taken before the call.
+const threwCounted = run(cfg({ entryHookMode: 'replace', entryHookId: 'smoke-throw' }));
+assert((threwCounted.hookDiagnostics?.callCount ?? 0) > 0
+  && threwCounted.hookDiagnostics?.callCount === threwCounted.hookDiagnostics?.errorCount,
+  'a hook throwing on every bar counts every bar as reached, not as never-called');
+
+// ─── 9d. The shipped strategy: higherHighShallowPullback ──────────────────────
+
+console.log('\n[9d] higherHighShallowPullback');
+const HH_ID = 'hh-shallow-pullback';
+assert(getEntryHook(HH_ID) !== undefined, 'the strategy is registered under a stable id');
+
+const hhRun = run(cfg({ entryHookMode: 'replace', entryHookId: HH_ID }));
+const hhEntries = entries(hhRun.trades);
+assert(hhRun.hookDiagnostics !== undefined && hhRun.hookDiagnostics.callCount > 0,
+  `the strategy was actually consulted (${hhRun.hookDiagnostics?.callCount}× calls)`);
+assert(hhRun.hookDiagnostics?.errorCount === 0,
+  'it never throws — every leg access is guarded');
+assert(hhEntries.every(t => t.type === 'BUY'),
+  'long only — a short trigger is never converted into a trade');
+// The whole point of a filter: strictly fewer entries than taking every signal.
+const everyRun = entries(run(cfg({ entryHookMode: 'replace', entryHookId: 'take-every-signal' })).trades);
+assert(hhEntries.length < everyRun.length,
+  `it filters (${hhEntries.length} entries vs ${everyRun.length} taking every signal)`);
+
+// ─── 9d-2. ctx.log() reaches the Trade record ─────────────────────────────────
+
+// This is the confirmation path that needs no debugger: whatever a hook passes to ctx.log()
+// is appended to the signal reason, which the batch simulator writes to journal.entrySign
+// and journal.notes. If a trade shows that text in Trade History, the hook demonstrably ran
+// for that bar. Breaking this silently would remove the only debugger-free proof there is.
+registerEntryHook('smoke-log', {
+  label: 'logs evidence',
+  hook: ctx => { ctx.log(`EVIDENCE-${ctx.trigger.label}`); return true; },
+});
+const logged = entries(run(cfg({ entryHookMode: 'replace', entryHookId: 'smoke-log' })).trades);
+assert(logged.length > 0, `log hook produced entries (${logged.length})`);
+assert(logged.every(t => (t.journal?.entrySign ?? '').includes('EVIDENCE-')),
+  'ctx.log() text reaches journal.entrySign on every entry');
+assert(logged.every(t => (t.journal?.notes ?? '').includes('EVIDENCE-')),
+  'and journal.notes too');
+assert(logged.every(t => (t.journal?.entrySign ?? '').includes('[hook:smoke-log]')),
+  'the hook id is stamped on the reason, so a trade names the strategy that made it');
+
+// ─── 9e. A mode with no hook behind it is identity, and must be visible ───────
+
+console.log('\n[9e] mode set with no hook selected');
+// resolveEntryHook returns null for an empty id, so the engine runs the built-in chain and
+// the result is byte-identical to no hook at all. That IS correct — but it is also the most
+// confusing failure mode ("my filter did nothing"), which is why the store warns about it.
+const modeNoId = run(cfg({ entryHookMode: 'replace', entryHookId: undefined }));
+assert(fingerprint(modeNoId.trades) === fingerprint(BASELINE.trades),
+  'a mode with no hook id runs the built-in chain, byte-identical to baseline');
+assert(modeNoId.hookDiagnostics === undefined,
+  'and reports no hook diagnostics — which is why the store warns separately');
+
 // ─── 10. ctx exposes the instrumentation the engine computed ──────────────────
 
 console.log('\n[10] context payload');
@@ -387,6 +521,34 @@ if (sample) {
   assert(s.config.entryHookLookback === undefined || typeof s.config.entryHookLookback === 'number',
     'ctx.config is the live config');
 }
+
+// ─── 11. The debug probe (src/strategies/debug.ts) ────────────────────────────
+
+console.log('\n[11] probe / hookProbeStore');
+registerEntryHook('smoke-probe-helper', {
+  label: 'probe helper',
+  hook: ctx => { probe(ctx, { mine: ctx.trigger.count * 2 }); return false; },
+});
+run(cfg({ entryHookMode: 'replace', entryHookId: 'smoke-probe-helper' }));
+const rows1 = hookProbeStore.rows.length;
+assert(rows1 > 0, `probe captured rows (${rows1})`);
+assert(hookProbeStore.rows.every(r => r.bar >= 0 && !!r.label && r.count >= 1),
+  'every row carries bar / label / count');
+assert(hookProbeStore.rows.every(r => r.mine === r.count * 2),
+  'extra columns passed to probe() land on the row');
+assert(hookProbeStore.ctx !== null && hookProbeStore.ctx.absoluteIndex >= 0,
+  'the last full context is kept for inspection');
+
+const st = hookProbeStore.stats('count');
+assert(typeof st === 'object' && st !== null && 'median' in st,
+  `stats() returns a distribution (${JSON.stringify(st)})`);
+assert(hookProbeStore.where(r => r.count >= 3).length > 0, 'where() filters rows');
+assert(hookProbeStore.csv().split('\n').length === rows1 + 1, 'csv() emits a header plus one line per row');
+
+// Rows key off ctx.state identity, so a fresh run must start clean rather than append.
+run(cfg({ entryHookMode: 'replace', entryHookId: 'smoke-probe-helper' }));
+assert(hookProbeStore.rows.length === rows1,
+  `a second run resets rows instead of appending (${hookProbeStore.rows.length} === ${rows1})`);
 
 // ─── Summary ──────────────────────────────────────────────────────────────────
 

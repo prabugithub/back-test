@@ -2,6 +2,7 @@ import type { ReactNode } from 'react';
 import { TrendingUp, TrendingDown, Minus, RefreshCw, Settings2 } from 'lucide-react';
 import { type RegimeRules, type AutoBacktestConfig, generateBinaryPatterns } from '../../utils/autoBacktestEngine';
 import { ENTRY_HOOK_OPTIONS } from '../../strategies';
+import { HookDebugToggle } from './HookDebugToggle';
 import type { FilterPreviewBar, PreviewFilterKey } from '../../hooks/useFilterPreviewData';
 import { CardShell } from './CardShell';
 import { SegmentedControl } from './SegmentedControl';
@@ -237,6 +238,12 @@ export function EntryStep({ rules, up, isShort, isBoth }: RegimeStepProps) {
 // Picks a user-authored algorithm from src/strategies and says how it participates.
 // Deliberately the last card in the Entry step rather than a workflow step of its own: it
 // is a variant of "what triggers an entry", not a separate stage.
+// A structure filter set to anything but 'any' runs in evaluateAutoSignals' regime loop
+// BEFORE resolveEntryHook, so it silences the hook without appearing anywhere.
+function structureGate(f: string | undefined): boolean {
+  return f !== undefined && f !== 'any';
+}
+
 function CustomEntryHookCard({ rules, up }: Pick<RegimeStepProps, 'rules' | 'up'>) {
   const mode = rules.entryHookMode ?? 'off';
   const hookId = rules.entryHookId ?? '';
@@ -288,14 +295,31 @@ function CustomEntryHookCard({ rules, up }: Pick<RegimeStepProps, 'rules' | 'up'
             </p>
           )}
 
-          {/* A hook is driven by the H/L signal on the bar. Pivot entries have no such
-              signal, so the hook has no trigger and (failing closed) rejects every bar —
-              a dead configuration unless it is called out here. */}
-          {rules.entryMode === 'PIVOT' && (
+          {/* THE most common reason a hook looks dead. Both structure filters run in the
+              regime loop BEFORE the hook is reached, and 'bull_trend'/'bear_trend' are
+              shipped defaults on the uptrend/downtrend regimes — measured on real 5m NSE
+              data, the default htStructureFilter alone silences ~65% of signal bars, with
+              nothing in the trade log to show for it. */}
+          {(structureGate(rules.htStructureFilter) || structureGate(rules.ltStructureFilter)) && (
             <p className="mt-1.5 text-[10px] text-amber-600 leading-snug">
-              Entry Signal is set to <strong>Pivot</strong>. A hook only fires on H/L signal
-              bars, so this regime will take no trades. Switch Entry Signal to H/L Signal or
-              Confluence.
+              {[
+                structureGate(rules.htStructureFilter) ? 'HT' : null,
+                structureGate(rules.ltStructureFilter) ? 'LT' : null,
+              ].filter(Boolean).join(' and ')} Structure is filtered in the Market step. Those
+              gates run <strong>before</strong> the hook, so signals outside that structure
+              never reach your code at all. Set them to <strong>Any</strong> if the hook
+              should judge every signal itself.
+            </p>
+          )}
+
+          {/* Only 'gate' narrows on entry mode, and it narrows rather than kills: the hook
+              still runs on bars that are BOTH a pivot and an H/L signal. 'replace' does not
+              consult entryMode at all. */}
+          {mode === 'gate' && rules.entryMode === 'PIVOT' && (
+            <p className="mt-1.5 text-[10px] text-amber-600 leading-snug">
+              Entry Signal is set to <strong>Pivot</strong>. In Gate mode the hook only sees
+              bars that are a pivot <em>and</em> carry an H/L signal — a much smaller set.
+              Use H/L Signal or Confluence to see every signal.
             </p>
           )}
 
@@ -306,6 +330,13 @@ function CustomEntryHookCard({ rules, up }: Pick<RegimeStepProps, 'rules' | 'up'
             {' '}Every H/L signal reaches it at <em>any</em> count — H3, H4, L5 included —
             so the H1/H2 checkboxes above stop gating while a hook is on.
           </p>
+
+          {/* Same control as the panel footer. Repeated here because this is where the
+              strategy work happens, and the worker/main-thread distinction is invisible
+              until it costs you an afternoon of breakpoints that never fire. */}
+          <div className="mt-2">
+            <HookDebugToggle />
+          </div>
         </>
       )}
     </CardShell>

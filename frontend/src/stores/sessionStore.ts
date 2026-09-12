@@ -7,6 +7,8 @@ import { createLiveActions } from './liveActions';
 import { createSharedActions } from './sharedActions';
 import { createAutoBacktestActions } from './autoBacktestActions';
 import { type AutoBacktestConfig, type AutoSignal, type EntryMetricsSnapshot, type RegimeKey, defaultAutoBacktestConfig } from '../utils/autoBacktestEngine';
+import { getHookDebugMode } from '../utils/hookDebugMode';
+import type { BatchSimResult } from '../utils/batchBacktestSimulator';
 
 export interface SessionConfig {
   securityId: string;
@@ -91,6 +93,16 @@ export interface SessionStore {
   lastAutoSignalReason: string;
   isBatchBacktestRunning: boolean;
   batchBacktestProgress: number; // 0–100
+  // Run the batch backtest on the MAIN THREAD instead of the Web Worker, so breakpoints
+  // inside a custom entry hook actually pause. UI-only and machine-local (localStorage via
+  // utils/hookDebugMode) — deliberately NOT part of autoBacktestConfig or uiSettings, both
+  // of which persist to Firestore and would carry a debugging preference into a saved or
+  // shared strategy. Mirrored into the store purely so the toggle re-renders.
+  hookDebugMode: boolean;
+  // Diagnostics from the most recent batch run that had a hook configured — call count,
+  // errors, rejections. Kept in the store (not just notified) so __hook.doctor() can report
+  // it after the toast has gone. null until a hooked run completes.
+  lastHookDiagnostics: BatchSimResult['hookDiagnostics'] | null;
 
   // ── Saved auto-backtest configurations (named, persisted setups) ────────────
   savedAutoBacktestConfigs: SavedAutoBacktestConfig[];
@@ -161,6 +173,7 @@ export interface SessionStore {
   getRealizedPnL: () => number;
   toggleMarkers: (chartId?: 'primary' | 'secondary') => void;
   setTradeQuantity: (qty: number) => void;
+  setHookDebugMode: (on: boolean) => void;
   setRiskPerTrade: (risk: number) => void;
   setManualLevels: (levels: { sl: number; target: number; entry?: number } | null) => void;
   updatePositionTarget: (newTarget: number) => Promise<void>;
@@ -243,6 +256,8 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
   lastAutoSignalReason: '',
   isBatchBacktestRunning: false,
   batchBacktestProgress: 0,
+  hookDebugMode: getHookDebugMode(),
+  lastHookDiagnostics: null,
 
   // ── Saved auto-backtest configurations initial state ─────────────────────────
   savedAutoBacktestConfigs: [],

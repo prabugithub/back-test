@@ -15,6 +15,7 @@ import { calculatePivotPoints, getPivotPointsUpTo } from '../utils/indicators';
 import { analyzeMarketStructure, analyzeMarketStructureAt } from '../utils/pivotAnalysis';
 import { buildEntryInstrumentation } from '../utils/entryInstrumentation';
 import { buildNetPositionMirror, rebuildOpenPositionsFromTrades } from '../utils/netPosition';
+import { setHookDebugMode as persistHookDebugMode } from '../utils/hookDebugMode';
 import {
   executeLiveOrder,
   registerMonitorIfNeeded,
@@ -840,6 +841,13 @@ export function createSharedActions(set: StoreSet, get: StoreGet) {
     },
 
     setTradeQuantity: (tradeQuantity: number) => set({ tradeQuantity }),
+
+    // Persists to localStorage as well as the store — see utils/hookDebugMode for why it
+    // lives there rather than in autoBacktestConfig or uiSettings.
+    setHookDebugMode: (on: boolean) => {
+      persistHookDebugMode(on);
+      set({ hookDebugMode: on });
+    },
     setRiskPerTrade: (riskPerTrade: number) => set({ riskPerTrade }),
     setManualLevels: (manualLevels: SessionStore['manualLevels']) => set({ manualLevels }),
 

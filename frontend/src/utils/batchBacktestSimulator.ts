@@ -2,7 +2,7 @@
 
 import type { Candle, Trade, BacktestPosition, OpenPosition, ExitReason } from '../types';
 import type { TradeJournal } from '../types';
-import { type AutoBacktestConfig, type AutoSignal, type RegimeKey, MULTI_TRADE_DEFAULT_CAP, evaluateAutoSignals, evaluateTrailStop, evaluateAutoExitSignal, resolveTradeQuantity } from './autoBacktestEngine';
+import { type AutoBacktestConfig, type AutoSignal, type RegimeKey, MULTI_TRADE_DEFAULT_CAP, evaluateAutoSignals, evaluateTrailStop, evaluateAutoExitSignal, resolveTradeQuantity, resolveEntryHook } from './autoBacktestEngine';
 import { createHookRunState } from './entryHook';
 import { buildNetPositionMirror } from './netPosition';
 import { calculateMAPosition, calculateBarQuality, averageBarQuality, averageBarQualityIQR, calculateEMASlope, calculateEMAInteraction } from './pivotAnalysis';
@@ -40,10 +40,14 @@ export interface BatchSimResult {
   finalRealizedPnL: number;
   tradeCount: number;   // completed round-trips (trades with pnl)
   totalPnL: number;
-  // Custom entry hook diagnostics for the run. Absent when no regime used a hook.
-  // A hook that throws or returns an invalid decision never aborts the run — it just takes
-  // no trade on that bar — so without this the failure would be completely silent.
+  // Custom entry hook diagnostics. Present whenever a hook was reached at all — NOT only on
+  // failure. A hook that throws or returns an invalid decision never aborts the run (it just
+  // takes no trade on that bar), and a hook blocked upstream by the regime's structure
+  // filters is never called at all; both look like "nothing happened" without these numbers.
+  // Absent only when no regime used a hook, which is what keeps an unhooked run's result
+  // shape unchanged.
   hookDiagnostics?: {
+    callCount: number;     // bars that actually reached the hook — 0 means a config problem
     errorCount: number;
     error?: string;        // first trapped exception
     rejectedCount: number;
@@ -382,8 +386,14 @@ export function runBatchSimulation(
     finalRealizedPnL: multiRealizedPnL,
     tradeCount: trades.filter(t => t.pnl !== undefined).length,
     totalPnL,
-    hookDiagnostics: hookRunState.errorCount > 0 || hookRunState.rejectedCount > 0
+    // Gated on a hook being CONFIGURED, not on it having run. A hook that was configured and
+    // never called is the single most valuable thing to report — it is what a structure
+    // filter blocking the hook upstream looks like — so `callCount: 0` must reach the caller
+    // rather than collapsing to `undefined`.
+    hookDiagnostics: (['uptrend', 'downtrend', 'range', 'reversal'] as RegimeKey[])
+      .some(k => config[k].enabled && resolveEntryHook(config[k]) !== null)
       ? {
+          callCount: hookRunState.callCount,
           errorCount: hookRunState.errorCount,
           error: hookRunState.error,
           rejectedCount: hookRunState.rejectedCount,
