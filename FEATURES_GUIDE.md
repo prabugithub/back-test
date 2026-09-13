@@ -950,6 +950,10 @@ The existing **Quick Presets** row (Trend Follow / Range Trader / All Regimes) i
 
 The dropdown lists every saved configuration by name, marking the currently active one. Loading or saving as always keeps the dropdown selection in sync with the active configuration.
 
+### Default configuration on open
+
+When the Auto-Backtest page opens, it automatically loads a saved configuration so you don't start from the built-in defaults: the one you last loaded or saved on this machine, or — if that one no longer exists or you've never loaded one — the top of the list (most recently updated). It only does this while the current config is still the untouched built-in default; if a restored session brought its own config, or you've already edited/applied a preset, nothing is replaced.
+
 ---
 
 ## Quick Reference — UI Layout

@@ -5,7 +5,7 @@ import {
   type AutoBacktestConfig, type AutoSignal, type RegimeKey,
   MULTI_TRADE_DEFAULT_CAP, isMultiTradeMode,
   evaluateAutoSignals, evaluateTrailStop, evaluateAutoExitSignal,
-  resolveTradeQuantity, resolveEntryHook,
+  resolveTradeQuantity, resolveEntryHook, defaultAutoBacktestConfig,
 } from '../utils/autoBacktestEngine';
 import { runBatchSimulation, type BatchSimResult } from '../utils/batchBacktestSimulator';
 import { createHookRunState, type HookRunState } from '../utils/entryHook';
@@ -30,6 +30,15 @@ function candleTimeMinutes(timestampSec: number): number {
 function parseHHMM(hhmm: string): number {
   const [h, m] = hhmm.split(':').map(Number);
   return h * 60 + (m || 0);
+}
+
+// Machine-local memory of the last loaded/saved auto-BT config, used to pick the default on load.
+const LAST_AUTO_BT_CONFIG_KEY = 'lastAutoBacktestConfigId';
+function readLastAutoBacktestConfigId(): string | null {
+  try { return localStorage.getItem(LAST_AUTO_BT_CONFIG_KEY); } catch { return null; }
+}
+function writeLastAutoBacktestConfigId(id: string): void {
+  try { localStorage.setItem(LAST_AUTO_BT_CONFIG_KEY, id); } catch { /* storage unavailable */ }
 }
 
 let _openPositionSeq = 0;
@@ -658,11 +667,22 @@ export function createAutoBacktestActions(set: StoreSet, get: StoreGet) {
     loadSavedAutoBacktestConfigsList: async () => {
       const configs = await listAutoBacktestConfigs();
       set({ savedAutoBacktestConfigs: configs });
+
+      // Default load: last-used config, else the top of the list (most recently updated).
+      // Only while the live config is still the untouched initial default — a restored
+      // session's config or unsaved edits are never clobbered.
+      const state = get();
+      if (configs.length === 0 || state.activeAutoBacktestConfigId) return;
+      if (state.autoBacktestConfig !== defaultAutoBacktestConfig) return;
+      const lastId = readLastAutoBacktestConfigId();
+      const pick = configs.find(c => c.id === lastId) ?? configs[0];
+      get().applySavedAutoBacktestConfig(pick.id);
     },
 
     saveAutoBacktestConfigAs: async (name: string) => {
       try {
         const saved = await saveAutoBacktestConfigAsRemote(name, get().autoBacktestConfig);
+        writeLastAutoBacktestConfigId(saved.id);
         set(state => ({
           savedAutoBacktestConfigs: [saved, ...state.savedAutoBacktestConfigs],
           activeAutoBacktestConfigId: saved.id,
@@ -700,6 +720,7 @@ export function createAutoBacktestActions(set: StoreSet, get: StoreGet) {
       if (!found) return;
       get().setAutoBacktestConfig(found.config);
       set({ activeAutoBacktestConfigId: found.id, activeAutoBacktestConfigName: found.name });
+      writeLastAutoBacktestConfigId(found.id);
       useNotificationStore.getState().notify(`Configuration "${found.name}" loaded`, 'success');
     },
 
