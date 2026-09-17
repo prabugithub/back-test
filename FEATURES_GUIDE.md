@@ -415,6 +415,17 @@ export const myEntry: EntryHook = ctx => {
 };
 ```
 
+**Hooks that ship registered** (pick one in the Entry step → Custom Entry Hook dropdown):
+
+| Hook | What it takes |
+|---|---|
+| **Strong-Trend H1** | Long only, and the one built around *trend strength from the label stream itself*. In a strong bull trend each shallow pullback makes a new high immediately, which **resets the Al Brooks count — so the trend keeps printing H1, H1, H1 and never reaches H2**. At the same time nothing resets the bear count, so the L labels climb (L4, L5 … L7 is normal). It therefore enters on **H1 only**, and requires: the **last two H-side signals both H1** (interleaved L labels don't break the streak), at least **3 clean bull bars** in the current bull leg (bull body ≥ 50% of the bar's range), and **both EMA21 and EMA50 sloping up hard at the entry bar**, measured in ATRs per bar so the threshold carries across instruments. The climbing L count is recorded as `lRun` and can be required too (off by default). |
+| **Higher-High Shallow Pullback** | Long only. H2+, higher high, a bear pullback holding entirely above the previous leg's high and retracing at most 50%. |
+| **Deep Pullback Continuation** | H2+/L2+ with the structure, clean breakout leg, stop beyond the pullback extreme. |
+| **Take Every Signal** | Every H/L signal at any count, with the engine's own sizing and stops — the baseline to measure the others against. |
+
+Every threshold in these is a named constant at the top of its file with the reasoning written beside it, and every one records its intermediate values through `probe()` **before** it decides — so `__hook.stats('cleanBars')` or `__hook.stats('ema50SlopeAtr')` gives you the real distribution on your own instrument to re-tune against. Window sizes (slope lookbacks, leg-sequence length) come from Session Settings, never from the strategy file.
+
 **It fires on every H/L signal, at any count.** This is the headline difference from everything else in the panel. The built-in chain can only ever enter on **H1/H2/L1/L2** — the H1/H2 checkboxes are the whole vocabulary. The signal detector labels H3, H4, L5 and beyond all the same; a hook sees them all. **While a hook is on, those checkboxes stop gating** and your own code does the trigger filtering (`ctx.trigger.count`).
 
 **Two modes**, chosen per regime:

@@ -37,8 +37,14 @@
 import type { EntryHook, EntryHookEntry } from '../utils/entryHook';
 import { deepPullbackContinuation, takeEverySignal } from './example';
 import { higherHighShallowPullback } from './higherHighShallowPullback';
+import { strongTrendH1 } from './strongTrendH1';
 
 export const ENTRY_HOOKS: Record<string, EntryHookEntry> = {
+  'strong-trend-h1': {
+    label: 'Strong-Trend H1',
+    description: 'Long only. Buys every H1 while the bull count keeps resetting to H1 — last two H signals both H1, 3+ clean bull bars in the leg, EMA21 and EMA50 both sloping up hard at the entry bar.',
+    hook: strongTrendH1,
+  },
   'hh-shallow-pullback': {
     label: 'Higher-High Shallow Pullback',
     description: 'Long only. H2+, higher high, bear pullback holding above the previous leg\'s high and retracing at most 50%.',
