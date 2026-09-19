@@ -22,6 +22,16 @@ import {
   type NormalizedDecision,
 } from './entryHook';
 import { getEntryHook } from '../strategies';
+// Stop-loss primitives live in a LEAF module so `src/strategies/*` can compute the same
+// prospective stop this engine will book without importing the engine (which would close a
+// runtime cycle — the engine value-imports `getEntryHook` above). See utils/stopLoss.ts.
+import {
+  findRecentBullPivot,
+  findRecentBearPivot,
+  resolvePivotForSl,
+  slLong,
+  slShort,
+} from './stopLoss';
 import {
   analyzeMarketStructureAt,
   calculateEfficiencyRatio,
@@ -1288,9 +1298,7 @@ function evalHook(
 
   // Same pivot the built-in chain would have anchored a pivot-method stop to, so
   // slMethod: 'pivot' keeps working when a hook leaves the stop to the engine.
-  const pivotForSl = trigger.side === 'long'
-    ? findRecentBullPivot(pivots, currentIndex, candles, rules.confluenceLookback * 2)
-    : findRecentBearPivot(pivots, currentIndex, candles, rules.confluenceLookback * 2);
+  const pivotForSl = resolvePivotForSl(trigger.side, pivots, currentIndex, candles, rules);
 
   const logs: string[] = [];
   const ctx = hookEnv.buildCtx({ rules, regime, metrics: entryMetrics, logs });
@@ -1367,9 +1375,7 @@ export function previewEntryHook(
     logs,
   });
 
-  const pivotForSl = trigger.side === 'long'
-    ? findRecentBullPivot(pivots, currentIndex, candles, rules.confluenceLookback * 2)
-    : findRecentBearPivot(pivots, currentIndex, candles, rules.confluenceLookback * 2);
+  const pivotForSl = resolvePivotForSl(trigger.side, pivots, currentIndex, candles, rules);
 
   return runEntryHook({
     hook: resolved.hook,
@@ -1600,18 +1606,6 @@ export function passesMa(filter: string, candle: Candle, ema21: number | null, e
   return true;
 }
 
-function slLong(rules: RegimeRules, entry: number, pivot: PivotPoint | null, atr: number): number {
-  if (rules.slMethod === 'pivot' && pivot) return entry - pivot.slDistance;
-  if (rules.slMethod === 'atr' && atr > 0) return entry - atr * rules.slAtrMultiplier;
-  return entry - rules.slFixedPoints;
-}
-
-function slShort(rules: RegimeRules, entry: number, pivot: PivotPoint | null, atr: number): number {
-  if (rules.slMethod === 'pivot' && pivot) return entry + pivot.slDistance;
-  if (rules.slMethod === 'atr' && atr > 0) return entry + atr * rules.slAtrMultiplier;
-  return entry + rules.slFixedPoints;
-}
-
 function getPivotSeq(pivots: PivotPoint[]): string {
   let bull: PivotPoint | null = null;
   let bear: PivotPoint | null = null;
@@ -1630,26 +1624,6 @@ export function getEmaAt(candles: Candle[], index: number, period: number): numb
 
 export function getAtrAt(candles: Candle[], index: number): number {
   return getAtrValueAt(candles, index, 14);
-}
-
-function findRecentBullPivot(pivots: PivotPoint[], idx: number, candles: Candle[], lookback: number): PivotPoint | null {
-  const ts = candles[idx].timestamp;
-  const minTs = idx >= lookback ? candles[idx - lookback].timestamp : 0;
-  for (let i = pivots.length - 1; i >= 0; i--) {
-    const p = pivots[i];
-    if (p.type === 'bullish' && p.time <= ts && p.time >= minTs) return p;
-  }
-  return null;
-}
-
-function findRecentBearPivot(pivots: PivotPoint[], idx: number, candles: Candle[], lookback: number): PivotPoint | null {
-  const ts = candles[idx].timestamp;
-  const minTs = idx >= lookback ? candles[idx - lookback].timestamp : 0;
-  for (let i = pivots.length - 1; i >= 0; i--) {
-    const p = pivots[i];
-    if (p.type === 'bearish' && p.time <= ts && p.time >= minTs) return p;
-  }
-  return null;
 }
 
 // ─── Exit engine (auto-BT positions only) ─────────────────────────────────────

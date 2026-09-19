@@ -22,14 +22,44 @@
  * So the label test is: the last two H-side signals, the trigger bar's own included, are
  * both H1. Interleaved L labels do not break the streak (see H1_STREAK_STRICT).
  *
- * ── The other two gates ─────────────────────────────────────────────────────
+ * ── The other gates ─────────────────────────────────────────────────────────
  *
  *   - the current bull leg contains at least MIN_CLEAN_BULL_BARS clean bull bars —
  *     bull-bodied bars with a body-to-range ratio at or above MIN_CLEAN_BRR
  *   - both EMAs are sloping up hard at the ENTRY bar, EMA21 and EMA50 alike
+ *   - there is room to the next resistance for at least a 1:2 target — see below
  *
  * A pure filter — it returns true/false only, so the regime's own SL, target and position
  * sizing still apply. See the note at the bottom for a structural stop.
+ *
+ * ── Room to resistance, and why a pullback must not fail it ─────────────────
+ *
+ * Resistance is read off the PIVOTS — the system's own swing highs — restricted to PREVIOUS
+ * trading days. Today's own swing highs are excluded on purpose: they were made by the very
+ * move being traded, and in a strong trend they are exceeded within bars, so counting them
+ * would have this hook refuse every continuation entry it exists to take.
+ *
+ * The test is then: entry, the stop the engine would actually place, and the nearest
+ * resistance overhead must leave at least a 1:2 reward:risk. If the target cannot be reached
+ * without trading into a prior-day swing high, the entry is refused.
+ *
+ * The trap — and the reason the level test is phrased the way it is — is the PULLBACK entry.
+ * Once the session has traded up THROUGH a prior-day swing high, that level is broken: it is
+ * support now, not resistance, and a pullback to it is precisely the entry this hook wants.
+ * A naive "is there a prior swing high above my entry price" test rejects exactly those bars,
+ * because after the pullback the broken level sits overhead again. So a level counts as
+ * resistance only while **today's session high has not yet reached it**:
+ *
+ *     resistance = lowest prior-day swing high strictly above the session's high so far
+ *
+ * Every level the day has already traded through drops out by construction, so a pullback
+ * into broken resistance is measured against the NEXT untouched level above — which is the
+ * one that can actually stop the trade. (The session high is always at or above the entry
+ * close, so this condition also subsumes "must be above entry".)
+ *
+ * The mirror value — the nearest prior-day swing low the session has not broken — is
+ * measured as `support` and recorded, but deliberately does not gate anything. Say so if it
+ * should: requiring the stop to sit under it is a one-line change.
  *
  * ── How the leg sequence is laid out ────────────────────────────────────────
  *
@@ -42,6 +72,8 @@
 import type { EntryHook, EntryHookContext } from '../utils/entryHook';
 import { getEmaValueAt } from '../utils/indicators';
 import { calculateEMASlope } from '../utils/pivotAnalysis';
+import { istDayIndex, getSessionOpenContext } from '../utils/sessionDay';
+import { prospectiveStop } from '../utils/stopLoss';
 import type { LegSegment } from '../types';
 import { probe } from './debug';
 
@@ -99,6 +131,20 @@ const MIN_EMA50_SLOPE_ATR = 0.03;
  * you have looked at that column.
  */
 const MIN_L_RUN = 0;
+
+/**
+ * Least reward:risk the room to resistance must allow — "at least a 1:2 target".
+ *
+ * The regime's own `targetRR` wins when it is LARGER: a regime aiming at 3R that cannot
+ * reach 3R before the next prior-day swing high has a target it will not make, so the
+ * binding number is `max(this, rules.targetRR)`. Set this to 0 to switch the gate off and
+ * leave only the regime's target governing.
+ */
+const MIN_TARGET_RR = 2;
+
+/** Where the per-day swing-level cache lives on `ctx.state`. Namespaced because `ctx.state`
+ *  is one object shared by every hook in the run. */
+const LEVELS_KEY = 'strongTrendH1.priorDayLevels';
 
 /** probe()'s own rounding is private to debug.ts; extras arrive raw, so round here. */
 const r = (v: number | null | undefined, dp: number): number | null =>
@@ -171,6 +217,30 @@ export const strongTrendH1: EntryHook = ctx => {
   const slope21Atr = ema21Slope !== undefined && atr > 0 ? ema21Slope / atr : null;
   const slope50Atr = ema50Slope !== undefined && atr > 0 ? ema50Slope / atr : null;
 
+  // ── 6. Room to the next resistance ────────────────────────────────────────
+  // The stop is the ENGINE's — derived through the shared primitives in utils/stopLoss.ts
+  // rather than re-implemented here, because a reward:risk test measured against a stop the
+  // engine will not actually place is worse than no test at all. Exact for the 'atr' and
+  // 'fixed' methods and for 'pivot' in replace mode; see prospectiveStop's note for the
+  // one gate-mode case where it can differ.
+  const entry = ctx.candle.close;
+  const sl = prospectiveStop('long', entry, ctx.rules, ctx.pivots, ctx.fullCandles, ctx.absoluteIndex, atr);
+  const risk = sl === null ? null : entry - sl;
+
+  const session = sessionExtremes(ctx);
+  const levels = priorDayLevels(ctx);
+  // Unbroken = strictly above the session high so far. Everything today has already traded
+  // through has stopped being resistance, which is what keeps a pullback into a broken level
+  // from being refused.
+  const resistance = session === null ? null : firstAbove(levels.highs, session.high);
+  const support = session === null ? null : firstBelow(levels.lows, session.low);
+
+  const headroom = resistance === null ? null : resistance - entry;
+  // The column to tune against: reward:risk actually available to the next prior-day swing
+  // high. null when nothing is overhead — which is unlimited room, not zero.
+  const headroomRR = headroom !== null && risk !== null && risk > 0 ? headroom / risk : null;
+  const requiredRR = Math.max(MIN_TARGET_RR, ctx.rules.targetRR);
+
   // Recorded here, after every number is computed and before the first verdict below, so
   // __hook.table() shows the bars that reached the measurements and __hook.stats() gives the
   // real distributions to tune the four thresholds against. Costs nothing when unused.
@@ -193,9 +263,23 @@ export const strongTrendH1: EntryHook = ctx => {
     ema50SlopeAtr: r(slope50Atr, 3),
     // Signed distance from price to EMA21 in ATRs — how extended the entry is.
     emaDistAtr: ema21 !== null && atr > 0 ? r((ctx.candle.close - ema21) / atr, 2) : null,
+    // Room to resistance. `headroomRR` is the one to run __hook.stats() on: it says how
+    // much reward:risk the prior-day structure actually leaves, and null means nothing
+    // overhead at all. `priorHighs` being 0 means there are no previous days in the loaded
+    // data, so this gate cannot bind — load more history if that is unexpected.
+    entry: r(entry, 2),
+    sl: r(sl, 2),
+    risk: r(risk, 2),
+    sessionHigh: r(session?.high, 2),
+    resistance: r(resistance, 2),
+    headroom: r(headroom, 2),
+    headroomRR: r(headroomRR, 2),
+    requiredRR: r(requiredRR, 2),
+    support: r(support, 2),
+    priorHighs: levels.highs.length,
   });
 
-  // ── 6. The verdicts ───────────────────────────────────────────────────────
+  // ── 7. The verdicts ───────────────────────────────────────────────────────
   if (streak < REQUIRED_H1_STREAK) return false;
   if (lRun < MIN_L_RUN) return false;
 
@@ -206,11 +290,18 @@ export const strongTrendH1: EntryHook = ctx => {
   if (slope21Atr === null || slope21Atr < MIN_EMA21_SLOPE_ATR) return false;
   if (slope50Atr === null || slope50Atr < MIN_EMA50_SLOPE_ATR) return false;
 
+  // Room-to-resistance gate. No stop means the engine could not form one either and the
+  // trade would be skipped downstream anyway (runEntryHook's null-base path), so refuse it
+  // here where the reason is visible. `headroomRR === null` is the OPEN case — nothing
+  // overhead the session has not already taken out — and passes.
+  if (risk === null || !(risk > 0)) return false;
+  if (headroomRR !== null && headroomRR < requiredRR) return false;
+
   // Stamped onto the trade itself — ctx.log() is appended to the signal's reason, which the
   // batch simulator writes to journal.entrySign and journal.notes. So every trade this rule
   // produces carries its own proof in Trade History:
   //
-  //   Long [Uptrend] H1 | … [hook:strong-trend-h1] | H1x2 lRun=5 clean=4/6 …
+  //   Long [Uptrend] H1 | … [hook:strong-trend-h1] | H1x2 lRun=5 clean=4/6 … res=1012.40 rr=3.1
   //
   // That is the confirmation path that needs no debugger at all: if a trade shows this text,
   // this function ran and every gate above it passed for that bar.
@@ -219,7 +310,10 @@ export const strongTrendH1: EntryHook = ctx => {
     + `ema21=${ema21 === null ? 'na' : ema21.toFixed(2)} `
     + `slope21atr=${slope21Atr === null ? 'na' : slope21Atr.toFixed(3)} `
     + `ema50=${ema50 === null ? 'na' : ema50.toFixed(2)} `
-    + `slope50atr=${slope50Atr === null ? 'na' : slope50Atr.toFixed(3)}`
+    + `slope50atr=${slope50Atr === null ? 'na' : slope50Atr.toFixed(3)} `
+    + `res=${resistance === null ? 'open' : resistance.toFixed(2)} `
+    + `rr=${headroomRR === null ? 'open' : headroomRR.toFixed(1)}/${requiredRR} `
+    + `sup=${support === null ? 'none' : support.toFixed(2)}`
   );
 
   return true;
@@ -232,6 +326,83 @@ export const strongTrendH1: EntryHook = ctx => {
   //
   // The target then follows from the regime's targetRR against that risk.
 };
+
+/** Prior-day swing highs (ascending) and swing lows (descending), from the system's pivots. */
+interface PriorDayLevels {
+  /** IST day these were built for — the cache key. */
+  day: number;
+  highs: number[];
+  lows: number[];
+}
+
+/**
+ * Swing levels laid down on PREVIOUS trading days, newest session excluded.
+ *
+ * A `bearish` pivot records `current.high` and a `bullish` one `current.low`
+ * (`calculatePivotPoints`), so the two types are exactly the swing highs and swing lows
+ * being asked for here.
+ *
+ * Cached on `ctx.state` per IST day. The set of prior-day pivots is FIXED for the whole of
+ * today — new pivots can only land on today, which this filters out — so one build per day
+ * is not an optimisation that can go stale. Without it this would re-scan the entire pivot
+ * history on every trigger bar.
+ *
+ * `ctx.pivots` is oldest-first, so the scan stops at the first pivot belonging to today
+ * rather than walking the remainder. Note there is no lookback here at all: "nearest level
+ * above" is well defined over whatever history is loaded, so nothing needs tuning.
+ */
+function priorDayLevels(ctx: EntryHookContext): PriorDayLevels {
+  const day = istDayIndex(ctx.candle.timestamp);
+  const cached = ctx.state[LEVELS_KEY] as PriorDayLevels | undefined;
+  if (cached && cached.day === day) return cached;
+
+  const highs: number[] = [];
+  const lows: number[] = [];
+  for (const p of ctx.pivots) {
+    if (istDayIndex(p.time) >= day) break; // today's own swings — deliberately not resistance
+    if (p.type === 'bearish') highs.push(p.price);
+    else lows.push(p.price);
+  }
+  highs.sort((a, b) => a - b);
+  lows.sort((a, b) => b - a);
+
+  const fresh: PriorDayLevels = { day, highs, lows };
+  ctx.state[LEVELS_KEY] = fresh;
+  return fresh;
+}
+
+/**
+ * Highest high and lowest low of the entry bar's own session, up to and including that bar.
+ *
+ * This is what decides whether a prior-day level is still intact. Bounded by bars-per-day
+ * (75 on 5m), which is why `getSessionOpenContext` states no caching is warranted.
+ */
+function sessionExtremes(ctx: EntryHookContext): { high: number; low: number } | null {
+  const open = getSessionOpenContext(ctx.fullCandles, ctx.absoluteIndex);
+  if (!open) return null;
+
+  let high = Number.NEGATIVE_INFINITY;
+  let low = Number.POSITIVE_INFINITY;
+  for (let i = open.openBarIndex; i <= ctx.absoluteIndex; i++) {
+    const bar = ctx.fullCandles[i];
+    if (bar.high > high) high = bar.high;
+    if (bar.low < low) low = bar.low;
+  }
+  if (!Number.isFinite(high) || !Number.isFinite(low)) return null;
+  return { high, low };
+}
+
+/** First value strictly above `mark` in an ASCENDING list — the nearest intact resistance. */
+function firstAbove(ascending: number[], mark: number): number | null {
+  for (const v of ascending) if (v > mark) return v;
+  return null;
+}
+
+/** First value strictly below `mark` in a DESCENDING list — the nearest intact support. */
+function firstBelow(descending: number[], mark: number): number | null {
+  for (const v of descending) if (v < mark) return v;
+  return null;
+}
 
 /**
  * Clean bull bars within a segment: bull-bodied AND body-to-range at or above MIN_CLEAN_BRR.
