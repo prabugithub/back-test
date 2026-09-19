@@ -261,15 +261,17 @@ export function AutoBacktestPanel({ onNavigate, hidden }: AutoBacktestPanelProps
       riskPerTrade: config.riskPerTrade,
       minQuantity: config.minQuantity,
     };
-    // Carry the custom entry hook across. No preset defines one, so spreading
+    // Carry the custom entry AND exit hooks across. No preset defines either, so spreading
     // defaultAutoBacktestConfig would silently switch a configured hook off — the run would
     // then quietly go back to the built-in chain with no indication the strategy had been
-    // dropped. Presets describe filter thresholds; they have no opinion on your hook.
+    // dropped. Presets describe filter thresholds; they have no opinion on your hooks.
     for (const k of ['uptrend', 'downtrend', 'range', 'reversal'] as RegimeKey[]) {
       next[k] = {
         ...next[k],
         entryHookId: config[k].entryHookId,
         entryHookMode: config[k].entryHookMode,
+        exitHookId: config[k].exitHookId,
+        exitHookMode: config[k].exitHookMode,
       };
     }
     setAutoBacktestConfig(next);

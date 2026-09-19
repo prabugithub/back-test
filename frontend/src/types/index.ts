@@ -23,10 +23,16 @@ export interface TradeJournal {
   screenshotUrl?: string;
 }
 
-// Why a trade was closed. REVERSAL/OPP_SIGNAL/LEG_DECAY come from the auto-BT
+// Why a trade was closed. REVERSAL/OPP_SIGNAL/EXIT_HOOK come from the auto-BT
 // exit engine (autoBacktestEngine.ts evaluateAutoExitSignal) and only ever apply
 // to auto-entered backtest positions.
-export type ExitReason = 'SL' | 'TP' | 'MANUAL' | 'TIME_OVER' | 'REVERSAL' | 'OPP_SIGNAL' | 'LEG_DECAY';
+//
+// LEG_DECAY is RETIRED: the built-in Leg Decay Exit it came from was removed when the
+// custom exit hook replaced it (that logic now ships as the 'leg-decay' hook in
+// src/strategies/exits/). Nothing produces it any more, but trades booked before the
+// change are persisted in Firestore carrying it, so the value stays in the union and in
+// every label/badge map — dropping it would render those historical trades unlabelled.
+export type ExitReason = 'SL' | 'TP' | 'MANUAL' | 'TIME_OVER' | 'REVERSAL' | 'OPP_SIGNAL' | 'EXIT_HOOK' | 'LEG_DECAY';
 
 // One segment of the recent-price-action leg sequence captured at entry — either a
 // completed Al Brooks impulse leg or the pullback (retrace) between two legs. Segments

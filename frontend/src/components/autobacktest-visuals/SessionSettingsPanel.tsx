@@ -5,6 +5,11 @@ import {
   ENTRY_HOOK_LOOKBACK_MIN,
   ENTRY_HOOK_LOOKBACK_MAX,
 } from '../../utils/entryHook';
+import {
+  DEFAULT_EXIT_HOOK_LOOKBACK,
+  EXIT_HOOK_LOOKBACK_MIN,
+  EXIT_HOOK_LOOKBACK_MAX,
+} from '../../utils/exitHook';
 import { CardShell } from './CardShell';
 
 interface SessionSettingsPanelProps {
@@ -267,7 +272,7 @@ export function SessionSettingsPanel({ config, onChange, isOpen, onClose }: Sess
                 />
               </div>
               <div className="flex items-center justify-between gap-1">
-                <span className="text-[10px] text-gray-500" title="How many candles (ending at the trigger bar) a Custom Entry Hook receives as ctx.candles, so your algorithm never has to maintain its own history">Hook Candles</span>
+                <span className="text-[10px] text-gray-500" title="How many candles (ending at the trigger bar) a Custom Entry Hook receives as ctx.candles, so your algorithm never has to maintain its own history">Entry Hook Candles</span>
                 <input
                   type="number"
                   min={ENTRY_HOOK_LOOKBACK_MIN}
@@ -275,6 +280,20 @@ export function SessionSettingsPanel({ config, onChange, isOpen, onClose }: Sess
                   step={50}
                   value={config.entryHookLookback ?? DEFAULT_ENTRY_HOOK_LOOKBACK}
                   onChange={e => onChange({ entryHookLookback: Number(e.target.value) })}
+                  className="w-16 px-1.5 py-1 text-xs border rounded text-center"
+                />
+              </div>
+              {/* Deliberately a smaller default than the entry hook's: this window is rebuilt
+                  on every bar of every OPEN TRADE, not only on signal bars. */}
+              <div className="flex items-center justify-between gap-1">
+                <span className="text-[10px] text-gray-500" title="How many candles (ending at the current bar) a Custom Exit Hook receives as ctx.candles. Rebuilt every bar a trade is open, so keep it no larger than your trade management actually reads">Exit Hook Candles</span>
+                <input
+                  type="number"
+                  min={EXIT_HOOK_LOOKBACK_MIN}
+                  max={EXIT_HOOK_LOOKBACK_MAX}
+                  step={50}
+                  value={config.exitHookLookback ?? DEFAULT_EXIT_HOOK_LOOKBACK}
+                  onChange={e => onChange({ exitHookLookback: Number(e.target.value) })}
                   className="w-16 px-1.5 py-1 text-xs border rounded text-center"
                 />
               </div>

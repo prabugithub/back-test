@@ -103,6 +103,9 @@ export interface SessionStore {
   // errors, rejections. Kept in the store (not just notified) so __hook.doctor() can report
   // it after the toast has gone. null until a hooked run completes.
   lastHookDiagnostics: BatchSimResult['hookDiagnostics'] | null;
+  // The same, for the custom EXIT hook. Separate field because the two hooks are configured
+  // independently and a run can have one without the other.
+  lastExitHookDiagnostics: BatchSimResult['exitHookDiagnostics'] | null;
 
   // ── Saved auto-backtest configurations (named, persisted setups) ────────────
   savedAutoBacktestConfigs: SavedAutoBacktestConfig[];
@@ -258,6 +261,7 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
   batchBacktestProgress: 0,
   hookDebugMode: getHookDebugMode(),
   lastHookDiagnostics: null,
+  lastExitHookDiagnostics: null,
 
   // ── Saved auto-backtest configurations initial state ─────────────────────────
   savedAutoBacktestConfigs: [],

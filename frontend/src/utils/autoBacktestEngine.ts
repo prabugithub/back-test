@@ -21,7 +21,20 @@ import {
   type HookTrigger,
   type NormalizedDecision,
 } from './entryHook';
+import {
+  buildExitHookContext,
+  createExitHookRunState,
+  runExitHook,
+  type ExitHook,
+  type ExitHookEnv,
+  type ExitHookMode,
+  type ExitHookPositionInput,
+  type ExitHookRunState,
+  type NormalizedExit,
+  type PendingExit,
+} from './exitHook';
 import { getEntryHook } from '../strategies';
+import { getExitHook } from '../strategies/exits';
 // Stop-loss primitives live in a LEAF module so `src/strategies/*` can compute the same
 // prospective stop this engine will book without importing the engine (which would close a
 // runtime cycle — the engine value-imports `getEntryHook` above). See utils/stopLoss.ts.
@@ -213,24 +226,28 @@ export interface RegimeRules {
   exitTrailPivot?: boolean;
   exitTrailPivotBufferPoints?: number;    // default 2 — pad beyond the swing extreme (matches pivot slDistance's +2)
 
-  // 4. Leg-decay exit — re-grade the newest COMPLETED with-trend leg each bar
-  //    (only legs whose extreme formed after entry; windows respect
-  //    legMinBarCount/legMaxBarCount). 'min' = aligned metric must stay >=
-  //    threshold, 'max' = stay <= threshold; each violated check is one fail.
-  //    Exit when fails >= exitLegDecayMinFails. Fills at bar close, exitReason LEG_DECAY.
-  exitLegDecay?: boolean;
-  exitLegDecayMinBarsInTrade?: number;    // default 3 — no decay exit before this many bars in trade
-  exitLegDecayMinFails?: number;          // default 1
-  exitDecayEfficiencyFilter?: 'none' | 'min' | 'max';
-  exitDecayEfficiencyThreshold?: number;  // default 0.25
-  exitDecayConsecBreakFilter?: 'none' | 'min' | 'max';
-  exitDecayConsecBreakThreshold?: number; // default 3
-  exitDecayBarBreakFilter?: 'none' | 'min' | 'max';
-  exitDecayBarBreakThreshold?: number;    // default 4
-  exitDecayEma21SlopeFilter?: 'none' | 'min' | 'max';
-  exitDecayEma21SlopeThreshold?: number;  // default 0
-  exitDecayGapBarFilter?: 'none' | 'min' | 'max';
-  exitDecayGapBarThreshold?: number;      // default 0.3
+  // 4. Custom exit hook — a user-authored TypeScript function that manages the open
+  //    trade bar by bar: hold it, move its stop/target, or close it. Where the three
+  //    mechanisms above are declarative switches, this runs arbitrary code, and it is
+  //    what replaced the old built-in Leg Decay Exit (that logic now ships as the
+  //    'leg-decay' hook in src/strategies/exits/legDecay.ts — same checks, editable).
+  //
+  //    Addressed by string id rather than held as a function, because the batch simulator
+  //    runs in a Web Worker and only the serialized config crosses postMessage — the worker
+  //    resolves the id against its own import of src/strategies/exits.
+  //
+  //    Both fields optional and absent from defaults/presets: undefined IS the identity
+  //    state and there is no config-migration layer. Read them only through resolveExitHook.
+  exitHookId?: string;
+  // 'off'     — not consulted (default).
+  // 'gate'    — the built-in signal exits above run first; their verdict reaches the hook as
+  //             ctx.pendingExit and the hook has the final say, including vetoing it.
+  // 'replace' — the built-in signal exits are skipped; the hook alone decides.
+  //
+  // Either way the SL/TP touch check and the Pivot Trailing Stop keep running — those are
+  // price levels, not opinions. Fills at bar close (or a hook-named price inside the bar),
+  // exitReason EXIT_HOOK.
+  exitHookMode?: ExitHookMode;
 
   // ── Leg-pattern rule engine (utils/legPattern) ──────────────────────────────
   // An ORDERED, POSITIONAL shape over the recent leg sequence — "three bull legs of
@@ -344,6 +361,13 @@ export interface AutoBacktestConfig {
   // bar) are handed to a user hook as ctx.candles, so a hook never maintains its own history.
   // Clamped to [50, 5000] on read; see resolveHookLookback (default 1200).
   entryHookLookback?: number;
+
+  // Custom exit hook rolling window — how many candles (ending at and including the current
+  // bar) are handed to a user exit hook as ctx.candles. Smaller default than the entry
+  // hook's: this context is rebuilt on every bar of every OPEN TRADE rather than on signal
+  // bars only, and trade management reads recent action far more than deep history.
+  // Clamped to [50, 5000] on read; see resolveExitHookLookback (default 400).
+  exitHookLookback?: number;
 
   // Per-regime rule sets
   uptrend: RegimeRules;   // Bull-Trend, Bull-Trending-range
@@ -1633,32 +1657,23 @@ export function getAtrAt(candles: Candle[], index: number): number {
 // identical by construction. Canonical per-bar order:
 //   1. evaluateTrailStop        (before the SL/TP touch check)
 //   2. SL/TP touch check        (existing machinery, possibly-trailed SL)
-//   3. evaluateAutoExitSignal   (REVERSAL → OPP_SIGNAL → LEG_DECAY, fill at close)
+//   3. evaluateAutoExitSignal   (REVERSAL → OPP_SIGNAL → EXIT_HOOK, fill at close)
 //   4. auto square-off
 //   5. entry check
 
-export type AutoExitReason = 'REVERSAL' | 'OPP_SIGNAL' | 'LEG_DECAY';
+export type AutoExitReason = 'REVERSAL' | 'OPP_SIGNAL' | 'EXIT_HOOK';
 
 export interface AutoExitPositionInfo {
   quantity: number;               // signed — sign gives direction
+  averagePrice?: number;          // needed by a custom exit hook (open P&L, breakeven stops)
   stopLoss?: number;
+  target?: number;
   entryBarIndex?: number;
   entryRegime?: RegimeKey;        // rules come from config[entryRegime]; fallback: current ltMarket's regime
   exitWithTrendSeen?: boolean;
   exitAgainstBars?: number;
-}
-
-// Generic min/max gate for the leg-decay checks — same shape as the entry
-// predicates but keyed by explicit filter/threshold instead of RegimeRules fields.
-export function passesMinMax(
-  filter: 'none' | 'min' | 'max' | undefined,
-  threshold: number,
-  value: number | undefined
-): boolean {
-  const mode = filter ?? 'none';
-  if (mode === 'none' || value === undefined) return true;
-  if (mode === 'min') return value >= threshold;
-  return value <= threshold;
+  slTrailed?: boolean;
+  id?: string;                    // multi-trade mode — lets a hook key ctx.state per trade
 }
 
 /** Supplies the leg-pattern feature window for the current bar, built at most once per
@@ -1748,31 +1763,78 @@ export function evaluateTrailStop(
   return { newStopLoss: candidate };
 }
 
-// Phase 2 — signal exits, evaluated on bar close (fill = candles[currentIndex].close).
-// Fixed precedence: REVERSAL → OPP_SIGNAL → LEG_DECAY. Always returns the updated
-// per-bar reversal state — callers must persist it onto the position even when
-// exit is null, or the confirm-bars counter resets every bar.
+// ─── Custom exit hook — resolution ────────────────────────────────────────────
+
+/** What a regime's exit-hook settings resolve to. */
+export interface ResolvedExitHook {
+  mode: 'gate' | 'replace';
+  id: string;
+  /** null when the configured id is not in the registry — the regime then runs NO signal
+   *  exits at all, rather than silently falling back to the built-in ones. A mechanism the
+   *  user switched on must never be skipped without saying so (same reasoning as
+   *  resolveEntryHook and passesLegPattern). */
+  hook: ExitHook | null;
+}
+
+export function resolveExitHook(rules: RegimeRules): ResolvedExitHook | null {
+  const mode = rules.exitHookMode ?? 'off';
+  if (mode !== 'gate' && mode !== 'replace') return null;
+  const id = rules.exitHookId ?? '';
+  if (!id) return null; // a mode with no hook chosen is still the identity state
+  return { mode, id, hook: getExitHook(id) ?? null };
+}
+
+/** True when this regime consults an exit hook at all. */
+export function exitHookActive(rules: RegimeRules): boolean {
+  return resolveExitHook(rules) !== null;
+}
+
+/** What evaluateAutoExitSignal hands back. `adjust` is independent of `exit`: a hook may
+ *  move the stop on a bar it holds, and the callers must apply it either way. */
+export interface AutoExitDecision {
+  exit: { reason: AutoExitReason; detail: string; fillPrice?: number } | null;
+  /** Stop/target moves requested by a custom exit hook, already validated. Null when there
+   *  are none. Takes effect from the NEXT bar — this runs after the touch check. */
+  adjust: { stopLoss?: number; target?: number } | null;
+  state: { exitWithTrendSeen: boolean; exitAgainstBars: number };
+}
+
+// Phase 2 — signal exits, evaluated on bar close (fill = candles[currentIndex].close, or a
+// price inside the bar a hook named). Fixed precedence: REVERSAL → OPP_SIGNAL → EXIT_HOOK,
+// with the hook able to veto the first two in 'gate' mode and replacing them outright in
+// 'replace' mode. Always returns the updated per-bar reversal state — callers must persist
+// it onto the position even when exit is null, or the confirm-bars counter resets every bar.
 export function evaluateAutoExitSignal(
   candles: Candle[],
   currentIndex: number,
   position: AutoExitPositionInfo,
-  config: AutoBacktestConfig
-): {
-  exit: { reason: AutoExitReason; detail: string } | null;
-  state: { exitWithTrendSeen: boolean; exitAgainstBars: number };
-} {
+  config: AutoBacktestConfig,
+  // Per-RUN exit-hook state — the scratch object hooks keep across bars and across open
+  // trades, plus trapped-error bookkeeping. Owned by the caller because this function is
+  // per-bar and stateless. Omitted, each call gets a fresh one: hooks still work, but
+  // ctx.state no longer carries between bars.
+  exitRunState?: ExitHookRunState
+): AutoExitDecision {
   const state = {
     exitWithTrendSeen: position.exitWithTrendSeen ?? false,
     exitAgainstBars: position.exitAgainstBars ?? 0,
   };
-  if (currentIndex < 50 || position.quantity === 0) return { exit: null, state };
+  const hold: AutoExitDecision = { exit: null, adjust: null, state };
+  if (currentIndex < 50 || position.quantity === 0) return hold;
 
   const rules = resolveExitRules(candles, currentIndex, position.entryRegime, config);
-  if (!rules.exitOnReversal && !rules.exitOnOppSignal && !rules.exitLegDecay) return { exit: null, state };
+  const resolvedHook = resolveExitHook(rules);
+  if (!rules.exitOnReversal && !rules.exitOnOppSignal && !resolvedHook) return hold;
   const isLong = position.quantity > 0;
 
+  // In 'replace' mode the built-in signal exits are skipped entirely — the hook IS the exit
+  // strategy. The reversal state machine then stops advancing too, which is correct: nothing
+  // consumes it, and a counter nobody reads is just a stale number on the position.
+  const runBuiltIns = resolvedHook?.mode !== 'replace';
+  let pending: PendingExit | null = null;
+
   // 1. REVERSAL — LT structure against the position for N consecutive checks
-  if (rules.exitOnReversal) {
+  if (runBuiltIns && rules.exitOnReversal) {
     const pivots = getPivotPointsUpTo(candles, currentIndex);
     const { ltMarket } = analyzeMarketStructureAt(candles, currentIndex, pivots);
     const isAgainst = isLong ? ltMarket.startsWith('Bear') : ltMarket.startsWith('Bull');
@@ -1781,12 +1843,12 @@ export function evaluateAutoExitSignal(
     state.exitAgainstBars = isAgainst ? state.exitAgainstBars + 1 : 0;
     const armed = state.exitWithTrendSeen || !(rules.exitReversalRequireWithTrend ?? true);
     if (armed && state.exitAgainstBars >= (rules.exitReversalConfirmBars ?? 1)) {
-      return { exit: { reason: 'REVERSAL', detail: `LT:${ltMarket} against for ${state.exitAgainstBars} bar(s)` }, state };
+      pending = { reason: 'REVERSAL', detail: `LT:${ltMarket} against for ${state.exitAgainstBars} bar(s)` };
     }
   }
 
   // 2. OPP_SIGNAL — opposite Brooks pullback signal on the current bar
-  if (rules.exitOnOppSignal) {
+  if (runBuiltIns && !pending && rules.exitOnOppSignal) {
     const marker = getAlBrooksMarkersUpTo(candles, currentIndex).find(m => m.time === candles[currentIndex].timestamp) ?? null;
     if (marker) {
       const opp1 = isLong ? 'L1' : 'H1';
@@ -1795,45 +1857,119 @@ export function evaluateAutoExitSignal(
         (marker.signal === opp1 && (rules.exitOppAllow1 ?? false)) ||
         (marker.signal === opp2 && (rules.exitOppAllow2 ?? true));
       if (fired) {
-        return { exit: { reason: 'OPP_SIGNAL', detail: `${marker.signal} against ${isLong ? 'long' : 'short'}` }, state };
+        pending = { reason: 'OPP_SIGNAL', detail: `${marker.signal} against ${isLong ? 'long' : 'short'}` };
       }
     }
   }
 
-  // 3. LEG_DECAY — re-grade the newest completed with-trend leg formed after entry
-  if (rules.exitLegDecay && position.entryBarIndex !== undefined
-    && currentIndex - position.entryBarIndex >= (rules.exitLegDecayMinBarsInTrade ?? 3)) {
+  // 3. EXIT_HOOK — the user's own trade management gets the last word.
+  if (resolvedHook) {
+    // A mode set against an unregistered id: no exit at all, deliberately. Falling back to
+    // the built-ins would make a broken config look like a working one.
+    if (!resolvedHook.hook) return { exit: null, adjust: null, state };
+
+    const normalized = runExitHookAt(
+      candles, currentIndex, config, rules, position,
+      resolvedHook.mode === 'gate' ? pending : null,
+      resolvedHook.hook,
+      exitRunState ?? createExitHookRunState()
+    );
+
+    if (normalized.exit) {
+      return {
+        exit: { reason: 'EXIT_HOOK', detail: normalized.exit.detail, fillPrice: normalized.exit.fillPrice },
+        adjust: normalized.adjust,
+        state,
+      };
+    }
+    // An explicit `{ exit: false }` vetoes whatever the built-ins decided. A silent `false`
+    // is "no opinion" and lets the pending exit stand — that distinction is the whole point
+    // of gate mode.
+    if (normalized.veto) return { exit: null, adjust: normalized.adjust, state };
+    if (pending) return { exit: { ...pending }, adjust: normalized.adjust, state };
+    return { exit: null, adjust: normalized.adjust, state };
+  }
+
+  return { exit: pending ? { ...pending } : null, adjust: null, state };
+}
+
+/**
+ * Builds the hook's context and runs it. Split out of evaluateAutoExitSignal purely to keep
+ * that function readable — everything here is the lazy `env` thunk the context defers to,
+ * which is why none of these cached lookups happen on a bar whose hook never touches a
+ * market field.
+ */
+function runExitHookAt(
+  candles: Candle[],
+  currentIndex: number,
+  config: AutoBacktestConfig,
+  rules: RegimeRules,
+  position: AutoExitPositionInfo,
+  pendingExit: PendingExit | null,
+  hook: ExitHook,
+  runState: ExitHookRunState
+): NormalizedExit {
+  const isLong = position.quantity > 0;
+  const logs: string[] = [];
+
+  const env = (): ExitHookEnv => {
+    const pivots = getPivotPointsUpTo(candles, currentIndex);
+    const { ltMarket, htMarket } = analyzeMarketStructureAt(candles, currentIndex, pivots);
+    // The newest COMPLETED leg on the POSITION's side — the same window the old built-in
+    // leg-decay check graded, which is what lets the ported 'leg-decay' hook behave
+    // identically to the mechanism it replaced.
     const legs = getAlBrooksLegsAt(candles, currentIndex);
     const leg = isLong ? legs.bull : legs.bear;
-    // Only grade legs whose extreme formed after entry — never re-judge the
-    // entry leg the confirmation filters already approved.
-    if (leg && leg.endIndex > position.entryBarIndex) {
-      const metrics = computeEntryMetrics(candles, currentIndex, config, leg);
-      if (!metrics.legTooShort) {
-        const fails: string[] = [];
-        if (!passesMinMax(rules.exitDecayEfficiencyFilter, rules.exitDecayEfficiencyThreshold ?? 0.25,
-          metrics.efficiencyRatio)) fails.push('ER');
-        if (!passesMinMax(rules.exitDecayConsecBreakFilter, rules.exitDecayConsecBreakThreshold ?? 3,
-          isLong ? metrics.maxConsecutiveHighBreaks : metrics.maxConsecutiveLowBreaks)) fails.push('consecBreak');
-        if (!passesMinMax(rules.exitDecayBarBreakFilter, rules.exitDecayBarBreakThreshold ?? 4,
-          isLong ? metrics.highBreakCount : metrics.lowBreakCount)) fails.push('barBreak');
-        if (!passesMinMax(rules.exitDecayEma21SlopeFilter, rules.exitDecayEma21SlopeThreshold ?? 0,
-          aligned(metrics.ema21Slope, isLong))) fails.push('ema21Slope');
-        if (!passesMinMax(rules.exitDecayGapBarFilter, rules.exitDecayGapBarThreshold ?? 0.3,
-          metrics.ema20GapBarRatio)) fails.push('gapBar');
-        if (fails.length >= (rules.exitLegDecayMinFails ?? 1)) {
-          return { exit: { reason: 'LEG_DECAY', detail: `leg[${leg.startIndex}-${leg.endIndex}] failed: ${fails.join(', ')}` }, state };
-        }
-      }
-    }
-  }
+    const legWindow: LegWindow | null = leg
+      ? { startIndex: leg.startIndex, endIndex: leg.endIndex }
+      : null;
+    return {
+      ltMarket,
+      htMarket,
+      pivotSeq: getPivotSeq(pivots),
+      pivots,
+      ema21: getEmaAt(candles, currentIndex, 21),
+      ema60: getEmaAt(candles, currentIndex, 60),
+      atr: getAtrAt(candles, currentIndex),
+      legWindow,
+      metrics: computeEntryMetrics(candles, currentIndex, config, legWindow),
+    };
+  };
 
-  return { exit: null, state };
+  const positionInput: ExitHookPositionInput = {
+    id: position.id,
+    quantity: position.quantity,
+    // A position restored from an old session may predate averagePrice being threaded here.
+    // 0 would make every open-P&L number nonsense, so fall back to the bar's close: open
+    // profit then reads as flat, which is the honest answer when entry is unknown.
+    averagePrice: position.averagePrice ?? candles[currentIndex].close,
+    stopLoss: position.stopLoss,
+    target: position.target,
+    entryBarIndex: position.entryBarIndex,
+    slTrailed: position.slTrailed,
+  };
+
+  const ctx = buildExitHookContext({
+    candles,
+    currentIndex,
+    config,
+    rules,
+    // The regime that OPENED the trade manages it for its whole life; resolveExitRules
+    // already applied the same fallback to pick `rules`, so this only re-derives the label.
+    regime: position.entryRegime ?? getRegimeKey(env().ltMarket),
+    position: positionInput,
+    pendingExit,
+    env,
+    state: runState.state,
+    logs,
+  });
+
+  return runExitHook({ hook, ctx, logs, runState });
 }
 
 // Count of exit mechanisms switched on for a regime — UI badge helper.
 export function countActiveExitMechanisms(rules: RegimeRules): number {
-  return [rules.exitOnReversal, rules.exitOnOppSignal, rules.exitTrailPivot, rules.exitLegDecay]
+  return [rules.exitOnReversal, rules.exitOnOppSignal, rules.exitTrailPivot, exitHookActive(rules)]
     .filter(Boolean).length;
 }
 

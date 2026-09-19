@@ -5,10 +5,11 @@ import {
   type AutoBacktestConfig, type AutoSignal, type RegimeKey,
   MULTI_TRADE_DEFAULT_CAP, isMultiTradeMode,
   evaluateAutoSignals, evaluateTrailStop, evaluateAutoExitSignal,
-  resolveTradeQuantity, resolveEntryHook, defaultAutoBacktestConfig,
+  resolveTradeQuantity, resolveEntryHook, resolveExitHook, defaultAutoBacktestConfig,
 } from '../utils/autoBacktestEngine';
 import { runBatchSimulation, type BatchSimResult } from '../utils/batchBacktestSimulator';
 import { createHookRunState, type HookRunState } from '../utils/entryHook';
+import { createExitHookRunState, type ExitHookRunState } from '../utils/exitHook';
 import type { Candle } from '../types';
 import { useNotificationStore } from './notificationStore';
 import type { ExitReason, OpenPosition, Trade, TradeJournal } from '../types';
@@ -60,6 +61,19 @@ function hookStateFor(candles: Candle[]): HookRunState {
   return s;
 }
 
+// The same arrangement for the custom EXIT hook. A separate map, not a second field on the
+// entry state: the two hooks are independent, either can be configured without the other,
+// and merging their scratch objects would let one hook's keys collide with the other's.
+const _exitHookStates = new WeakMap<Candle[], ExitHookRunState>();
+function exitHookStateFor(candles: Candle[]): ExitHookRunState {
+  let s = _exitHookStates.get(candles);
+  if (!s) {
+    s = createExitHookRunState();
+    _exitHookStates.set(candles, s);
+  }
+  return s;
+}
+
 // Reports on EVERY run that had a hook configured, not just failing ones.
 //
 // The reason is diagnostic, not cosmetic. Three very different situations used to look
@@ -88,6 +102,29 @@ function reportHookDiagnostics(result: BatchSimResult, onMainThread: boolean): v
 }
 
 /**
+ * The same report for the custom EXIT hook. Separate function rather than a parameterised
+ * one, because the zero-call advice differs in kind: an entry hook that was never called was
+ * blocked by a filter ahead of it, while an exit hook that was never called usually means no
+ * trade was ever OPEN under that regime — a problem on the entry side, not this one.
+ */
+function reportExitHookDiagnostics(result: BatchSimResult, onMainThread: boolean): void {
+  const d = result.exitHookDiagnostics;
+  if (!d) return; // no exit hook configured — nothing to say
+
+  const parts = [`${onMainThread ? 'main thread' : 'worker'}`, `called ${d.callCount}×`];
+  if (d.errorCount > 0) parts.push(`${d.errorCount} error${d.errorCount === 1 ? '' : 's'} — ${d.error}`);
+  if (d.rejectedCount > 0) parts.push(`${d.rejectedCount} rejected — ${d.rejectReason}`);
+  if (d.callCount === 0) {
+    parts.push('never reached — it only runs while a trade is open, so check the entry side took any trades at all in this regime');
+  }
+
+  const msg = `Exit hook: ${parts.join(' · ')}`;
+  const tone = d.errorCount > 0 ? 'error' : (d.callCount === 0 || d.rejectedCount > 0) ? 'warning' : 'info';
+  if (tone === 'info') console.info(msg, d); else console.warn(msg, d);
+  useNotificationStore.getState().notify(msg, tone);
+}
+
+/**
  * Warns when a regime has a hook MODE set but no usable hook behind it.
  *
  * `resolveEntryHook` returns null for an empty id, and the engine then runs the built-in
@@ -108,6 +145,18 @@ function warnUnusableHookConfig(config: AutoBacktestConfig): void {
   if (unusable.length > 0) {
     const msg = `Entry hook: mode is set on ${unusable.join(', ')} but no hook is selected — `
       + 'ran the built-in filters instead, so results are unchanged. Pick a hook in the Entry step.';
+    console.warn(msg);
+    notify(msg, 'warning');
+  }
+
+  // (a2) The exit side's version of the same identity trap.
+  const unusableExit = keys.filter(k => {
+    const r = config[k];
+    return r.enabled && (r.exitHookMode ?? 'off') !== 'off' && resolveExitHook(r) === null;
+  });
+  if (unusableExit.length > 0) {
+    const msg = `Exit hook: mode is set on ${unusableExit.join(', ')} but no hook is selected — `
+      + 'ran the built-in exits instead, so results are unchanged. Pick a hook in the Exit step.';
     console.warn(msg);
     notify(msg, 'warning');
   }
@@ -370,22 +419,39 @@ export function createAutoBacktestActions(set: StoreSet, get: StoreGet) {
         }
         if (slTpOnly) continue;
 
-        // ── 3. Price-action exit signals (REVERSAL → OPP_SIGNAL → LEG_DECAY) ────
-        const { exit, state: exitState } = evaluateAutoExitSignal(state.candles, index, current, config);
+        // ── 3. Price-action exit signals (REVERSAL → OPP_SIGNAL → EXIT_HOOK) ────
+        const { exit, adjust, state: exitState } = evaluateAutoExitSignal(
+          state.candles, index, current, config, exitHookStateFor(state.candles)
+        );
         // Persist the per-bar reversal state even when no exit fires, or the
-        // confirm-bars counter resets every bar.
-        if (exitState.exitWithTrendSeen !== (current.exitWithTrendSeen ?? false)
+        // confirm-bars counter resets every bar. A custom exit hook's stop/target move rides
+        // along in the same write — it takes effect from the NEXT bar's touch check, which
+        // is correct: the hook decided on this bar's close.
+        const slMoved = adjust?.stopLoss !== undefined;
+        const tpMoved = adjust?.target !== undefined;
+        if (slMoved || tpMoved
+          || exitState.exitWithTrendSeen !== (current.exitWithTrendSeen ?? false)
           || exitState.exitAgainstBars !== (current.exitAgainstBars ?? 0)) {
-          current = { ...current, ...exitState };
+          current = {
+            ...current,
+            ...exitState,
+            ...(slMoved ? { stopLoss: adjust!.stopLoss, slTrailed: true } : {}),
+            ...(tpMoved ? { target: adjust!.target } : {}),
+          };
           syncNetPositionMirror({
             openPositions: get().openPositions.map(p => (p.id === id ? current : p)),
           });
+          if (slMoved) {
+            useNotificationStore.getState().notify(
+              `Exit hook moved SL → ${adjust!.stopLoss!.toFixed(2)}`, 'info'
+            );
+          }
         }
         if (exit) {
           const label = exit.reason === 'REVERSAL' ? 'Reversal Exit'
-            : exit.reason === 'OPP_SIGNAL' ? 'Opposite-Signal Exit' : 'Leg-Decay Exit';
+            : exit.reason === 'OPP_SIGNAL' ? 'Opposite-Signal Exit' : 'Exit Hook';
           useNotificationStore.getState().notify(`${label}: ${exit.detail}`, 'warning');
-          get().closeIndependentPosition(id, exit.reason, close);
+          get().closeIndependentPosition(id, exit.reason, exit.fillPrice ?? close);
           continue;
         }
 
@@ -508,7 +574,7 @@ export function createAutoBacktestActions(set: StoreSet, get: StoreGet) {
     },
 
     // Phase 2 of the auto exit engine — price-action exit signals evaluated on
-    // bar close (REVERSAL → OPP_SIGNAL → LEG_DECAY). Runs AFTER checkSLTPHits,
+    // bar close (REVERSAL → OPP_SIGNAL → EXIT_HOOK). Runs AFTER checkSLTPHits,
     // before runAutoSquareOff. Exits immediately, no dialog (same precedent as
     // the autoExitSL path in checkSLTPHits). Auto-entered backtest positions only.
     runAutoExitCheck: (index: number) => {
@@ -520,28 +586,50 @@ export function createAutoBacktestActions(set: StoreSet, get: StoreGet) {
       const position = state.position;
       if (!position || position.quantity === 0 || !position.autoEntry) return;
 
-      const { exit, state: exitState } = evaluateAutoExitSignal(
-        state.candles, index, position, state.autoBacktestConfig
+      const { exit, adjust, state: exitState } = evaluateAutoExitSignal(
+        state.candles, index, position, state.autoBacktestConfig,
+        exitHookStateFor(state.candles)
       );
 
       // Persist the per-bar reversal state even when no exit fires — otherwise
-      // the confirm-bars counter would reset every bar.
-      if (exitState.exitWithTrendSeen !== (position.exitWithTrendSeen ?? false)
+      // the confirm-bars counter would reset every bar. A custom exit hook's stop/target
+      // move goes in the same write; it first bites on the NEXT bar's touch check, since
+      // this phase runs after checkSLTPHits.
+      const slMoved = adjust?.stopLoss !== undefined;
+      const tpMoved = adjust?.target !== undefined;
+      if (slMoved || tpMoved
+        || exitState.exitWithTrendSeen !== (position.exitWithTrendSeen ?? false)
         || exitState.exitAgainstBars !== (position.exitAgainstBars ?? 0)) {
-        set({ position: { ...position, ...exitState } });
+        set({
+          position: {
+            ...position,
+            ...exitState,
+            // Re-arm the triggers whenever a level moves — same convention as
+            // runAutoTrailStop and updatePositionTarget.
+            ...(slMoved ? { stopLoss: adjust!.stopLoss, slTrailed: true, slHit: undefined, slDialogShown: undefined } : {}),
+            ...(tpMoved ? { target: adjust!.target, tpHit: undefined, tpDialogShown: undefined } : {}),
+          },
+        });
+        if (slMoved) {
+          useNotificationStore.getState().notify(
+            `Exit hook moved SL → ${adjust!.stopLoss!.toFixed(2)}`, 'info'
+          );
+        }
       }
       if (!exit) return;
 
       const isLong = position.quantity > 0;
       const label = exit.reason === 'REVERSAL' ? 'Reversal Exit'
-        : exit.reason === 'OPP_SIGNAL' ? 'Opposite-Signal Exit' : 'Leg-Decay Exit';
+        : exit.reason === 'OPP_SIGNAL' ? 'Opposite-Signal Exit' : 'Exit Hook';
       useNotificationStore.getState().notify(`${label}: ${exit.detail}`, 'warning');
       get().executeTrade(
         isLong ? 'SELL' : 'BUY',
         Math.abs(position.quantity),
         undefined,
         undefined,
-        undefined,        // fill at current candle close
+        // Undefined fills at the current candle's close; a custom exit hook may name a
+        // price inside the bar instead (runExitHook refuses one outside its high/low).
+        exit.fillPrice,
         exit.reason
       );
     },
@@ -574,8 +662,10 @@ export function createAutoBacktestActions(set: StoreSet, get: StoreGet) {
           batchBacktestProgress: 100,
           lastAutoSignalReason: `Batch complete: ${result.tradeCount} trades, P&L ₹${result.totalPnL.toFixed(2)}`,
           lastHookDiagnostics: result.hookDiagnostics ?? null,
+          lastExitHookDiagnostics: result.exitHookDiagnostics ?? null,
         });
         reportHookDiagnostics(result, mainThread);
+        reportExitHookDiagnostics(result, mainThread);
       };
 
       // ── Main-thread mode ─────────────────────────────────────────────────────

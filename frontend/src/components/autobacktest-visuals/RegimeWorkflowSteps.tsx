@@ -2,6 +2,7 @@ import type { ReactNode } from 'react';
 import { TrendingUp, TrendingDown, Minus, RefreshCw, Settings2 } from 'lucide-react';
 import { type RegimeRules, type AutoBacktestConfig, generateBinaryPatterns } from '../../utils/autoBacktestEngine';
 import { ENTRY_HOOK_OPTIONS } from '../../strategies';
+import { EXIT_HOOK_OPTIONS } from '../../strategies/exits';
 import { HookDebugToggle } from './HookDebugToggle';
 import type { FilterPreviewBar, PreviewFilterKey } from '../../hooks/useFilterPreviewData';
 import { CardShell } from './CardShell';
@@ -780,116 +781,7 @@ export function ExitStep({ rules, up, meta, isShort, config, onOpenSessionSettin
         </div>
       </CardShell>
 
-      <CardShell title="Leg Decay Exit">
-        <div className="flex items-center justify-between gap-2 flex-wrap mb-2">
-          <label className="flex items-center gap-2 cursor-pointer select-none"
-            title="Re-grades the newest completed with-trend leg each bar with the same metrics as the Confirmation filters (only legs formed after entry; windows respect Leg Min/Max Bars in Session Settings). Exits at bar close when enough checks fail, exit reason LEG_DECAY.">
-            <ToggleSwitch checked={rules.exitLegDecay ?? false} onChange={v => up({ exitLegDecay: v })} activeColor={meta.activeBg} />
-            <span className={`text-xs font-semibold ${rules.exitLegDecay ? meta.color : 'text-gray-400'}`}>
-              {rules.exitLegDecay ? 'On' : 'Off'}
-            </span>
-          </label>
-          <div className="flex items-center gap-1" title="No decay exit before this many bars in the trade.">
-            <span className="text-[10px] text-gray-500">Min bars in trade:</span>
-            <input
-              type="number" min={0} max={50} value={rules.exitLegDecayMinBarsInTrade ?? 3}
-              onChange={e => up({ exitLegDecayMinBarsInTrade: Number(e.target.value) })}
-              className="w-10 px-1 py-0.5 text-[10px] border rounded text-center"
-            />
-          </div>
-          <div className="flex items-center gap-1" title="Exit when at least this many of the enabled checks below fail on the same bar.">
-            <span className="text-[10px] text-gray-500">Min fails:</span>
-            <input
-              type="number" min={1} max={5} value={rules.exitLegDecayMinFails ?? 1}
-              onChange={e => up({ exitLegDecayMinFails: Number(e.target.value) })}
-              className="w-10 px-1 py-0.5 text-[10px] border rounded text-center"
-            />
-          </div>
-        </div>
-        <div className="grid grid-cols-1 @3xl:grid-cols-2 @6xl:grid-cols-3 gap-2">
-          <ThresholdFilterControl
-            label="Efficiency Ratio"
-            tooltip="Kaufman ER of the current with-trend leg. 'Hold ≥' fails the check when the leg's efficiency drops below the threshold (trend losing directness)."
-            mode={rules.exitDecayEfficiencyFilter ?? 'none'}
-            offValue="none"
-            modeOptions={[
-              { value: 'none', label: 'Off' },
-              { value: 'min', label: 'Hold ≥' },
-              { value: 'max', label: 'Stay ≤' },
-            ]}
-            onModeChange={v => up({ exitDecayEfficiencyFilter: v as RegimeRules['exitDecayEfficiencyFilter'] })}
-            threshold={rules.exitDecayEfficiencyThreshold ?? 0.25}
-            onThresholdChange={v => up({ exitDecayEfficiencyThreshold: v })}
-            diagram={null}
-            min={0} max={1} step={0.05}
-          />
-          <ThresholdFilterControl
-            label="Consecutive Breaks"
-            tooltip="Longest run of aligned prior-bar breaks in the current leg (micro-channel strength). 'Hold ≥' fails when the newest leg can no longer sustain a run of that length."
-            mode={rules.exitDecayConsecBreakFilter ?? 'none'}
-            offValue="none"
-            modeOptions={[
-              { value: 'none', label: 'Off' },
-              { value: 'min', label: 'Hold ≥' },
-              { value: 'max', label: 'Stay ≤' },
-            ]}
-            onModeChange={v => up({ exitDecayConsecBreakFilter: v as RegimeRules['exitDecayConsecBreakFilter'] })}
-            threshold={rules.exitDecayConsecBreakThreshold ?? 3}
-            onThresholdChange={v => up({ exitDecayConsecBreakThreshold: v })}
-            diagram={null}
-            min={1} max={10} step={1}
-          />
-          <ThresholdFilterControl
-            label="Break Count"
-            tooltip="Total aligned prior-bar breaks in the current leg window (momentum persistence). 'Hold ≥' fails when momentum dries up."
-            mode={rules.exitDecayBarBreakFilter ?? 'none'}
-            offValue="none"
-            modeOptions={[
-              { value: 'none', label: 'Off' },
-              { value: 'min', label: 'Hold ≥' },
-              { value: 'max', label: 'Stay ≤' },
-            ]}
-            onModeChange={v => up({ exitDecayBarBreakFilter: v as RegimeRules['exitDecayBarBreakFilter'] })}
-            threshold={rules.exitDecayBarBreakThreshold ?? 4}
-            onThresholdChange={v => up({ exitDecayBarBreakThreshold: v })}
-            diagram={null}
-            min={0} max={20} step={1}
-          />
-          <ThresholdFilterControl
-            label="EMA21 Slope"
-            tooltip="Direction-aligned EMA21 slope (flips automatically for shorts). 'Hold ≥' fails when the slope turns against the trade."
-            mode={rules.exitDecayEma21SlopeFilter ?? 'none'}
-            offValue="none"
-            modeOptions={[
-              { value: 'none', label: 'Off' },
-              { value: 'min', label: 'Hold ≥' },
-              { value: 'max', label: 'Stay ≤' },
-            ]}
-            onModeChange={v => up({ exitDecayEma21SlopeFilter: v as RegimeRules['exitDecayEma21SlopeFilter'] })}
-            threshold={rules.exitDecayEma21SlopeThreshold ?? 0}
-            onThresholdChange={v => up({ exitDecayEma21SlopeThreshold: v })}
-            diagram={null}
-            min={-2} max={2} step={0.05}
-            formatValue={v => v.toFixed(2)}
-          />
-          <ThresholdFilterControl
-            label="EMA20 Gap-Bar"
-            tooltip="Fraction of leg bars not touching the EMA20 (Brooks gap bars — strong trend). 'Hold ≥' fails when price starts hugging the average again."
-            mode={rules.exitDecayGapBarFilter ?? 'none'}
-            offValue="none"
-            modeOptions={[
-              { value: 'none', label: 'Off' },
-              { value: 'min', label: 'Hold ≥' },
-              { value: 'max', label: 'Stay ≤' },
-            ]}
-            onModeChange={v => up({ exitDecayGapBarFilter: v as RegimeRules['exitDecayGapBarFilter'] })}
-            threshold={rules.exitDecayGapBarThreshold ?? 0.3}
-            onThresholdChange={v => up({ exitDecayGapBarThreshold: v })}
-            diagram={null}
-            min={0} max={1} step={0.05}
-          />
-        </div>
-      </CardShell>
+      <CustomExitHookCard rules={rules} up={up} />
 
       <CardShell muted>
         <div className="flex items-center justify-between gap-2">
@@ -907,6 +799,99 @@ export function ExitStep({ rules, up, meta, isShort, config, onOpenSessionSettin
         </div>
       </CardShell>
     </div>
+  );
+}
+
+// ─── Custom Exit Hook ───────────────────────────────────────────────────────
+// The exit half of the strategy builder — picks a user-authored trade-management algorithm
+// from src/strategies/exits and says how it participates. Mirrors CustomEntryHookCard above,
+// and sits last in the Exit step for the same reason that one sits last in Entry: it is a
+// variant of "what closes a trade", not a separate stage.
+//
+// This card replaced the Leg Decay Exit, whose five hard-coded checks now ship as the
+// 'leg-decay' hook — same behaviour, editable in TypeScript instead of five dropdowns.
+
+function CustomExitHookCard({ rules, up }: Pick<RegimeStepProps, 'rules' | 'up'>) {
+  const mode = rules.exitHookMode ?? 'off';
+  const hookId = rules.exitHookId ?? '';
+  const known = hookId === '' || EXIT_HOOK_OPTIONS.some(o => o.id === hookId);
+  const selected = EXIT_HOOK_OPTIONS.find(o => o.id === hookId);
+  const builtInsOn = (rules.exitOnReversal ?? false) || (rules.exitOnOppSignal ?? false);
+
+  return (
+    <CardShell title="Custom Exit Hook">
+      <SegmentedControl
+        value={mode}
+        onChange={m => up({ exitHookMode: m })}
+        options={[
+          { value: 'off' as const, label: 'Off' },
+          { value: 'gate' as const, label: 'Gate' },
+          { value: 'replace' as const, label: 'Replace' },
+        ]}
+        className="mb-2"
+      />
+
+      {mode !== 'off' && (
+        <>
+          <select
+            value={hookId}
+            onChange={e => up({ exitHookId: e.target.value || undefined })}
+            className="w-full px-2 py-1 text-xs border rounded-lg"
+          >
+            <option value="">— no hook selected —</option>
+            {EXIT_HOOK_OPTIONS.map(o => (
+              <option key={o.id} value={o.id}>{o.label}</option>
+            ))}
+          </select>
+
+          {selected?.description && (
+            <p className="mt-1.5 text-[10px] text-gray-500 leading-snug">{selected.description}</p>
+          )}
+
+          {/* A configured-but-unresolvable hook runs NO signal exits rather than quietly
+              falling back to the built-in ones, so this has to be loud. */}
+          {!known && (
+            <p className="mt-1.5 text-[10px] text-red-600 leading-snug">
+              No hook registered under <span className="font-mono">{hookId}</span>. This regime
+              will run no signal exits at all until you pick one or register it in
+              src/strategies/exits.
+            </p>
+          )}
+
+          {hookId === '' && (
+            <p className="mt-1.5 text-[10px] text-amber-600 leading-snug">
+              No hook selected — this setting has no effect until you pick one.
+            </p>
+          )}
+
+          {/* Gate mode is meaningless without something to gate: with both built-in signal
+              exits off there is never a pendingExit, so 'gate' and 'replace' behave
+              identically and a veto-only hook does literally nothing. */}
+          {mode === 'gate' && !builtInsOn && (
+            <p className="mt-1.5 text-[10px] text-amber-600 leading-snug">
+              Reversal and Opposite Signal are both off, so there is nothing for Gate mode to
+              gate — your hook will never see a <span className="font-mono">pendingExit</span>.
+              Turn one on, or switch to <strong>Replace</strong>.
+            </p>
+          )}
+
+          <p className="mt-2 text-[10px] text-gray-500 leading-snug">
+            {mode === 'gate'
+              ? 'Reversal and Opposite Signal evaluate first; your hook sees their verdict as ctx.pendingExit and has the final say — it can let it stand, veto it, or exit on its own terms.'
+              : 'Reversal and Opposite Signal are skipped entirely. Your code alone decides when the trade closes.'}
+            {' '}Runs once per bar per open trade, <em>after</em> that bar&apos;s SL/TP check —
+            so a stop it moves first bites on the next bar. The SL/TP levels and the Pivot
+            Trailing Stop keep working either way.
+          </p>
+
+          {/* Same control as the panel footer and the entry card: a hook running on the
+              worker cannot be broken into from the main thread's devtools. */}
+          <div className="mt-2">
+            <HookDebugToggle />
+          </div>
+        </>
+      )}
+    </CardShell>
   );
 }
 

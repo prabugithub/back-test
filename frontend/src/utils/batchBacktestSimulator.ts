@@ -2,8 +2,9 @@
 
 import type { Candle, Trade, BacktestPosition, OpenPosition, ExitReason } from '../types';
 import type { TradeJournal } from '../types';
-import { type AutoBacktestConfig, type AutoSignal, type RegimeKey, MULTI_TRADE_DEFAULT_CAP, evaluateAutoSignals, evaluateTrailStop, evaluateAutoExitSignal, resolveTradeQuantity, resolveEntryHook } from './autoBacktestEngine';
+import { type AutoBacktestConfig, type AutoSignal, type RegimeKey, MULTI_TRADE_DEFAULT_CAP, evaluateAutoSignals, evaluateTrailStop, evaluateAutoExitSignal, resolveTradeQuantity, resolveEntryHook, resolveExitHook } from './autoBacktestEngine';
 import { createHookRunState } from './entryHook';
+import { createExitHookRunState } from './exitHook';
 import { buildNetPositionMirror } from './netPosition';
 import { calculateMAPosition, calculateBarQuality, averageBarQuality, averageBarQualityIQR, calculateEMASlope, calculateEMAInteraction } from './pivotAnalysis';
 import { buildLegSequence } from './legSequence';
@@ -53,6 +54,17 @@ export interface BatchSimResult {
     rejectedCount: number;
     rejectReason?: string; // first validation failure
   };
+  // Custom EXIT hook diagnostics, same shape and the same reasoning. Reported separately
+  // from the entry hook's because the two fail for different reasons: an entry hook at 0
+  // calls was blocked by a structure filter, an exit hook at 0 calls means no trade was ever
+  // open under a regime that had it on — usually the entry side taking nothing at all.
+  exitHookDiagnostics?: {
+    callCount: number;
+    errorCount: number;
+    error?: string;
+    rejectedCount: number;
+    rejectReason?: string;
+  };
 }
 
 function candleTimeMinutes(timestampSec: number): number {
@@ -88,6 +100,9 @@ export function runBatchSimulation(
   // One per RUN, threaded through every bar: this is what makes ctx.state persist across
   // bars so a hook can keep cooldowns and counters, and what collects trapped hook errors.
   const hookRunState = createHookRunState();
+  // Separate scratch/bookkeeping for the exit hook. Also one per RUN, and shared across every
+  // open trade — a hook keeping per-trade counters keys them by ctx.position.id.
+  const exitHookRunState = createExitHookRunState();
 
   function enterPosition(candle: Candle, signal: AutoSignal, qty: number, candleIndex: number) {
     // signal.entryPrice IS candle.close for every built-in path — the engine sets it from
@@ -316,10 +331,22 @@ export function runBatchSimulation(
     // Evaluated on bar close, after the SL/TP touch check, before square-off.
     // The reversal state must be persisted even when no exit fires, or the
     // confirm-bars counter would reset every bar.
-    const { exit, state } = evaluateAutoExitSignal(candles, i, pos, config);
+    const { exit, adjust, state } = evaluateAutoExitSignal(candles, i, pos, config, exitHookRunState);
     pos.exitWithTrendSeen = state.exitWithTrendSeen;
     pos.exitAgainstBars = state.exitAgainstBars;
-    if (exit) return { reason: exit.reason, fillPrice: candle.close };
+    // Stop/target moves from a custom exit hook, applied whether or not the trade closes.
+    // This runs AFTER the touch check above, so a moved level first bites on the next bar —
+    // see the timing note in utils/exitHook/types.ts.
+    if (adjust) {
+      if (adjust.stopLoss !== undefined) {
+        pos.stopLoss = adjust.stopLoss;
+        pos.slTrailed = true;
+      }
+      if (adjust.target !== undefined) pos.target = adjust.target;
+    }
+    // fillPrice is the bar close for the built-in reasons and may be a hook-named price
+    // inside the bar; runExitHook has already refused anything outside its high/low.
+    if (exit) return { reason: exit.reason, fillPrice: exit.fillPrice ?? candle.close };
 
     // ── 3. Auto square-off ──────────────────────────────────────────────────
     if (config.autoSquareOff && candleTimeMinutes(candle.timestamp) >= parseHHMM(config.squareOffTime)) {
@@ -398,6 +425,18 @@ export function runBatchSimulation(
           error: hookRunState.error,
           rejectedCount: hookRunState.rejectedCount,
           rejectReason: hookRunState.rejectReason,
+        }
+      : undefined,
+    // Same gate on the exit side: CONFIGURED, not "ran". An exit hook that was never called
+    // is exactly what "my entry side took no trades" looks like from here.
+    exitHookDiagnostics: (['uptrend', 'downtrend', 'range', 'reversal'] as RegimeKey[])
+      .some(k => config[k].enabled && resolveExitHook(config[k]) !== null)
+      ? {
+          callCount: exitHookRunState.callCount,
+          errorCount: exitHookRunState.errorCount,
+          error: exitHookRunState.error,
+          rejectedCount: exitHookRunState.rejectedCount,
+          rejectReason: exitHookRunState.rejectReason,
         }
       : undefined,
   };

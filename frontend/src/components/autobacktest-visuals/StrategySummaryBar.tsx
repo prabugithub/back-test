@@ -1,6 +1,7 @@
 import type { RegimeKey, RegimeRules } from '../../utils/autoBacktestEngine';
 import { Chip, type ChipTone } from './Chip';
 import { getEntryHookLabel } from '../../strategies';
+import { getExitHookLabel } from '../../strategies/exits';
 import type { WorkflowStep } from './RegimeWorkflowSteps';
 
 interface StrategySummaryBarProps {
@@ -90,6 +91,10 @@ export function StrategySummaryBar({ regime, rules, onJumpToStep }: StrategySumm
   // of them would be actively misleading — say they are bypassed instead.
   const bypassed = hookOn && hookMode === 'replace';
 
+  const exitHookMode = rules.exitHookMode ?? 'off';
+  const exitHookId = rules.exitHookId;
+  const exitHookOn = exitHookMode !== 'off' && !!exitHookId;
+
   return (
     <div className="flex flex-wrap items-center gap-1.5 px-3 py-1.5">
       <Chip tone={directionTone} onClick={jump('market')}>
@@ -119,6 +124,13 @@ export function StrategySummaryBar({ regime, rules, onJumpToStep }: StrategySumm
       <Chip tone="neutral" onClick={jump('exit')}>
         RR: {rules.targetRR}×
       </Chip>
+      {/* In 'replace' mode the built-in signal exits never run, so the chip says which
+          mode it is rather than implying they are stacked. */}
+      {exitHookOn && (
+        <Chip tone="purple" onClick={jump('exit')}>
+          Exit hook: {getExitHookLabel(exitHookId) ?? exitHookId} ({exitHookMode})
+        </Chip>
+      )}
     </div>
   );
 }

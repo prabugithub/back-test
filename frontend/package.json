@@ -14,6 +14,7 @@
     "backtest:eval": "tsx scripts/backtestEval.ts",
     "backtest:exit-smoke": "tsx scripts/exitEngineSmoke.ts",
     "backtest:entryhook": "tsx scripts/entryHookSmoke.ts",
+    "backtest:exithook": "tsx scripts/exitHookSmoke.ts",
     "backtest:legpattern": "tsx scripts/legPatternSmoke.ts",
     "backtest:legseq-verify": "tsx scripts/legSequenceVerify.ts"
   },

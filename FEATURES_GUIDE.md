@@ -276,7 +276,7 @@ Per-regime rules are configured through a 5-section **Market → Entry → Confi
 - **Entry section** — Entry Signal mode (Pivot/H-L Signal/Confluence) with H1/H2/L1/L2 toggles and confluence lookback, MA Filter, and the single most-recent Pivot Seq filter.
 - **Confirmation section** — all Quality Setup Filters (ATR Depth, Efficiency Ratio, Bar Overlap, Bar Range, Break Count, Consecutive Breaks, EMA21/EMA50 Slope, EMA20 Gap-Bar/Bias) plus Pivot Sequence History (High/Low Sequence, Pivot Gap). Its accordion header shows a live badge counting how many of these are currently active.
 - **Leg Pattern section** — the ordered leg-shape matcher (see "Leg Pattern — describing a shape, not a threshold" below). Off by default; its accordion header badges the number of configured slots.
-- **Exit section** — Target RR, the four Price-Action Exit Engine mechanisms (Reversal, Opposite Signal, Pivot Trailing Stop, Leg Decay — see below), plus a read-only shortcut summarizing the session's auto square-off time and SL/TP fill mode with a button that opens Session Settings. Its accordion header shows a live badge counting how many exit mechanisms are active.
+- **Exit section** — Target RR, the four Price-Action Exit Engine mechanisms (Reversal, Opposite Signal, Pivot Trailing Stop, Custom Exit Hook — see below), plus a read-only shortcut summarizing the session's auto square-off time and SL/TP fill mode with a button that opens Session Settings. Its accordion header shows a live badge counting how many exit mechanisms are active.
 - **Risk section** — Stop-loss method (Pivot/ATR/Fixed) and its amount, plus a read-only shortcut summarizing position-sizing (auto risk-based vs. manual) with a button that opens Session Settings.
 
 Two elements stay pinned above the scrollable accordion regardless of which section is expanded: the **Live Preview Strip** (see below) and a **Strategy Summary** chip bar — a plain-language, read-only recap of the active regime's current rules (direction, entry mode, MA filter, confirmation-filter count, SL method, RR), derived entirely from `RegimeRules` with no new state. Clicking a chip expands the accordion section that owns that setting. A **Run Full Backtest** footer (status + progress bar + the button itself) stays pinned below the scrollable area so it's always reachable without scrolling.
@@ -312,16 +312,18 @@ Al Brooks-style trade management for **auto-entered backtest positions only** �
 
 All four mechanisms default to **off** — existing saved configurations and sessions are unaffected until explicitly enabled.
 
-Canonical per-bar evaluation order (identical in both loops): trail stop → SL/TP touch check → signal exits (Reversal → Opposite Signal → Leg Decay) → auto square-off → new entry check.
+Canonical per-bar evaluation order (identical in both loops): trail stop → SL/TP touch check → signal exits (Reversal → Opposite Signal → Custom Exit Hook) → auto square-off → new entry check.
 
 | Mechanism | Toggle | Trigger | Exit Reason |
 |-----------|--------|---------|--------------|
 | **Reversal Exit** | `exitOnReversal` | The LT market structure (same read as the Trend Reversal flag) reads against the position for `exitReversalConfirmBars` consecutive bars (default 1). `exitReversalRequireWithTrend` (default on) requires structure to have read *with* the trade at least once before the exit can arm — turn off for counter-trend regimes (Range/Reversal), which may never see a with-trend read. | `REVERSAL` |
 | **Opposite Signal Exit** | `exitOnOppSignal` | An opposite Brooks pullback signal fires on the current bar against the position (L1/L2 for a long, H1/H2 for a short) — `exitOppAllow1`/`exitOppAllow2` pick which count (default: 2nd only, the classic Brooks reversal trigger; 3rd+ signals never count). | `OPP_SIGNAL` |
 | **Pivot Trailing Stop** | `exitTrailPivot` | Ratchets the stop-loss behind the 3-bar swing extreme of the most recent **confirmed** same-side pivot (bullish pivot's low cluster for longs, bearish pivot's high cluster for shorts), padded by `exitTrailPivotBufferPoints` (default 2). Only pivots confirmed through the prior bar are used, so a pivot can never move the same bar's own SL touch check — and the stop only ever tightens, never loosens. The actual exit still goes through the normal SL machinery; the closing trade is flagged `slTrailed`. | `SL` (+ `slTrailed`) |
-| **Leg Decay Exit** | `exitLegDecay` | Re-grades the newest **completed** with-trend leg formed *after* entry (never re-judges the entry leg the Confirmation filters already approved) using the same metrics as the Confirmation step's leg-strength filters — Efficiency Ratio, Consecutive Breaks, Break Count, EMA21 Slope, EMA20 Gap-Bar — each with its own `none`/`min`/`max` mode + threshold. Waits at least `exitLegDecayMinBarsInTrade` bars (default 3) before checking; exits once at least `exitLegDecayMinFails` of the enabled checks fail on the same bar (default 1). Windows respect the session's Leg Min/Max Bars. | `LEG_DECAY` |
+| **Custom Exit Hook** | `exitHookMode` + `exitHookId` | A TypeScript function you write decides, bar by bar, whether to hold the trade, move its stop/target, or close it. See "Custom Exit Hook" below. | `EXIT_HOOK` (or `SL` when it only moved the stop) |
 
-All three signal-based exits (Reversal, Opposite Signal, Leg Decay) fill at the current bar's **close** and exit immediately — there is no "tighten stop first" option in this version. The Pivot Trailing Stop instead only ever moves the SL; the actual exit fires later through the regular SL touch check (`slTpFillMode` still governs the fill price there).
+Both built-in signal exits (Reversal, Opposite Signal) fill at the current bar's **close** and exit immediately — there is no "tighten stop first" option for them. A Custom Exit Hook may name any price inside the bar instead, and *can* tighten the stop rather than exiting. The Pivot Trailing Stop only ever moves the SL; the actual exit fires later through the regular SL touch check (`slTpFillMode` still governs the fill price there).
+
+> **Removed: Leg Decay Exit.** The built-in mechanism (`exitLegDecay` plus eleven `exitDecayXxx` fields) is gone, replaced by the Custom Exit Hook. Its exact logic ships as the **Leg Decay** hook in `frontend/src/strategies/exits/legDecay.ts` — same five checks, same guards, now editable in code instead of through five dropdowns. Saved configurations that set the old fields simply ignore them; pick the `leg-decay` hook in the Exit step to get the behaviour back. Trades closed by the old mechanism keep their `LEG_DECAY` exit reason in the log and still render with their own badge.
 
 ---
 
@@ -515,6 +517,51 @@ Rows reset automatically at the start of each run (they key off the run's `ctx.s
 
 Run `npm run backtest:entryhook` for the acceptance suite covering the window contract, causality, the overrides and the fail-closed paths.
 
+### Custom Exit Hook — writing the trade management in code
+
+The exit-side mirror of the Custom Entry Hook, and the last card in the **Exit** step (per regime). Where the entry hook is asked *"should this signal bar become a trade?"*, the exit hook is asked, once per bar a trade is open, *"hold it, move its stop, or close it?"*. It exists for the management rule no combination of switches can state — "give it 8 bars, then demand a new high every 3, and go to breakeven once it pays 1R".
+
+**Where you write it.** Add a file to `frontend/src/strategies/exits/`, export a function, and register it under an id in `strategies/exits/index.ts`. `exits/example.ts` is a worked reference with three hooks registered; `exits/legDecay.ts` is the ported built-in. Vite hot-reloads on save. The full context type is documented in `utils/exitHook/types.ts`.
+
+**Modes** (per regime, default Off):
+
+| Mode | What runs |
+|------|-----------|
+| **Gate** | Reversal and Opposite Signal evaluate first. Their verdict reaches the hook as `ctx.pendingExit`, and the hook has the final say — return nothing to let it stand, `{ exit: false }` to **veto** it, or an exit of your own. |
+| **Replace** | Reversal and Opposite Signal are skipped entirely. Your code alone decides when the trade closes. |
+
+Either way the SL/TP touch check and the Pivot Trailing Stop keep running — those are price levels, not opinions. Turn the trail off yourself if a hook should own the stop.
+
+**What the hook returns.** ⚠ An object return **exits the trade** unless it says `exit: false` — the same convention as the entry hook's `take`. `return { sl: x }` closes the position; `return { exit: false, sl: x }` moves the stop and holds. `return false` always holds.
+
+| Field | Effect |
+|-------|--------|
+| `exit` | Defaults to `true` on an object return. `false` holds (and vetoes a pending built-in exit in Gate mode). |
+| `price` | Fill price for the exit; defaults to the bar's close. Must lie inside the bar's high/low — a price the bar never traded is refused, not clamped. |
+| `reason` | Replaces the auto-generated detail text. `ctx.log(...)` output is appended. |
+| `sl` / `target` | Move the stop or target, applied whether or not the trade exits. Must stay on the correct side of the close. **Not ratcheted** — a hook may widen a stop, so a trailing hook must refuse to loosen its own. |
+
+**Timing.** The hook runs *after* that bar's SL/TP touch check, so a bar that already stopped out never reaches it, and a stop the hook moves first bites on the **next** bar. That is causally correct — the hook decides on the bar's close.
+
+**What it can read.** `ctx.position` (side, absolute quantity, entry price, `barsInTrade`, current stop/target, `openPoints`, `riskPoints`, `mfePoints`/`maePoints`), the market read the engine computed for the bar (`ltMarket`, `htMarket`, `pivotSeq`, EMAs, ATR, pivots), `ctx.metrics` graded over the newest completed leg on the trade's own side, `ctx.legs()` / `ctx.legFeatures()`, the raw H/L labels in `ctx.signals`, and a `ctx.state` scratch object that persists for the whole run. Everything expensive is built on first access — a hook that reads only `ctx.position` costs almost nothing per bar, which matters because this runs on *every* bar of *every* open trade.
+
+**Hooks that ship registered** (pick one in the Exit step → Custom Exit Hook dropdown):
+
+| Id | What it does |
+|----|--------------|
+| `leg-decay` | The former built-in Leg Decay Exit: re-grades the newest completed with-trend leg formed after entry (ER, consecutive breaks, break count, EMA21 slope, EMA20 gap-bar) and closes once enough checks fail. |
+| `breakeven-trail` | Stop to entry at +1R, then trails 2 ATR behind the best price seen (ratchet only). Cuts any trade still under +0.3R after 20 bars. |
+| `time-stop` | Closes anything still open after 30 bars, win or lose. Pairs with Gate mode. |
+| `hold-winners` | Gate mode only. Never exits on its own — vetoes a pending Reversal or Opposite-Signal exit while the trade is still up 1.5R or better. |
+
+**Window size.** `ctx.candles` is the last `exitHookLookback` candles, set by **Exit Hook Candles** in Session Settings → Instrumentation Lookbacks (default **400**, clamped `[50, 5000]`). Deliberately smaller than the entry hook's 1200: this window is rebuilt on every bar of every open trade, not only on signal bars.
+
+**Debugging.** The same story as the entry hook — the batch run happens in a Web Worker, so breakpoints never pause until you turn on **Run on main thread** (repeated in this card). `__hook.doctor()` in the console now reports the exit side too: which regimes have a hook, whether Gate mode has anything to gate, and the last run's call/error/rejection counts. An exit hook at **0 calls** almost always means the *entry* side took no trades in that regime.
+
+**Fail-closed, both halves independently.** An invalid exit is refused and the trade stays open; an invalid stop/target move is dropped and the levels keep their old values. A hook that throws is trapped, counted, and treated as having said nothing — the run never aborts. A mode set against an **unregistered id** runs *no* signal exits at all rather than silently falling back to the built-ins.
+
+**Tests:** `npm run backtest:exithook` (62 assertions) — `off` and a mode with no id both byte-identical to baseline; the window contract and causality guarantees; the position view's derived fields; `exitHookLookback` honoured and clamped; `ctx.state` accumulating within a run then resetting; every fail-closed path; stop moves reaching booked trades and exiting through the normal SL machinery; and each shipped hook running clean over a full backtest. `npm run backtest:exit-smoke` covers the gate/replace/veto semantics inside the engine.
+
 ### Pivot Sequence History & Pivot Gap
 
 Two per-regime filters alongside the single most-recent Pivot Seq filter above, both configured in the **Pivot Sequence History (last 4)** section:
@@ -588,7 +635,7 @@ Describes where the entry candle sits relative to the EMA:
 
 - **Confidence level** (1–5)
 - **Notes** (free text)
-- **Exit reason** — `SL`, `TP`, `MANUAL`, `TIME_OVER`, plus `REVERSAL`/`OPP_SIGNAL`/`LEG_DECAY` for auto-backtest trades closed by the Price-Action Exit Engine (see section 6)
+- **Exit reason** — `SL`, `TP`, `MANUAL`, `TIME_OVER`, plus `REVERSAL`/`OPP_SIGNAL`/`EXIT_HOOK` for auto-backtest trades closed by the Price-Action Exit Engine (see section 6). `LEG_DECAY` is retired but still appears on trades booked before the Custom Exit Hook replaced that mechanism
 - **R:R Ratio** (auto-calculated from SL/Target)
 
 ---
