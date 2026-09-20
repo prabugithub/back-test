@@ -1,5 +1,5 @@
 import type { Candle } from '../types';
-import { calculatePivotPoints, calculateEMA, getEmaValueAt, type PivotPoint } from './indicators';
+import { calculatePivotPoints, calculateEMA, getEmaValueAt, DEFAULT_MIN_PIVOT_GAP_BARS, type PivotPoint } from './indicators';
 
 export interface PivotAnalysisResult {
     llhhPivot: 'HH-HL' | 'HH-LL' | 'LH-HL' | 'LH-LL' | '';
@@ -16,7 +16,11 @@ export interface PivotAnalysisResult {
 export function analyzePivotForTrade(
     candles: Candle[],
     currentIndex: number,
-    tradeType: 'BUY' | 'SELL'
+    tradeType: 'BUY' | 'SELL',
+    // Resolve from the active AutoBacktestConfig via resolveMinPivotGapBars. Taken as a
+    // plain number rather than the config itself — autoBacktestEngine imports this module,
+    // so importing the resolver back would be circular.
+    minPivotGapBars: number = DEFAULT_MIN_PIVOT_GAP_BARS
 ): PivotAnalysisResult {
     const result: PivotAnalysisResult = {
         llhhPivot: '',
@@ -34,7 +38,7 @@ export function analyzePivotForTrade(
     const visibleCandles = candles.slice(0, currentIndex + 1);
 
     // Calculate pivot points
-    const pivots = calculatePivotPoints(visibleCandles);
+    const pivots = calculatePivotPoints(visibleCandles, minPivotGapBars);
 
     if (pivots.length === 0) {
         return result;
@@ -69,7 +73,9 @@ export function analyzePivotForTrade(
 export function analyzeManualEntry(
     candles: Candle[],
     currentIndex: number,
-    tradeType: 'BUY' | 'SELL'
+    tradeType: 'BUY' | 'SELL',
+    /** See analyzePivotForTrade — resolved from AutoBacktestConfig by the caller. */
+    minPivotGapBars: number = DEFAULT_MIN_PIVOT_GAP_BARS
 ): PivotAnalysisResult {
     const result: PivotAnalysisResult = {
         llhhPivot: '',
@@ -83,7 +89,7 @@ export function analyzeManualEntry(
     }
 
     const visibleCandles = candles.slice(0, currentIndex + 1);
-    const pivots = calculatePivotPoints(visibleCandles);
+    const pivots = calculatePivotPoints(visibleCandles, minPivotGapBars);
 
     // 1. LLHH-Pivot from recent pivots
     if (pivots.length > 0) {

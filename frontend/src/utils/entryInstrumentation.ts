@@ -10,7 +10,7 @@
 import type { Candle, Trade } from '../types';
 import { calculatePivotPoints, calculateATR, calculateEMA, calculateAlBrooksLegs } from './indicators';
 import { analyzeMarketStructure } from './pivotAnalysis';
-import { computeEntryMetrics, type AutoBacktestConfig, type EntryMetricsSnapshot } from './autoBacktestEngine';
+import { computeEntryMetrics, resolveMinPivotGapBars, type AutoBacktestConfig, type EntryMetricsSnapshot } from './autoBacktestEngine';
 import { buildLegSequence } from './legSequence';
 import { buildSessionOpenFields } from './sessionDay';
 
@@ -30,7 +30,7 @@ export function buildEntryInstrumentation(
   entryMetricsOverride?: EntryMetricsSnapshot
 ): EntryInstrumentation {
   const visible = candles.slice(0, index + 1);
-  const pivots = calculatePivotPoints(visible);
+  const pivots = calculatePivotPoints(visible, resolveMinPivotGapBars(config));
   const { ltMarket } = analyzeMarketStructure(visible, pivots);
 
   const atrSeries = calculateATR(visible, 14);

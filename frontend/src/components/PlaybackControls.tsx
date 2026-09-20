@@ -4,7 +4,7 @@ import { useSessionStore } from '../stores/sessionStore';
 import { useNotificationStore } from '../stores/notificationStore';
 import { formatTimestamp } from '../utils/formatters';
 import { getPivotPointsUpTo } from '../utils/indicators';
-import { getCurrentMarketState } from '../utils/autoBacktestEngine';
+import { getCurrentMarketState, resolveMinPivotGapBars } from '../utils/autoBacktestEngine';
 
 /**
  * Returns { secondsLeft, totalSeconds, pct } for the current candle based on timeframe.
@@ -175,15 +175,17 @@ export function PlaybackControls({ onOpenHistory, onOpenDashboard, onOpenBacktes
 
   const currentCandle = useSessionStore((s) => s.candles[s.currentIndex] || null);
   const autoBTEnabled = useSessionStore((s) => s.autoBacktestConfig.enabled);
+  // Selector returns a plain number, so it stays referentially stable across renders.
+  const minPivotGapBars = useSessionStore((s) => resolveMinPivotGapBars(s.autoBacktestConfig));
 
   const memoizedPivots = useMemo(() => {
     if (candles.length === 0) return [];
-    return getPivotPointsUpTo(candles, currentIndex);
-  }, [candles, currentIndex]);
+    return getPivotPointsUpTo(candles, currentIndex, minPivotGapBars);
+  }, [candles, currentIndex, minPivotGapBars]);
 
   const marketState = useMemo(
-    () => getCurrentMarketState(candles, currentIndex),
-    [candles, currentIndex]
+    () => getCurrentMarketState(candles, currentIndex, minPivotGapBars),
+    [candles, currentIndex, minPivotGapBars]
   );
 
   const recentPivot = memoizedPivots.length > 0 ? memoizedPivots[memoizedPivots.length - 1] : null;

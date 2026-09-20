@@ -12,6 +12,7 @@ import { useLiveStore } from '../stores/liveStore';
 import type { DrawingTool } from './ChartToolbar';
 import type { Indicator } from './ChartToolbar';
 import { calculateSMA, calculateEMA, calculatePivotPoints, calculateAlBrooks } from '../utils/indicators';
+import { resolveMinPivotGapBars } from '../utils/autoBacktestEngine';
 import { resampleCandles } from '../utils/resampler';
 import { useChartDrawings } from '../hooks/useChartDrawings';
 import type { Point } from '../hooks/useChartDrawings';
@@ -61,6 +62,7 @@ export function AdvancedChart({
   const primaryIndicators = useSessionStore((s) => s.primaryIndicators) as Indicator[];
   const secondaryIndicators = useSessionStore((s) => s.secondaryIndicators) as Indicator[];
   const showSecondaryChart = useSessionStore((s) => s.showSecondaryChart);
+  const minPivotGapBars = useSessionStore((s) => resolveMinPivotGapBars(s.autoBacktestConfig));
 
   // The chart is "active" if it's currently selected (or in single-chart mode, always active)
   const isActiveChart = !showSecondaryChart || activeChartId === chartId;
@@ -142,8 +144,8 @@ export function AdvancedChart({
   // Memoize heavy calculations
   const memoizedPivots = useMemo(() => {
     if (!activeIndicators.includes('pivotPoints') || visibleCandles.length === 0) return [];
-    return calculatePivotPoints(visibleCandles);
-  }, [visibleCandles, activeIndicators]);
+    return calculatePivotPoints(visibleCandles, minPivotGapBars);
+  }, [visibleCandles, activeIndicators, minPivotGapBars]);
 
   const memoizedAlBrooks = useMemo(() => {
     if (!activeIndicators.includes('alBrooks') || visibleCandles.length === 0) return [];

@@ -20,6 +20,7 @@ import {
 import { useSessionStore } from '../stores/sessionStore';
 import { calculatePivotPoints } from '../utils/indicators';
 import { analyzeMarketStructure } from '../utils/pivotAnalysis';
+import { resolveMinPivotGapBars } from '../utils/autoBacktestEngine';
 import { LayoutGrid } from 'lucide-react';import { type DrawingTool } from '../types';
 export type Indicator = 'none' | 'sma21' | 'sma60' | 'ema21' | 'ema60' | 'pivotPoints' | 'alBrooks';
 
@@ -77,9 +78,11 @@ export function ChartToolbar({
   const showPivotRR = useSessionStore((s) => s.showPivotRR);
   const togglePivotRR = useSessionStore((s) => s.togglePivotRR);
 
+  const minPivotGapBars = useSessionStore((s) => resolveMinPivotGapBars(s.autoBacktestConfig));
+
   // Calculate market structure for display
   const visibleCandles = candles.slice(0, currentIndex + 1);
-  const pivots = visibleCandles.length >= 5 ? calculatePivotPoints(visibleCandles) : [];
+  const pivots = visibleCandles.length >= 5 ? calculatePivotPoints(visibleCandles, minPivotGapBars) : [];
   const { ltMarket, htMarket } = visibleCandles.length >= 25 ? analyzeMarketStructure(visibleCandles, pivots) : { ltMarket: 'Initializing...', htMarket: 'Initializing...' };
 
   const getStructureColor = (market: string) => {

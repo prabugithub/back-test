@@ -7,6 +7,9 @@ import {
   getAlBrooksLegsAt,
   getEmaValueAt,
   getAtrValueAt,
+  DEFAULT_MIN_PIVOT_GAP_BARS,
+  MIN_PIVOT_GAP_BARS_MIN,
+  MIN_PIVOT_GAP_BARS_MAX,
   type PivotPoint,
 } from './indicators';
 import {
@@ -342,6 +345,12 @@ export interface AutoBacktestConfig {
   // EMA20 interaction (Brooks gap-bar / always-in) instrumentation — recorded on trade entries
   emaInteractionLookback: number; // bars looked back for EMA20 gap-bar/always-in interaction stats (default 20)
 
+  // Minimum bars between two consecutive pivots of the SAME type. A qualifying signal
+  // closer than this to the last EMITTED same-type pivot is dropped (keep-first), which
+  // stops one uninterrupted impulse from printing an LL and then an HL on adjacent bars.
+  // Clamped to [1, 10] on read; see resolveMinPivotGapBars. 1 = legacy, no suppression.
+  minPivotGapBars?: number;
+
   // Consecutive directional-break instrumentation — longest unbroken run of prior-high
   // (or prior-low) breaks within the window (Brooks impulse micro-channel)
   consecutiveBreakLookback?: number; // bars looked back for the consecutive-break run search (default 10)
@@ -374,6 +383,18 @@ export interface AutoBacktestConfig {
   downtrend: RegimeRules; // Bear-Trend, Bear-Trending-range
   range: RegimeRules;     // Range
   reversal: RegimeRules;  // Bull-Reversal, Bear-Reversal
+}
+
+/** Minimum same-type pivot separation, clamped. Every caller of calculatePivotPoints /
+ *  getPivotPointsUpTo that has a config in hand should resolve through this rather than
+ *  reading config.minPivotGapBars directly — configs saved before the field existed have
+ *  it undefined. */
+export function resolveMinPivotGapBars(
+  config: Pick<AutoBacktestConfig, 'minPivotGapBars'>,
+): number {
+  const raw = config.minPivotGapBars ?? DEFAULT_MIN_PIVOT_GAP_BARS;
+  if (!Number.isFinite(raw)) return DEFAULT_MIN_PIVOT_GAP_BARS;
+  return Math.min(MIN_PIVOT_GAP_BARS_MAX, Math.max(MIN_PIVOT_GAP_BARS_MIN, Math.floor(raw)));
 }
 
 // ─── Regime key mapping ───────────────────────────────────────────────────────
@@ -703,7 +724,7 @@ export function computeEntryMetrics(
   config: AutoBacktestConfig,
   legWindow?: LegWindow | null
 ): EntryMetricsSnapshot {
-  const pivots = getPivotPointsUpTo(candles, currentIndex);
+  const pivots = getPivotPointsUpTo(candles, currentIndex, resolveMinPivotGapBars(config));
   const pivotSeqStats = getPivotSequenceStats(pivots, 4);
 
   const leg = legWindow && legWindow.endIndex >= 0 ? legWindow : null;
@@ -842,7 +863,7 @@ export function evaluateAutoSignals(
   // Pre-compute indicators (shared across every regime's evaluation below) —
   // cached lookups against the full candles array so a bar-by-bar auto-backtest
   // run doesn't re-derive pivots/AlBrooks/EMA/ATR from scratch every single bar.
-  const pivots = getPivotPointsUpTo(candles, currentIndex);
+  const pivots = getPivotPointsUpTo(candles, currentIndex, resolveMinPivotGapBars(config));
   const alBrooks = getAlBrooksMarkersUpTo(candles, currentIndex);
   const ema21 = getEmaAt(candles, currentIndex, 21);
   const ema60 = getEmaAt(candles, currentIndex, 60);
@@ -1371,7 +1392,7 @@ export function previewEntryHook(
   if (!trigger) return undefined;
   if (!resolved.hook) return false; // unknown id — fails closed, same as the engine
 
-  const pivots = getPivotPointsUpTo(candles, currentIndex);
+  const pivots = getPivotPointsUpTo(candles, currentIndex, resolveMinPivotGapBars(config));
   const { ltMarket, htMarket } = analyzeMarketStructureAt(candles, currentIndex, pivots);
   const { bull, bear } = getAlBrooksLegsAt(candles, currentIndex);
   const leg = trigger.side === 'long' ? bull : bear;
@@ -1719,7 +1740,7 @@ const resolveExitRules = (
   if (entryRegime) return config[entryRegime];
   // Restored old session with an open auto position but no stamped regime —
   // fall back to the regime the current LT structure maps to.
-  const pivots = getPivotPointsUpTo(candles, currentIndex);
+  const pivots = getPivotPointsUpTo(candles, currentIndex, resolveMinPivotGapBars(config));
   const { ltMarket } = analyzeMarketStructureAt(candles, currentIndex, pivots);
   return config[getRegimeKey(ltMarket)];
 };
@@ -1740,7 +1761,7 @@ export function evaluateTrailStop(
   if (!rules.exitTrailPivot) return null;
 
   const isLong = position.quantity > 0;
-  const pivots = getPivotPointsUpTo(candles, currentIndex - 1);
+  const pivots = getPivotPointsUpTo(candles, currentIndex - 1, resolveMinPivotGapBars(config));
   let pivot: PivotPoint | null = null;
   for (let i = pivots.length - 1; i >= 0; i--) {
     if (pivots[i].type === (isLong ? 'bullish' : 'bearish')) { pivot = pivots[i]; break; }
@@ -1835,7 +1856,7 @@ export function evaluateAutoExitSignal(
 
   // 1. REVERSAL — LT structure against the position for N consecutive checks
   if (runBuiltIns && rules.exitOnReversal) {
-    const pivots = getPivotPointsUpTo(candles, currentIndex);
+    const pivots = getPivotPointsUpTo(candles, currentIndex, resolveMinPivotGapBars(config));
     const { ltMarket } = analyzeMarketStructureAt(candles, currentIndex, pivots);
     const isAgainst = isLong ? ltMarket.startsWith('Bear') : ltMarket.startsWith('Bull');
     const isWith = isLong ? ltMarket.startsWith('Bull') : ltMarket.startsWith('Bear');
@@ -1913,7 +1934,7 @@ function runExitHookAt(
   const logs: string[] = [];
 
   const env = (): ExitHookEnv => {
-    const pivots = getPivotPointsUpTo(candles, currentIndex);
+    const pivots = getPivotPointsUpTo(candles, currentIndex, resolveMinPivotGapBars(config));
     const { ltMarket, htMarket } = analyzeMarketStructureAt(candles, currentIndex, pivots);
     // The newest COMPLETED leg on the POSITION's side — the same window the old built-in
     // leg-decay check graded, which is what lets the ported 'leg-decay' hook behave
@@ -1975,11 +1996,17 @@ export function countActiveExitMechanisms(rules: RegimeRules): number {
 
 // ─── Current market state utility (used by UI for live display) ───────────────
 
-export function getCurrentMarketState(candles: Candle[], currentIndex: number): { ltMarket: string; htMarket: string; regime: RegimeKey } {
+export function getCurrentMarketState(
+  candles: Candle[],
+  currentIndex: number,
+  // Resolve from the active AutoBacktestConfig via resolveMinPivotGapBars so the header
+  // readout classifies structure off the same pivot set the engine trades off.
+  minPivotGapBars: number = DEFAULT_MIN_PIVOT_GAP_BARS,
+): { ltMarket: string; htMarket: string; regime: RegimeKey } {
   if (currentIndex < 25 || candles.length < 26) {
     return { ltMarket: 'Range', htMarket: 'Range', regime: 'range' };
   }
-  const pivots = getPivotPointsUpTo(candles, currentIndex);
+  const pivots = getPivotPointsUpTo(candles, currentIndex, minPivotGapBars);
   const { ltMarket, htMarket } = analyzeMarketStructureAt(candles, currentIndex, pivots);
   return { ltMarket, htMarket, regime: getRegimeKey(ltMarket) };
 }

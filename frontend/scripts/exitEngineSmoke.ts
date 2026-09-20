@@ -8,6 +8,7 @@ import {
   evaluateTrailStop,
   evaluateAutoExitSignal,
   countActiveExitMechanisms,
+  resolveMinPivotGapBars,
   type AutoBacktestConfig,
   type RegimeRules,
 } from '../src/utils/autoBacktestEngine';
@@ -84,7 +85,7 @@ const cfg = (uptrend: Partial<RegimeRules>): AutoBacktestConfig => ({
 
   // Expected candidate, replicated independently: latest bullish pivot among
   // pivots confirmed through bar i-1, 3-bar cluster min low, minus buffer.
-  const pivots = calculatePivotPoints(candles.slice(0, i)).filter(p => p.type === 'bullish');
+  const pivots = calculatePivotPoints(candles.slice(0, i), resolveMinPivotGapBars(config)).filter(p => p.type === 'bullish');
   assert(pivots.length > 0, 'synthetic uptrend produced bullish pivots');
   const b = pivots[pivots.length - 1].barIndex;
   const expected = Math.min(candles[b].low, candles[b - 1].low, candles[b - 2].low) - 2;

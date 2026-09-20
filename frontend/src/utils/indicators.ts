@@ -143,15 +143,42 @@ export interface PivotPoint {
   barIndex: number; // index into the candles array this pivot fired on — enables O(1) bar-distance math
 }
 
+/** Minimum bars between two EMITTED pivots of the SAME type. 1 = legacy (no suppression).
+ *  Surfaced as AutoBacktestConfig.minPivotGapBars (Session Settings → Instrumentation
+ *  Lookbacks); read through resolveMinPivotGapBars in autoBacktestEngine.ts. */
+export const DEFAULT_MIN_PIVOT_GAP_BARS = 2;
+export const MIN_PIVOT_GAP_BARS_MIN = 1;
+export const MIN_PIVOT_GAP_BARS_MAX = 10;
+
 /**
  * Calculate Reversal Pivot Points (Bullish and Bearish)
  * Based on advanced candlestick pattern analysis
  * Detects reversal patterns using multiple candle confirmation
+ *
+ * `minGapBars` enforces a minimum bar separation between two pivots of the SAME type,
+ * KEEP-FIRST: the first bar of a run of qualifying same-type signals is emitted and every
+ * later signal within the window is dropped outright. Without it a single uninterrupted
+ * impulse emits a pivot on bar i and another on bar i+1, and the second one gets a full
+ * HL/HH label purely because that bar's low/high sat above the previous BAR's — not
+ * because any retracement happened. Bullish and bearish are tracked separately, so a
+ * genuine fast reversal (swing low then swing high two bars later) still comes through.
+ *
+ * Suppression only ever reads state built from bars strictly BEFORE i, so the function
+ * stays a left-to-right fold and the causal prefix invariant relied on by
+ * getPivotPointsUpTo still holds exactly — see the memoization note further down.
  */
-export function calculatePivotPoints(candles: Candle[]): PivotPoint[] {
+export function calculatePivotPoints(
+  candles: Candle[],
+  minGapBars: number = DEFAULT_MIN_PIVOT_GAP_BARS,
+): PivotPoint[] {
   const result: PivotPoint[] = [];
   let lastBullPrice = 0;
   let lastBearPrice = 0;
+  // Bar index of the last pivot actually PUSHED for each type (not merely detected).
+  // Advancing these on emit only is what makes the rule keep-first rather than a window
+  // that slides forward on every suppressed signal and never re-arms.
+  let lastBullBarIndex = -Infinity;
+  let lastBearBarIndex = -Infinity;
 
   // Validate we have enough candles
   if (!candles || candles.length < 5) {
@@ -176,11 +203,11 @@ export function calculatePivotPoints(candles: Candle[]): PivotPoint[] {
     // BULLISH REVERSAL PIVOT LOGIC
     // ============================================
 
-    // Check if previous candle was a pivot to avoid consecutive signals
-    const isPreviousBullPivot =
-      prev.close > prev2.high &&
-      prev.close > prev.open &&
-      prev3.close < prev3.open;
+    // Check if previous candle was a pivot to avoid consecutive signals.
+    // This used to re-derive a looser approximation of the emit predicate from the raw
+    // candles, which both missed real consecutive pivots and blocked bars that were never
+    // pivots. It now just asks whether bar i-1 was actually emitted.
+    const isPreviousBullPivot = lastBullBarIndex === i - 1;
 
     // Condition 1: Current breaks previous high (simple pattern)
     const condition1_bull =
@@ -206,7 +233,7 @@ export function calculatePivotPoints(candles: Candle[]): PivotPoint[] {
     // Combined bullish signal
     const bullishPivot = (condition1_bull_or || condition1_bull) && condition3_bull;
 
-    if (bullishPivot) {
+    if (bullishPivot && i - lastBullBarIndex >= minGapBars) {
       // Logic for Long SL Distance: abs(min(low[0-4]) - close[0]) + 2
       const minLow = Math.min(current.low, prev.low, prev2.low);
       const slDistance = Math.ceil(Math.abs(current.close - minLow) + 2);
@@ -215,7 +242,10 @@ export function calculatePivotPoints(candles: Candle[]): PivotPoint[] {
       if (lastBullPrice > 0) {
         label = current.low > lastBullPrice ? 'HL' : 'LL';
       }
+      // Both baselines advance on emit only, so a suppressed bar never becomes the
+      // reference for the next label or for the gap window.
       lastBullPrice = current.low;
+      lastBullBarIndex = i;
 
       result.push({
         time: current.timestamp,
@@ -231,11 +261,9 @@ export function calculatePivotPoints(candles: Candle[]): PivotPoint[] {
     // BEARISH REVERSAL PIVOT LOGIC
     // ============================================
 
-    // Check if previous candle was a pivot to avoid consecutive signals
-    const isPreviousBearPivot =
-      prev.close < prev2.low &&
-      prev.close < prev.open &&
-      prev3.close > prev3.open;
+    // Check if previous candle was a pivot to avoid consecutive signals — see the
+    // bullish mirror above for why this is emitted-state rather than re-derived.
+    const isPreviousBearPivot = lastBearBarIndex === i - 1;
 
     // Condition 1: Current breaks previous low (simple pattern)
     const condition1_bear =
@@ -261,7 +289,7 @@ export function calculatePivotPoints(candles: Candle[]): PivotPoint[] {
     // Combined bearish signal
     const bearishPivot = condition1_bear_or || (condition1_bear && condition3_bear);
 
-    if (bearishPivot) {
+    if (bearishPivot && i - lastBearBarIndex >= minGapBars) {
       // Logic for Short SL Distance: abs(max(high[0-4]) - close[0]) + 2
       const maxHigh = Math.max(current.high, prev.high, prev2.high);
       const slDistance = Math.ceil(Math.abs(current.close - maxHigh) + 2);
@@ -271,6 +299,7 @@ export function calculatePivotPoints(candles: Candle[]): PivotPoint[] {
         label = current.high > lastBearPrice ? 'HH' : 'LH';
       }
       lastBearPrice = current.high;
+      lastBearBarIndex = i;
 
       result.push({
         time: current.timestamp,
@@ -649,7 +678,11 @@ function runAlBrooks(
 // calculatePivotPoints/calculateEMA/calculateATR/runAlBrooks are all strictly
 // causal — the value at bar i is a fold over candles[0..i] only, never anything
 // after it (verified: each loop only ever reads i, i-1, i-2, i-3 and running
-// state built from earlier iterations). That means calling e.g.
+// state built from earlier iterations). calculatePivotPoints' same-type gap
+// suppression does not change this: it compares i against lastBull/BearBarIndex,
+// which are only ever written on an emit at some bar < i, so the decision at bar i
+// is still a function of candles[0..i] alone and a pivot, once emitted, is never
+// moved or withdrawn. That means calling e.g.
 // calculatePivotPoints(candles.slice(0, i + 1)) for every i from 0..N produces,
 // bar for bar, exactly the same PivotPoint[] prefix as calling it ONCE on the
 // full `candles` array and reading off the entries up to bar i — but the naive
@@ -666,21 +699,32 @@ function runAlBrooks(
 // identically to calling the un-cached function directly. Nothing here changes
 // any computed value, only how often it's recomputed.
 
-const pivotPointsCache = new WeakMap<Candle[], PivotPoint[]>();
+// Keyed by minGapBars as well as the candles array, same two-level shape as emaCache /
+// atrCache below — a changed Session Settings gap must not be served a stale pivot list.
+const pivotPointsCache = new WeakMap<Candle[], Map<number, PivotPoint[]>>();
 
-function getFullPivotPoints(candles: Candle[]): PivotPoint[] {
-  let cached = pivotPointsCache.get(candles);
+function getFullPivotPoints(candles: Candle[], minGapBars: number): PivotPoint[] {
+  let byGap = pivotPointsCache.get(candles);
+  if (!byGap) {
+    byGap = new Map();
+    pivotPointsCache.set(candles, byGap);
+  }
+  let cached = byGap.get(minGapBars);
   if (!cached) {
-    cached = calculatePivotPoints(candles);
-    pivotPointsCache.set(candles, cached);
+    cached = calculatePivotPoints(candles, minGapBars);
+    byGap.set(minGapBars, cached);
   }
   return cached;
 }
 
 /** Pivots visible as of `endIndex` (inclusive) — identical to
- *  calculatePivotPoints(candles.slice(0, endIndex + 1)), amortized O(log n). */
-export function getPivotPointsUpTo(candles: Candle[], endIndex: number): PivotPoint[] {
-  const full = getFullPivotPoints(candles);
+ *  calculatePivotPoints(candles.slice(0, endIndex + 1), minGapBars), amortized O(log n). */
+export function getPivotPointsUpTo(
+  candles: Candle[],
+  endIndex: number,
+  minGapBars: number = DEFAULT_MIN_PIVOT_GAP_BARS,
+): PivotPoint[] {
+  const full = getFullPivotPoints(candles, minGapBars);
   // barIndex is strictly ascending in `full`, so binary-search the cut point
   // instead of an O(full.length) filter on every call.
   let lo = 0, hi = full.length;

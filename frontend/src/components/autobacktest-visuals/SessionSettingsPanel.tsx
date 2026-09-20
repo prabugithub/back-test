@@ -248,6 +248,14 @@ export function SessionSettingsPanel({ config, onChange, isOpen, onClose }: Sess
                 />
               </div>
               <div className="flex items-center justify-between gap-1">
+                <span className="text-[10px] text-gray-500" title="Minimum bars between two pivots of the SAME type. A qualifying signal closer than this to the last pivot of the same type is dropped (the first one is kept), so a single impulse can't print an LL and then an HL on adjacent bars. Raise it for a sparser structure skeleton. 1 = off (legacy).">Min Pivot Gap</span>
+                <input
+                  type="number" min={1} max={10} value={config.minPivotGapBars ?? 2}
+                  onChange={e => onChange({ minPivotGapBars: Number(e.target.value) })}
+                  className="w-12 px-1.5 py-1 text-xs border rounded text-center"
+                />
+              </div>
+              <div className="flex items-center justify-between gap-1">
                 <span className="text-[10px] text-gray-500" title="Minimum bars a completed breakout leg needs before its strength metrics count — H/L entries with a shorter (or no) leg are blocked while any leg-strength filter is active">Leg Min Bars</span>
                 <input
                   type="number" min={2} max={20} value={config.legMinBarCount ?? 5}
