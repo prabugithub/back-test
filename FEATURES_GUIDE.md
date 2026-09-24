@@ -143,6 +143,7 @@ All drawings persist in the Zustand store and save with the session.
 | **Fibonacci Retracement** | Click high and low | Auto-draws 7 fib levels (0, 23.6, 38.2, 50, 61.8, 78.6, 100%) |
 | **Risk/Reward Tool** | Click entry, drag | Visualises risk:reward ratio with coloured zones |
 | **Callout / Text** | Click a candle | Adds an annotation label at that point |
+| **Measure** (ruler icon, `M`) | Click and drag from start to end | TradingView-style price/date range: shaded box (blue if the end is above the start, red if below) with a label showing price change, % change from the start price, bar count and elapsed time (e.g. `+12.50 (+1.25%)` / `15 bars, 1h 15m`). Saved like any other drawing, so it can be selected, moved, resized or deleted. Bar count is read from the chart at render time, so it stays correct after a reload. |
 
 ### Managing Drawings
 

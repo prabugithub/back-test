@@ -15,7 +15,8 @@ import {
   Eye,
   EyeOff,
   Download,
-  SeparatorHorizontal
+  SeparatorHorizontal,
+  Ruler
 } from 'lucide-react';
 import { useSessionStore } from '../stores/sessionStore';
 import { calculatePivotPoints } from '../utils/indicators';
@@ -102,6 +103,7 @@ export function ChartToolbar({
     { id: 'text', icon: Type, label: 'Text', shortcut: '8' },
     { id: 'callout', icon: MessageSquare, label: 'Callout', shortcut: '9' },
     { id: 'channel', icon: SeparatorHorizontal, label: 'Parallel Channel', shortcut: '0' },
+    { id: 'measure', icon: Ruler, label: 'Measure (bars, price, %)', shortcut: 'M' },
   ];
 
   const indicators: Array<{ id: Indicator; label: string; color: string }> = [

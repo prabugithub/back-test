@@ -1332,6 +1332,7 @@ export function AdvancedChart({
         '8': 'text',
         '9': 'callout',
         '0': 'channel',
+        'm': 'measure',
       };
 
       const key = e.key.toLowerCase();
