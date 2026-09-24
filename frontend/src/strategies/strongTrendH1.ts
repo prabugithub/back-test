@@ -1,319 +1,375 @@
 /**
- * Strong-trend H1 continuation. LONG ONLY.
+ * Strong-trend-DAY H1/H2 continuation. LONG ONLY.
  *
  * The setup, in words:
  *
- *   In a trend strong enough that the bull count never gets past H1, buy every H1.
+ *   First decide whether TODAY is a strong bull trend day, the way a discretionary Al Brooks
+ *   trader reads it: yesterday's structure, the multi-day context, and how today is
+ *   developing. Only on such a day, buy H1/H2 near the EMA (or an H1 far from it once the day
+ *   has run 20+ gap bars without touching the EMA).
  *
- * ── Why a repeated H1 IS the trend-strength signal ──────────────────────────
+ * The judgement is a WEIGHTED SCORE plus a few HARD VETOES, not a stack of hard gates: one
+ * marginal factor should not kill an otherwise textbook day, but a failed breakout should.
  *
- * The Al Brooks counter resets whenever the swing it was counting is broken. In a strong
- * bull trend each pullback is so shallow and so brief that the very first attempt up
- * (the H1) immediately makes a new high — which resets the count, so the NEXT pullback
- * also produces an H1. A trend that keeps printing H1, H1, H1 never gave the bears enough
- * room to build an H2, let alone an H3.
+ * ── 1. Yesterday (priorDayProfile — built once per session, cached) ─────────
  *
- * The mirror image is visible on the other side at the same time: because price never makes
- * a new low, nothing resets the bear count, so the L labels just keep climbing — L1, L2,
- * L3, L4 … L7 is normal inside a strong uptrend. A high L count is therefore CONFIRMING
- * here, not a warning. It is measured and recorded (`lRun`), and available as a gate via
- * MIN_L_RUN, which ships off — see the constant.
+ *   - Contraction: yesterday's range vs the average daily range (ADR). Trend days follow
+ *     trading-range days. Too tight (< TIGHT_RANGE_ADR) is 50/50 breakout mode, too wide
+ *     (> WIDE_RANGE_ADR) is usually followed by a range day.
+ *   - Close location: a close in the top quarter of the day (a bull trend bar on the daily).
+ *   - Late breakout: in the last `trendDayLateBars` bars price CLOSED above the earlier day
+ *     high, in at least two pushes to new highs, with clean bull bars.
+ *   - Climax check: late breakouts that end in 2+ oversized bull bars usually open the next
+ *     day with a pullback — a tight channel into the close is wanted, not a buy climax.
+ *   - Pivot structure: the day's LL swing low followed by a higher swing low (HL) above the
+ *     day's midpoint — the trading range resolved up.
+ *   - EMA21 slope at yesterday's close: flat→rising scores, falling costs.
  *
- * So the label test is: the last two H-side signals, the trigger bar's own included, are
- * both H1. Interleaved L labels do not break the streak (see H1_STREAK_STRICT).
+ * ── 2. Broader structure (daily bars aggregated from the 5m data) ───────────
  *
- * ── The other gates ─────────────────────────────────────────────────────────
+ *   - Daily higher lows over the last three sessions.
+ *   - Yesterday inside the prior `trendDayMultiDayLookback`-session range and today breaking
+ *     out above it scores; opening just under that multi-day high (resistance) costs.
  *
- *   - the current bull leg contains at least MIN_CLEAN_BULL_BARS clean bull bars —
- *     bull-bodied bars with a body-to-range ratio at or above MIN_CLEAN_BRR
- *   - both EMAs are sloping up hard at the ENTRY bar, EMA21 and EMA50 alike
- *   - there is room to the next resistance for at least a 1:2 target — see below
+ * ── 3. Today (todayProfile — recomputed each call over today's bars only) ───
  *
- * A pure filter — it returns true/false only, so the regime's own SL, target and position
- * sizing still apply. See the note at the bottom for a structural stop.
+ *   Vetoes (each one KILLS the day — no further entries this session):
+ *   - no close above the previous day's high (PDH) within `trendDayPdhBreakBars` bars
+ *     (a gap open above counts);
+ *   - after that break, any close back below PDH (failed breakout);
+ *   - a big bear bar closing below EMA21, or two consecutive bear closes below it;
+ *   - a close below the opening swing low.
+ *   Scored: gap size vs ADR, first-bar quality and whether its low holds, first-hour trend vs
+ *   chop, the biggest bear body, a run of gap bars above EMA21.
+ *
+ * ── 4. The bar itself ───────────────────────────────────────────────────────
+ *
+ *   Trigger H1 or H2, price above EMA21 and within EMA_NEAR_ATR of it — or an H1 far from the
+ *   EMA when the current gap-bar run is ≥ `trendDayGapBarsMin` and the day scores
+ *   STRONG_TREND_DAY_SCORE. The old bar-level strength reads (H1 streak, clean bull bars in
+ *   the leg, EMA21/EMA50 slope) are now score components, not gates. Room to the next
+ *   prior-day resistance for the target stays a veto (see below), and at most
+ *   `trendDayMaxEntries` entries are approved per session.
+ *
+ * Every window (ADR days, late bars, PDH-break bars, first-hour bars, gap bars, max entries)
+ * comes from Session Settings — see DEFAULT_TREND_DAY_WINDOWS. Ratio thresholds and score
+ * weights are the named constants below: STARTING VALUES, to be re-tuned from
+ * `__hook.stats(...)` on your own data. Every component is recorded by probe() before any
+ * verdict and written into the trade's reason string, so each trade explains itself.
  *
  * ── Room to resistance, and why a pullback must not fail it ─────────────────
  *
- * Resistance is read off the PIVOTS — the system's own swing highs — restricted to PREVIOUS
- * trading days. Today's own swing highs are excluded on purpose: they were made by the very
- * move being traded, and in a strong trend they are exceeded within bars, so counting them
- * would have this hook refuse every continuation entry it exists to take.
- *
- * The test is then: entry, the stop the engine would actually place, and the nearest
- * resistance overhead must leave at least a 1:2 reward:risk. If the target cannot be reached
- * without trading into a prior-day swing high, the entry is refused.
- *
- * The trap — and the reason the level test is phrased the way it is — is the PULLBACK entry.
- * Once the session has traded up THROUGH a prior-day swing high, that level is broken: it is
- * support now, not resistance, and a pullback to it is precisely the entry this hook wants.
- * A naive "is there a prior swing high above my entry price" test rejects exactly those bars,
- * because after the pullback the broken level sits overhead again. So a level counts as
- * resistance only while **today's session high has not yet reached it**:
- *
- *     resistance = lowest prior-day swing high strictly above the session's high so far
- *
- * Every level the day has already traded through drops out by construction, so a pullback
- * into broken resistance is measured against the NEXT untouched level above — which is the
- * one that can actually stop the trade. (The session high is always at or above the entry
- * close, so this condition also subsumes "must be above entry".)
- *
- * The mirror value — the nearest prior-day swing low the session has not broken — is
- * measured as `support` and recorded, but deliberately does not gate anything. Say so if it
- * should: requiring the stop to sit under it is a one-line change.
+ * Resistance = the lowest PRIOR-DAY pivot swing high strictly above today's session high so
+ * far. Today's own swing highs are excluded (the trend exceeds them within bars), and a level
+ * the session has already traded through is support, not resistance — so a pullback into a
+ * broken level is measured against the NEXT untouched level. Entry, the stop the engine will
+ * actually place (utils/stopLoss.ts) and that resistance must leave
+ * max(MIN_TARGET_RR, rules.targetRR) reward:risk. Nothing overhead passes.
  *
  * ── How the leg sequence is laid out ────────────────────────────────────────
  *
- * `ctx.legs()` is NEWEST-FIRST, and a bull leg's retrace is tagged `direction: 'bear'`
- * (a pullback carries the direction counter to the leg it retraced). An H1 usually fires as
- * a shallow retrace ends, so segs[0] is usually the bear pullback and segs[1] the bull leg —
- * but in a strong trend the leg often runs right up to the entry bar with no retrace segment
- * at all, so BOTH shapes are accepted and neither is assumed.
+ * `ctx.legs()` is NEWEST-FIRST, and a bull leg's retrace is tagged `direction: 'bear'`. An
+ * H1/H2 usually fires as a retrace ends (segs[0] = bear pullback, segs[1] = bull leg), but in
+ * a strong trend the leg often runs right up to the entry bar (segs[0] = bull leg). Both
+ * shapes are accepted; anything else scores no clean-leg point rather than blocking.
  */
 import type { EntryHook, EntryHookContext } from '../utils/entryHook';
-import { getEmaValueAt } from '../utils/indicators';
+import { getAtrValueAt, getEmaValueAt } from '../utils/indicators';
 import { calculateEMASlope } from '../utils/pivotAnalysis';
-import { istDayIndex, getSessionOpenContext } from '../utils/sessionDay';
+import { istDayIndex, getSessionOpenContext, type SessionOpenContext } from '../utils/sessionDay';
 import { prospectiveStop } from '../utils/stopLoss';
-import type { LegSegment } from '../types';
+import type { Candle, LegSegment } from '../types';
 import { probe } from './debug';
 
 /**
- * How many consecutive H-side signals, ending at and INCLUDING the trigger bar, must all be
- * H1. 2 is what "the last two labels should be H1" asks for. Raise to 3+ for a stricter
- * read of "continuously only H1"; 1 disables the streak test and takes every H1.
+ * Fallbacks for the optional `AutoBacktestConfig.trendDay*` windows, shared with Session
+ * Settings. Lives here rather than in autoBacktestEngine.ts because the engine imports the
+ * strategy registry — a value import back into it would be a module cycle.
  */
-const REQUIRED_H1_STREAK = 2;
+export const DEFAULT_TREND_DAY_WINDOWS = {
+  trendDayAdrDays: 10,
+  trendDayMultiDayLookback: 5,
+  trendDayLateBars: 18,
+  trendDayPdhBreakBars: 6,
+  trendDayFirstHourBars: 12,
+  trendDayGapBarsMin: 20,
+  trendDayMaxEntries: 3,
+} as const;
 
-/**
- * Whether an interleaved L label breaks the H1 streak.
- *
- * false (default) — only H-side labels are read, so H1 · L4 · H1 still counts as a streak
- * of two. This is the reading that matches the mechanism above: the climbing L count is a
- * symptom of the same strong trend, not evidence against it.
- *
- * true — the last REQUIRED_H1_STREAK entries of the raw label stream must ALL be H1,
- * whatever side they are on. Much stricter, and on 5m data it mostly fires on runaway
- * one-directional moves. Both readings are recorded (`hStreak` vs `rawStreak` in the probe
- * row) on every bar, so flipping this is an informed choice rather than a guess.
- */
-const H1_STREAK_STRICT = false;
+// ── Yesterday ──────────────────────────────────────────────────────────────
+/** Range / ADR below this = too tight: breakout mode, often another range day. */
+const TIGHT_RANGE_ADR = 0.35;
+/** Range / ADR at or below this (and above TIGHT) = the contraction that precedes trend days. */
+const CONTRACTION_ADR = 0.8;
+/** Range / ADR above this = a big swing day, usually followed by a trading-range day. */
+const WIDE_RANGE_ADR = 1.3;
+/** Close location (0 = day low, 1 = day high) for a bull trend bar on the daily. */
+const STRONG_CLOSE_LOC = 0.75;
+/** Close location at or below this = sellers won the close. */
+const WEAK_CLOSE_LOC = 0.4;
+/** Pushes to a new day high needed in the late window — "two good bull legs". */
+const MIN_LATE_LEGS = 2;
+/** A late bull bar is climactic at this multiple of yesterday's average body. */
+const CLIMAX_BODY_MULT = 2.5;
+/** This many climactic late bars = a buy climax into the close. */
+const CLIMAX_MIN_BARS = 2;
 
-/** A bull bar counts as CLEAN at or above this body-to-range ratio. 0.5 = the body is at
- *  least half the bar's range. `__hook.stats('cleanBars')` on your own instrument is the
- *  way to judge whether this and MIN_CLEAN_BULL_BARS are set sensibly together. */
+// ── Broader structure ──────────────────────────────────────────────────────
+/** A multi-day high within this many ADRs above PDH is resistance the day opens into. */
+const RESISTANCE_NEAR_ADR = 0.3;
+
+// ── Today ──────────────────────────────────────────────────────────────────
+/** Gap (open − prior close) / ADR up to this = the healthy small gap. */
+const GOOD_GAP_ADR = 0.3;
+/** Gap / ADR above this = the move may have already happened — often a range day. */
+const BIG_GAP_ADR = 0.5;
+/** A bull trend bar closes in at least the top third of its range. */
+const TREND_BAR_CLOSE_LOC = 0.67;
+/** Bars after the first bar that must hold its low for "first bar held". */
+const FIRST_BAR_HOLD_BARS = 3;
+/** First-hour net progress (close − open) / first-hour range at or above this = trending. */
+const FIRST_HOUR_PROGRESS = 0.5;
+/** First hour already used this much of ADR ... */
+const FIRST_HOUR_SPENT_ADR = 0.6;
+/** ... with progress below this = chop; the rest of the day is usually a range. */
+const FIRST_HOUR_CHOP_PROGRESS = 0.3;
+/** A bear bar is "big" when its body is at least this many ATRs. */
+const BIG_BEAR_BODY_ATR = 0.8;
+/** The opening swing low spans at least this many opening bars (longer if PDH broke later). */
+const OPENING_SWING_BARS = 3;
+/** Max distance above EMA21, in ATRs, for an entry to count as "near the moving average". */
+const EMA_NEAR_ATR = 1.0;
+
+// ── Bar-level strength (now score components) ──────────────────────────────
+/** A bull bar is CLEAN at or above this body-to-range ratio. */
 const MIN_CLEAN_BRR = 0.5;
-
-/** Minimum clean bull bars inside the current bull leg. Counted over the WHOLE leg, not
- *  consecutively — `cleanRun` in the probe row carries the longest consecutive run, so
- *  switch the gate to that (it is one line, marked below) if that is what you meant. */
+/** Clean bull bars inside the current bull leg for the clean-leg point. */
 const MIN_CLEAN_BULL_BARS = 3;
-
-/**
- * Minimum EMA slope at the entry bar, in ATRs per bar.
- *
- * Normalised by ATR deliberately: a raw slope is points-per-bar, so a threshold tuned on
- * one symbol or timeframe does not carry to another, while this one does. The lookbacks
- * behind each slope (10 and 20 bars by default) come from Session Settings, not from here.
- *
- * These two numbers are STARTING VALUES, not measurements. Run the hook once with the two
- * lines under "slope gate" commented out and read the real distribution off
- * `__hook.stats('ema21SlopeAtr')` / `__hook.stats('ema50SlopeAtr')`, then set each threshold
- * where it actually separates your trends from your ranges.
- */
+/** H1s in a row (H-side labels, trigger included) for the H1-streak point. */
+const REQUIRED_H1_STREAK = 2;
+/** true: interleaved L labels break the H1 streak. false: only H-side labels are read. */
+const H1_STREAK_STRICT = false;
+/** Entry-bar EMA slopes, in ATRs per bar, for the slope point (both must pass). */
 const MIN_EMA21_SLOPE_ATR = 0.05;
 const MIN_EMA50_SLOPE_ATR = 0.03;
 
-/**
- * Minimum bear count on the other side for the trend to qualify — the "L4, L5 … L7 and
- * still no new low" confirmation. Ships at 0 (OFF) because it is the observation that
- * EXPLAINS the repeated H1 rather than an independent condition, and gating on both tests
- * the same thing twice. `lRun` is recorded on every bar regardless; set this to 3 or 4 once
- * you have looked at that column.
- */
-const MIN_L_RUN = 0;
-
-/**
- * Least reward:risk the room to resistance must allow — "at least a 1:2 target".
- *
- * The regime's own `targetRR` wins when it is LARGER: a regime aiming at 3R that cannot
- * reach 3R before the next prior-day swing high has a target it will not make, so the
- * binding number is `max(this, rules.targetRR)`. Set this to 0 to switch the gate off and
- * leave only the regime's target governing.
- */
+// ── Verdict ────────────────────────────────────────────────────────────────
+/** Score needed to call today a strong trend day. */
+const MIN_TREND_DAY_SCORE = 6;
+/** Score needed for the far-from-EMA gap-bar H1. */
+const STRONG_TREND_DAY_SCORE = 9;
+/** Least reward:risk room to resistance; the regime's own targetRR wins when larger. 0 = off. */
 const MIN_TARGET_RR = 2;
 
-/** Where the per-day swing-level cache lives on `ctx.state`. Namespaced because `ctx.state`
- *  is one object shared by every hook in the run. */
+/** Points per score component. Positive = trend-day evidence, negative = against. */
+const W = {
+  contraction: 2,
+  tooTight: -1,
+  tooWide: -2,
+  strongClose: 1,
+  weakClose: -1,
+  lateTwoLegs: 2,
+  lateBreakout: 1,
+  climax: -1,
+  pivotResolvedUp: 1,
+  emaRising: 1,
+  emaFalling: -1,
+  dailyHigherLows: 1,
+  multiDayBreakout: 1,
+  intoMultiDayHigh: -1,
+  goodGap: 1,
+  bigGap: -1,
+  firstBarTrend: 1,
+  firstBarBear: -1,
+  firstBarHeld: 1,
+  firstHourTrend: 1,
+  firstHourChop: -1,
+  bigBearBar: -1,
+  gapBars: 1,
+  h1Streak: 1,
+  cleanLeg: 1,
+  slopes: 1,
+} as const;
+
+const EMA_PERIOD = 21;
+
+/** `ctx.state` keys — namespaced because `ctx.state` is shared by every hook in the run. */
 const LEVELS_KEY = 'strongTrendH1.priorDayLevels';
+const PROFILE_KEY = 'strongTrendH1.priorDayProfile';
+const SESSION_KEY = 'strongTrendH1.session';
 
 /** probe()'s own rounding is private to debug.ts; extras arrive raw, so round here. */
 const r = (v: number | null | undefined, dp: number): number | null =>
   v === null || v === undefined || !Number.isFinite(v) ? null : Number(v.toFixed(dp));
 
 export const strongTrendH1: EntryHook = ctx => {
-  // ── 1. Trigger: long side, H1 exactly ─────────────────────────────────────
-  // Not "H1 or later": the whole premise is that a strong trend never gets past H1, so an
-  // H2 here is itself evidence the trend has slowed.
+  // ── 1. Trigger: long side, H1 or H2 ───────────────────────────────────────
   if (ctx.trigger.side !== 'long') return false;
-  if (ctx.trigger.count !== 1) return false;
+  if (ctx.trigger.count !== 1 && ctx.trigger.count !== 2) return false;
 
+  const win = windows(ctx);
+  const open = getSessionOpenContext(ctx.fullCandles, ctx.absoluteIndex);
+  if (!open) return false;
+  const prior = priorDayProfile(ctx, open, win);
+  if (!prior) return false; // no previous session loaded — the day cannot be judged
+  const today = todayProfile(ctx, open, prior, win);
+  const day = sessionState(ctx, open);
+
+  // ── 2. The bull leg being bought ──────────────────────────────────────────
   const segs = ctx.legs();
-
-  // ── 2. We must be in / on the back of a bull leg ──────────────────────────
-  // Accepted shapes, and only these two:
-  //   segs[0] = bull leg                          — the leg ran up to the entry bar
-  //   segs[0] = bear pullback, segs[1] = bull leg — the usual H1 position
-  // Anything else (a bear leg newest, a bull pullback retracing a bear leg) is not this
-  // setup, and is rejected rather than searched past — a bull leg found six segments back
-  // says nothing about the bar being entered.
   const head = segs[0];
-  if (!head) return false;
-
   let bullLeg: LegSegment | null = null;
   let pullback: LegSegment | null = null;
-  if (head.kind === 'leg' && head.direction === 'bull') {
+  if (head?.kind === 'leg' && head.direction === 'bull') {
     bullLeg = head;
-  } else if (head.kind === 'pullback' && head.direction === 'bear') {
+  } else if (head?.kind === 'pullback' && head.direction === 'bear') {
     const next = segs[1];
     if (next && next.kind === 'leg' && next.direction === 'bull') {
       bullLeg = next;
       pullback = head;
     }
   }
-  if (!bullLeg) return false;
+  const clean = bullLeg ? countCleanBullBars(bullLeg) : null;
 
-  // ── 3. Clean bull bars inside that leg ────────────────────────────────────
-  const clean = countCleanBullBars(bullLeg);
-  if (clean === null) return false; // per-candle arrays missing — unmeasurable, so untradeable
-
-  // ── 4. The label stream ───────────────────────────────────────────────────
-  // Bounded by the leg sequence itself (Session Settings → Leg Seq N), not by a bar count
-  // invented here: a previous H1 from 400 bars ago is not part of this trend's structure.
+  // ── 3. Label stream (bounded by Session Settings → Leg Seq N) ─────────────
   const labels = recentLabels(ctx, segs);
   const hStreak = countLeadingH1(labels.filter(l => l[0] === 'H'));
   const rawStreak = countLeadingH1(labels);
   const streak = H1_STREAK_STRICT ? rawStreak : hStreak;
   const lRun = maxLCount(labels);
 
-  // ── 5. Moving averages at the ENTRY bar ───────────────────────────────────
-  // Why not just read ctx.metrics.ema21Slope: computeEntryMetrics anchors the EMA slopes at
-  // legWindow.endIndex when a completed breakout leg exists, so that number describes the MA
-  // at the swing extreme — often 5-15 bars back — not at the bar that would fill. These are
-  // measured at ctx.absoluteIndex, which is the entry bar itself.
-  //
-  // ctx.ema21 is already entry-bar anchored (getEmaAt(candles, currentIndex, 21) in the
-  // engine), so it is used as-is; EMA50 has no ctx field and is looked up from the cached
-  // per-bar series on fullCandles — never on ctx.candles, which is a fresh slice and would
-  // force a full recompute on every trigger bar.
-  //
-  // Both lookbacks come from Session Settings. The ?? defaults mirror computeEntryMetrics
-  // exactly so an entry-bar slope stays comparable with the leg-end one beside it.
+  // ── 4. Moving averages at the ENTRY bar ───────────────────────────────────
+  // ctx.ema21 is entry-bar anchored; EMA50 is looked up from the cached series on
+  // fullCandles (never ctx.candles, a fresh slice that would force a recompute).
+  const atr = ctx.atr;
+  const entry = ctx.candle.close;
   const ema21 = ctx.ema21;
   const ema50 = getEmaValueAt(ctx.fullCandles, ctx.absoluteIndex, 50);
   const ema21Slope = calculateEMASlope(ctx.fullCandles, ctx.absoluteIndex, 21, ctx.config.ema21SlopeLookback ?? 10);
   const ema50Slope = calculateEMASlope(ctx.fullCandles, ctx.absoluteIndex, 50, ctx.config.ema50SlopeLookback ?? 20);
-
-  const atr = ctx.atr;
   const slope21Atr = ema21Slope !== undefined && atr > 0 ? ema21Slope / atr : null;
   const slope50Atr = ema50Slope !== undefined && atr > 0 ? ema50Slope / atr : null;
+  const emaDistAtr = ema21 !== null && atr > 0 ? (entry - ema21) / atr : null;
 
-  // ── 6. Room to the next resistance ────────────────────────────────────────
-  // The stop is the ENGINE's — derived through the shared primitives in utils/stopLoss.ts
-  // rather than re-implemented here, because a reward:risk test measured against a stop the
-  // engine will not actually place is worse than no test at all. Exact for the 'atr' and
-  // 'fixed' methods and for 'pivot' in replace mode; see prospectiveStop's note for the
-  // one gate-mode case where it can differ.
-  const entry = ctx.candle.close;
+  // ── 5. Room to the next resistance ────────────────────────────────────────
   const sl = prospectiveStop('long', entry, ctx.rules, ctx.pivots, ctx.fullCandles, ctx.absoluteIndex, atr);
   const risk = sl === null ? null : entry - sl;
-
-  const session = sessionExtremes(ctx);
   const levels = priorDayLevels(ctx);
-  // Unbroken = strictly above the session high so far. Everything today has already traded
-  // through has stopped being resistance, which is what keeps a pullback into a broken level
-  // from being refused.
-  const resistance = session === null ? null : firstAbove(levels.highs, session.high);
-  const support = session === null ? null : firstBelow(levels.lows, session.low);
-
+  const resistance = firstAbove(levels.highs, today.sessionHigh);
+  const support = firstBelow(levels.lows, today.sessionLow);
   const headroom = resistance === null ? null : resistance - entry;
-  // The column to tune against: reward:risk actually available to the next prior-day swing
-  // high. null when nothing is overhead — which is unlimited room, not zero.
   const headroomRR = headroom !== null && risk !== null && risk > 0 ? headroom / risk : null;
   const requiredRR = Math.max(MIN_TARGET_RR, ctx.rules.targetRR);
 
-  // Recorded here, after every number is computed and before the first verdict below, so
-  // __hook.table() shows the bars that reached the measurements and __hook.stats() gives the
-  // real distributions to tune the four thresholds against. Costs nothing when unused.
+  // ── 6. The trend-day score ────────────────────────────────────────────────
+  const { score, parts } = scoreDay(prior, today, win, {
+    h1Streak: streak >= REQUIRED_H1_STREAK,
+    cleanLeg: clean !== null && clean.total >= MIN_CLEAN_BULL_BARS,
+    slopes: slope21Atr !== null && slope21Atr >= MIN_EMA21_SLOPE_ATR
+      && slope50Atr !== null && slope50Atr >= MIN_EMA50_SLOPE_ATR,
+  });
+
+  // Day-level vetoes. Each is a fact about the session so far, so it can only go from false
+  // to true — once one fires the day is killed and stays killed.
+  const pdhDeadline = win.trendDayPdhBreakBars;
+  const veto =
+    today.pdhBreakBar === null && today.bars >= pdhDeadline ? 'noPdhBreak'
+    : today.pdhBreakBar !== null && today.pdhBreakBar >= pdhDeadline ? 'latePdhBreak'
+    : today.pdhFailed ? 'pdhFailed'
+    : today.bearBreak ? 'bearBreak'
+    : today.openingLowBroken ? 'openingLowBroken'
+    : null;
+  if (veto && !day.killed) day.killed = veto;
+
+  const nearEma = emaDistAtr !== null && emaDistAtr >= 0 && emaDistAtr <= EMA_NEAR_ATR;
+  const farGapBarH1 = ctx.trigger.count === 1
+    && today.gapBars >= win.trendDayGapBarsMin
+    && score >= STRONG_TREND_DAY_SCORE;
+
+  // Recorded before any verdict so __hook.table() / __hook.stats() see every trigger bar.
   probe(ctx, {
-    hStreak,            // H1s in a row, L labels ignored     <- what H1_STREAK_STRICT=false uses
-    rawStreak,          // H1s in a row in the raw stream     <- what H1_STREAK_STRICT=true uses
-    lRun,               // highest L count in the same window — the "L7 and no new low" read
+    tdScore: score,
+    tdParts: parts.join(' '),
+    killed: day.killed,
+    entriesToday: day.entries,
+    // yesterday
+    pdh: r(prior.pdh, 2),
+    rangeAdr: r(prior.rangeAdr, 2),
+    closeLoc: r(prior.closeLoc, 2),
+    lateBreakout: prior.lateBreakout,
+    lateLegs: prior.lateLegs,
+    lateClean: prior.lateClean,
+    climaxBars: prior.climaxBars,
+    pivotResolvedUp: prior.pivotResolvedUp,
+    llToHlBars: prior.llToHlBars,
+    swingsLlToHl: prior.swingsLlToHl,
+    ySlopeAtr: r(prior.emaSlopeAtrClose, 3),
+    dailyHigherLows: prior.dailyHigherLows,
+    yInsideMultiDay: prior.yInsideMultiDay,
+    multiDayHigh: r(prior.multiDayHigh, 2),
+    // today
+    barsToday: today.bars,
+    pdhBreakBar: today.pdhBreakBar,
+    gapAdr: r(today.gapAdr, 2),
+    firstBarTrend: today.firstBarTrend,
+    firstBarHeld: today.firstBarHeld,
+    fhRangeAdr: r(today.fhRangeAdr, 2),
+    fhProgress: r(today.fhProgress, 2),
+    maxBearBodyAtr: r(today.maxBearBodyAtr, 2),
+    gapBars: today.gapBars,
+    maxGapBars: today.maxGapBars,
+    // bar
+    hStreak,
+    rawStreak,
+    lRun,
     labels: labels.slice(0, 6).join('·'),
-    cleanBars: clean.total,
-    cleanRun: clean.maxRun,
-    legBars: bullLeg.barCount,
-    legBrr: r(bullLeg.brrAvg, 3),
+    cleanBars: clean?.total ?? null,
+    cleanRun: clean?.maxRun ?? null,
+    legBars: bullLeg?.barCount ?? null,
     pullbackBars: pullback?.barCount ?? 0,
     ema21: r(ema21, 2),
     ema50: r(ema50, 2),
-    ema21SlopeEntry: r(ema21Slope, 4),
-    ema50SlopeEntry: r(ema50Slope, 4),
-    // Slope per ATR — the instrument-independent form the gates actually read.
     ema21SlopeAtr: r(slope21Atr, 3),
     ema50SlopeAtr: r(slope50Atr, 3),
-    // Signed distance from price to EMA21 in ATRs — how extended the entry is.
-    emaDistAtr: ema21 !== null && atr > 0 ? r((ctx.candle.close - ema21) / atr, 2) : null,
-    // Room to resistance. `headroomRR` is the one to run __hook.stats() on: it says how
-    // much reward:risk the prior-day structure actually leaves, and null means nothing
-    // overhead at all. `priorHighs` being 0 means there are no previous days in the loaded
-    // data, so this gate cannot bind — load more history if that is unexpected.
-    entry: r(entry, 2),
+    emaDistAtr: r(emaDistAtr, 2),
+    nearEma,
+    farGapBarH1,
+    // room
     sl: r(sl, 2),
     risk: r(risk, 2),
-    sessionHigh: r(session?.high, 2),
     resistance: r(resistance, 2),
-    headroom: r(headroom, 2),
     headroomRR: r(headroomRR, 2),
     requiredRR: r(requiredRR, 2),
     support: r(support, 2),
-    priorHighs: levels.highs.length,
   });
 
-  // ── 7. The verdicts ───────────────────────────────────────────────────────
-  if (streak < REQUIRED_H1_STREAK) return false;
-  if (lRun < MIN_L_RUN) return false;
+  // ── 7. Verdicts ───────────────────────────────────────────────────────────
+  if (day.killed) return false;
+  if (today.pdhBreakBar === null) return false;       // not broken out yet — not a trend day yet
+  if (day.entries >= win.trendDayMaxEntries && day.lastEntryBar !== ctx.absoluteIndex) return false;
+  if (ema21 === null || entry <= ema21) return false; // must hold above the moving average
+  if (score < MIN_TREND_DAY_SCORE) return false;
+  if (!nearEma && !farGapBarH1) return false;
 
-  // Swap for `clean.maxRun` to require three clean bull bars BACK TO BACK.
-  if (clean.total < MIN_CLEAN_BULL_BARS) return false;
-
-  // slope gate — comment these two out to collect the distribution first
-  if (slope21Atr === null || slope21Atr < MIN_EMA21_SLOPE_ATR) return false;
-  if (slope50Atr === null || slope50Atr < MIN_EMA50_SLOPE_ATR) return false;
-
-  // Room-to-resistance gate. No stop means the engine could not form one either and the
-  // trade would be skipped downstream anyway (runEntryHook's null-base path), so refuse it
-  // here where the reason is visible. `headroomRR === null` is the OPEN case — nothing
-  // overhead the session has not already taken out — and passes.
+  // No stop means the engine could not form one either; refuse here where the reason shows.
   if (risk === null || !(risk > 0)) return false;
   if (headroomRR !== null && headroomRR < requiredRR) return false;
 
-  // Stamped onto the trade itself — ctx.log() is appended to the signal's reason, which the
-  // batch simulator writes to journal.entrySign and journal.notes. So every trade this rule
-  // produces carries its own proof in Trade History:
-  //
-  //   Long [Uptrend] H1 | … [hook:strong-trend-h1] | H1x2 lRun=5 clean=4/6 … res=1012.40 rr=3.1
-  //
-  // That is the confirmation path that needs no debugger at all: if a trade shows this text,
-  // this function ran and every gate above it passed for that bar.
+  // The engine may ask again for the same bar under another regime — count the bar once.
+  if (day.lastEntryBar !== ctx.absoluteIndex) {
+    day.entries++;
+    day.lastEntryBar = ctx.absoluteIndex;
+  }
+
+  // Stamped onto the trade's reason, so every trade carries its own proof in Trade History.
   ctx.log(
-    `H1x${streak} lRun=${lRun} clean=${clean.total}/${bullLeg.barCount} run=${clean.maxRun} `
-    + `ema21=${ema21 === null ? 'na' : ema21.toFixed(2)} `
-    + `slope21atr=${slope21Atr === null ? 'na' : slope21Atr.toFixed(3)} `
-    + `ema50=${ema50 === null ? 'na' : ema50.toFixed(2)} `
-    + `slope50atr=${slope50Atr === null ? 'na' : slope50Atr.toFixed(3)} `
+    `TD score=${score}/${MIN_TREND_DAY_SCORE} [${parts.join(' ')}] `
+    + `pdh=${prior.pdh.toFixed(2)} brk@${today.pdhBreakBar} `
+    + `${nearEma ? 'nearEMA' : `gapBars=${today.gapBars}`} emaDist=${emaDistAtr === null ? 'na' : emaDistAtr.toFixed(2)} `
+    + `H1x${streak} clean=${clean ? `${clean.total}/${bullLeg?.barCount}` : 'na'} `
     + `res=${resistance === null ? 'open' : resistance.toFixed(2)} `
     + `rr=${headroomRR === null ? 'open' : headroomRR.toFixed(1)}/${requiredRR} `
-    + `sup=${support === null ? 'none' : support.toFixed(2)}`
+    + `sup=${support === null ? 'none' : support.toFixed(2)} entry#${day.entries}`
   );
 
   return true;
@@ -321,11 +377,427 @@ export const strongTrendH1: EntryHook = ctx => {
   // To take a structural stop under the pullback (or under the leg when there is no pullback
   // segment) instead of the regime's configured one, replace the line above with:
   //
-  //   const anchor = pullback ? pullback.low : bullLeg.low;
-  //   return { sl: anchor - (atr > 0 ? atr * 0.25 : 0) };
-  //
-  // The target then follows from the regime's targetRR against that risk.
+  //   const anchor = pullback ? pullback.low : bullLeg?.low;
+  //   return anchor === undefined ? true : { sl: anchor - (atr > 0 ? atr * 0.25 : 0) };
 };
+
+// ─── Windows ─────────────────────────────────────────────────────────────────
+
+type TrendDayWindows = { -readonly [K in keyof typeof DEFAULT_TREND_DAY_WINDOWS]: number };
+
+/** Session Settings values with the shared fallbacks, floored to sane minimums. */
+function windows(ctx: EntryHookContext): TrendDayWindows {
+  const c = ctx.config;
+  const d = DEFAULT_TREND_DAY_WINDOWS;
+  const pick = (v: number | undefined, def: number, min: number) =>
+    Number.isFinite(v) ? Math.max(min, Math.floor(v as number)) : def;
+  return {
+    trendDayAdrDays: pick(c.trendDayAdrDays, d.trendDayAdrDays, 3),
+    trendDayMultiDayLookback: pick(c.trendDayMultiDayLookback, d.trendDayMultiDayLookback, 2),
+    trendDayLateBars: pick(c.trendDayLateBars, d.trendDayLateBars, 3),
+    trendDayPdhBreakBars: pick(c.trendDayPdhBreakBars, d.trendDayPdhBreakBars, 1),
+    trendDayFirstHourBars: pick(c.trendDayFirstHourBars, d.trendDayFirstHourBars, 2),
+    trendDayGapBarsMin: pick(c.trendDayGapBarsMin, d.trendDayGapBarsMin, 1),
+    trendDayMaxEntries: pick(c.trendDayMaxEntries, d.trendDayMaxEntries, 1),
+  };
+}
+
+// ─── Daily bars (the higher timeframe) ───────────────────────────────────────
+
+interface DayBar {
+  day: number;
+  /** Absolute index of the session's first and last 5m bar. */
+  start: number;
+  end: number;
+  open: number;
+  high: number;
+  low: number;
+  close: number;
+}
+
+/**
+ * Up to `count` complete sessions strictly before `before` (today's open bar), NEWEST-FIRST,
+ * aggregated from the base candles. Nothing at or after `before` is read, so no lookahead.
+ */
+function priorDays(candles: Candle[], before: number, count: number): DayBar[] {
+  const out: DayBar[] = [];
+  let i = before - 1;
+  while (i >= 0 && out.length < count) {
+    const day = istDayIndex(candles[i].timestamp);
+    const end = i;
+    let high = Number.NEGATIVE_INFINITY;
+    let low = Number.POSITIVE_INFINITY;
+    while (i >= 0 && istDayIndex(candles[i].timestamp) === day) {
+      if (candles[i].high > high) high = candles[i].high;
+      if (candles[i].low < low) low = candles[i].low;
+      i--;
+    }
+    const start = i + 1;
+    out.push({ day, start, end, open: candles[start].open, high, low, close: candles[end].close });
+  }
+  return out;
+}
+
+// ─── Yesterday ───────────────────────────────────────────────────────────────
+
+interface PriorDayProfile {
+  pdh: number;
+  pdl: number;
+  pdc: number;
+  /** Mean range of the `trendDayAdrDays` sessions before yesterday; null with < 3 of them. */
+  adr: number | null;
+  rangeAdr: number | null;
+  closeLoc: number;
+  lateBreakout: boolean;
+  lateLegs: number;
+  lateClean: number;
+  climaxBars: number;
+  pivotResolvedUp: boolean;
+  llToHlBars: number | null;
+  /** Swing pivots (either type) strictly between the LL and the HL — the legs between them. */
+  swingsLlToHl: number | null;
+  emaSlopeAtrClose: number | null;
+  dailyHigherLows: boolean;
+  yInsideMultiDay: boolean;
+  multiDayHigh: number | null;
+}
+
+/**
+ * Everything about the previous session(s) the day verdict needs. Cached on `ctx.state` per
+ * IST day: it reads only bars before today's open, so it is fixed for the whole session.
+ */
+function priorDayProfile(
+  ctx: EntryHookContext,
+  open: SessionOpenContext,
+  win: TrendDayWindows,
+): PriorDayProfile | null {
+  const today = istDayIndex(ctx.candle.timestamp);
+  const cached = ctx.state[PROFILE_KEY] as { day: number; profile: PriorDayProfile | null } | undefined;
+  if (cached && cached.day === today) return cached.profile;
+
+  const profile = buildPriorDayProfile(ctx, open, win);
+  ctx.state[PROFILE_KEY] = { day: today, profile };
+  return profile;
+}
+
+function buildPriorDayProfile(
+  ctx: EntryHookContext,
+  open: SessionOpenContext,
+  win: TrendDayWindows,
+): PriorDayProfile | null {
+  const fc = ctx.fullCandles;
+  const days = priorDays(fc, open.openBarIndex, Math.max(win.trendDayAdrDays, win.trendDayMultiDayLookback) + 1);
+  const y = days[0];
+  if (!y) return null;
+  const range = y.high - y.low;
+  if (!(range > 0)) return null;
+
+  const adrSet = days.slice(1, 1 + win.trendDayAdrDays);
+  const adr = adrSet.length >= 3 ? adrSet.reduce((s, d) => s + (d.high - d.low), 0) / adrSet.length : null;
+
+  // Late window: yesterday's last N bars, against the day's high BEFORE that window.
+  const lateStart = Math.max(y.start, y.end - win.trendDayLateBars + 1);
+  let preLateHigh = Number.NEGATIVE_INFINITY;
+  let bodySum = 0;
+  for (let i = y.start; i <= y.end; i++) {
+    if (i < lateStart && fc[i].high > preLateHigh) preLateHigh = fc[i].high;
+    bodySum += Math.abs(fc[i].close - fc[i].open);
+  }
+  const avgBody = bodySum / (y.end - y.start + 1);
+
+  let lateBreakout = false;
+  let lateLegs = 0;
+  let lateClean = 0;
+  let climaxBars = 0;
+  let running = preLateHigh;
+  let inPush = false;
+  for (let i = lateStart; i <= y.end; i++) {
+    const b = fc[i];
+    // Brooks: the breakout must CLOSE beyond the range high, not just poke through it.
+    if (Number.isFinite(preLateHigh) && b.close > preLateHigh) lateBreakout = true;
+    // A push = a run of bars making new day highs; any bar that doesn't ends the push.
+    if (b.high > running) {
+      if (!inPush) lateLegs++;
+      inPush = true;
+      running = b.high;
+    } else {
+      inPush = false;
+    }
+    const barRange = b.high - b.low;
+    const body = b.close - b.open;
+    if (body > 0 && barRange > 0 && body / barRange >= MIN_CLEAN_BRR) lateClean++;
+    if (body > 0 && avgBody > 0 && body >= CLIMAX_BODY_MULT * avgBody) climaxBars++;
+  }
+  // No bars before the late window means no earlier range to break out of.
+  if (!Number.isFinite(preLateHigh)) lateLegs = 0;
+
+  // Pivot structure: the day's lowest swing low (LL), then the last higher swing low (HL).
+  const dayPivots = ctx.pivots.filter(p => p.barIndex >= y.start && p.barIndex <= y.end);
+  let ll: (typeof dayPivots)[number] | null = null;
+  for (const p of dayPivots) if (p.type === 'bullish' && (!ll || p.price < ll.price)) ll = p;
+  let hl: (typeof dayPivots)[number] | null = null;
+  if (ll) {
+    for (const p of dayPivots) {
+      if (p.type === 'bullish' && p.barIndex > ll.barIndex && p.price > ll.price) hl = p;
+    }
+  }
+  const mid = (y.high + y.low) / 2;
+  const pivotResolvedUp = hl !== null && hl.price > mid;
+  const llToHlBars = ll && hl ? hl.barIndex - ll.barIndex : null;
+  const swingsLlToHl = ll && hl
+    ? dayPivots.filter(p => p.barIndex > ll!.barIndex && p.barIndex < hl!.barIndex).length
+    : null;
+
+  const ySlope = calculateEMASlope(fc, y.end, EMA_PERIOD, ctx.config.ema21SlopeLookback ?? 10);
+  const yAtr = getAtrValueAt(fc, y.end);
+  const emaSlopeAtrClose = ySlope !== undefined && yAtr > 0 ? ySlope / yAtr : null;
+
+  const dailyHigherLows = days.length >= 3 && days[0].low > days[1].low && days[1].low > days[2].low;
+
+  const md = days.slice(1, 1 + win.trendDayMultiDayLookback);
+  let multiDayHigh: number | null = null;
+  let yInsideMultiDay = false;
+  if (md.length >= 2) {
+    multiDayHigh = Math.max(...md.map(d => d.high));
+    const multiDayLow = Math.min(...md.map(d => d.low));
+    yInsideMultiDay = y.high <= multiDayHigh && y.low >= multiDayLow;
+  }
+
+  return {
+    pdh: y.high,
+    pdl: y.low,
+    pdc: y.close,
+    adr,
+    rangeAdr: adr ? range / adr : null,
+    closeLoc: (y.close - y.low) / range,
+    lateBreakout,
+    lateLegs,
+    lateClean,
+    climaxBars,
+    pivotResolvedUp,
+    llToHlBars,
+    swingsLlToHl,
+    emaSlopeAtrClose,
+    dailyHigherLows,
+    yInsideMultiDay,
+    multiDayHigh,
+  };
+}
+
+// ─── Today ───────────────────────────────────────────────────────────────────
+
+interface TodayProfile {
+  /** Bars so far today, trigger bar included. */
+  bars: number;
+  sessionHigh: number;
+  sessionLow: number;
+  /** Bars-since-open of the first close above PDH; null if none yet. */
+  pdhBreakBar: number | null;
+  pdhFailed: boolean;
+  gapAdr: number | null;
+  firstBarTrend: boolean;
+  firstBarBear: boolean;
+  /** null until FIRST_BAR_HOLD_BARS bars after the first have printed. */
+  firstBarHeld: boolean | null;
+  fhRangeAdr: number | null;
+  fhProgress: number | null;
+  maxBearBodyAtr: number;
+  bearBreak: boolean;
+  /** Current run of bars whose low stayed above EMA21, ending at the trigger bar. */
+  gapBars: number;
+  maxGapBars: number;
+  openingLowBroken: boolean;
+}
+
+/** Today's development up to and including the trigger bar. Bounded by bars-per-day. */
+function todayProfile(
+  ctx: EntryHookContext,
+  open: SessionOpenContext,
+  prior: PriorDayProfile,
+  win: TrendDayWindows,
+): TodayProfile {
+  const fc = ctx.fullCandles;
+  const o = open.openBarIndex;
+  const last = ctx.absoluteIndex;
+
+  let sessionHigh = Number.NEGATIVE_INFINITY;
+  let sessionLow = Number.POSITIVE_INFINITY;
+  let pdhBreakBar: number | null = null;
+  for (let i = o; i <= last; i++) {
+    if (fc[i].high > sessionHigh) sessionHigh = fc[i].high;
+    if (fc[i].low < sessionLow) sessionLow = fc[i].low;
+    if (pdhBreakBar === null && fc[i].close > prior.pdh) pdhBreakBar = i - o;
+  }
+
+  // Opening swing low: the low of the opening bars up to the PDH break. Fixed once that
+  // window has printed; a later CLOSE below it = the opening drive failed.
+  const swingEnd = o + Math.max(OPENING_SWING_BARS, (pdhBreakBar ?? 0) + 1) - 1;
+  let openingLow = Number.POSITIVE_INFINITY;
+  for (let i = o; i <= Math.min(swingEnd, last); i++) if (fc[i].low < openingLow) openingLow = fc[i].low;
+
+  let pdhFailed = false;
+  let openingLowBroken = false;
+  let maxBearBodyAtr = 0;
+  let bearBreak = false;
+  let prevBearBelowEma = false;
+  let gapBars = 0;
+  let maxGapBars = 0;
+  for (let i = o; i <= last; i++) {
+    const b = fc[i];
+    const rel = i - o;
+    if (pdhBreakBar !== null && rel > pdhBreakBar && b.close < prior.pdh) pdhFailed = true;
+    if (i > swingEnd && b.close < openingLow) openingLowBroken = true;
+
+    const ema = getEmaValueAt(fc, i, EMA_PERIOD);
+    const atr = getAtrValueAt(fc, i);
+    const bearBody = b.open - b.close;
+    const bearBodyAtr = bearBody > 0 && atr > 0 ? bearBody / atr : 0;
+    if (bearBodyAtr > maxBearBodyAtr) maxBearBodyAtr = bearBodyAtr;
+
+    const bearBelowEma = bearBody > 0 && ema !== null && b.close < ema;
+    if (bearBelowEma && (bearBodyAtr >= BIG_BEAR_BODY_ATR || prevBearBelowEma)) bearBreak = true;
+    prevBearBelowEma = bearBelowEma;
+
+    if (ema !== null && b.low > ema) {
+      gapBars++;
+      if (gapBars > maxGapBars) maxGapBars = gapBars;
+    } else {
+      gapBars = 0;
+    }
+  }
+
+  const b0 = fc[o];
+  const r0 = b0.high - b0.low;
+  const firstBarTrend = b0.close > b0.open && r0 > 0
+    && (b0.close - b0.low) / r0 >= TREND_BAR_CLOSE_LOC
+    && (b0.close - b0.open) / r0 >= MIN_CLEAN_BRR;
+  const firstBarBear = b0.close < b0.open;
+  let firstBarHeld: boolean | null = null;
+  if (last - o >= FIRST_BAR_HOLD_BARS) {
+    firstBarHeld = true;
+    for (let i = o + 1; i <= o + FIRST_BAR_HOLD_BARS; i++) if (fc[i].low < b0.low) firstBarHeld = false;
+  }
+
+  const fhEnd = Math.min(last, o + win.trendDayFirstHourBars - 1);
+  let fhHigh = Number.NEGATIVE_INFINITY;
+  let fhLow = Number.POSITIVE_INFINITY;
+  for (let i = o; i <= fhEnd; i++) {
+    if (fc[i].high > fhHigh) fhHigh = fc[i].high;
+    if (fc[i].low < fhLow) fhLow = fc[i].low;
+  }
+  const fhRange = fhHigh - fhLow;
+  const fhProgress = fhRange > 0 ? (fc[fhEnd].close - open.dayOpen) / fhRange : null;
+  const fhRangeAdr = prior.adr ? fhRange / prior.adr : null;
+  const gapAdr = prior.adr ? (open.dayOpen - prior.pdc) / prior.adr : null;
+
+  return {
+    bars: last - o + 1,
+    sessionHigh,
+    sessionLow,
+    pdhBreakBar,
+    pdhFailed,
+    gapAdr,
+    firstBarTrend,
+    firstBarBear,
+    firstBarHeld,
+    fhRangeAdr,
+    fhProgress,
+    maxBearBodyAtr,
+    bearBreak,
+    gapBars,
+    maxGapBars,
+    openingLowBroken,
+  };
+}
+
+// ─── Score ───────────────────────────────────────────────────────────────────
+
+/** Weighted evidence for a strong bull trend day. `parts` lists every non-zero contribution. */
+function scoreDay(
+  p: PriorDayProfile,
+  t: TodayProfile,
+  win: TrendDayWindows,
+  bar: { h1Streak: boolean; cleanLeg: boolean; slopes: boolean },
+): { score: number; parts: string[] } {
+  let score = 0;
+  const parts: string[] = [];
+  const add = (key: keyof typeof W, when: boolean) => {
+    if (!when) return;
+    score += W[key];
+    parts.push(`${key}${W[key] > 0 ? '+' : ''}${W[key]}`);
+  };
+
+  // Yesterday
+  if (p.rangeAdr !== null) {
+    add('tooTight', p.rangeAdr < TIGHT_RANGE_ADR);
+    add('contraction', p.rangeAdr >= TIGHT_RANGE_ADR && p.rangeAdr <= CONTRACTION_ADR);
+    add('tooWide', p.rangeAdr > WIDE_RANGE_ADR);
+  }
+  add('strongClose', p.closeLoc >= STRONG_CLOSE_LOC);
+  add('weakClose', p.closeLoc <= WEAK_CLOSE_LOC);
+  const twoLegs = p.lateBreakout && p.lateLegs >= MIN_LATE_LEGS && p.lateClean >= MIN_CLEAN_BULL_BARS;
+  add('lateTwoLegs', twoLegs);
+  add('lateBreakout', p.lateBreakout && !twoLegs);
+  add('climax', p.climaxBars >= CLIMAX_MIN_BARS);
+  add('pivotResolvedUp', p.pivotResolvedUp);
+  if (p.emaSlopeAtrClose !== null) {
+    add('emaRising', p.emaSlopeAtrClose >= MIN_EMA21_SLOPE_ATR);
+    add('emaFalling', p.emaSlopeAtrClose <= -MIN_EMA21_SLOPE_ATR);
+  }
+
+  // Broader structure
+  add('dailyHigherLows', p.dailyHigherLows);
+  if (p.multiDayHigh !== null) {
+    const top = Math.max(p.multiDayHigh, p.pdh);
+    add('multiDayBreakout', t.sessionHigh > top && (p.yInsideMultiDay || p.pdc > p.multiDayHigh));
+    add('intoMultiDayHigh', p.adr !== null && p.multiDayHigh > p.pdh && t.sessionHigh < p.multiDayHigh
+      && (p.multiDayHigh - p.pdh) / p.adr <= RESISTANCE_NEAR_ADR);
+  }
+
+  // Today
+  if (t.gapAdr !== null) {
+    add('goodGap', t.gapAdr > 0 && t.gapAdr <= GOOD_GAP_ADR);
+    add('bigGap', t.gapAdr > BIG_GAP_ADR);
+  }
+  add('firstBarTrend', t.firstBarTrend);
+  add('firstBarBear', t.firstBarBear);
+  add('firstBarHeld', t.firstBarHeld === true);
+  if (t.fhProgress !== null) {
+    add('firstHourTrend', t.fhProgress >= FIRST_HOUR_PROGRESS);
+    add('firstHourChop', t.fhRangeAdr !== null && t.fhRangeAdr > FIRST_HOUR_SPENT_ADR
+      && t.fhProgress < FIRST_HOUR_CHOP_PROGRESS);
+  }
+  add('bigBearBar', t.maxBearBodyAtr >= BIG_BEAR_BODY_ATR);
+  add('gapBars', t.maxGapBars >= win.trendDayGapBarsMin);
+
+  // The bar
+  add('h1Streak', bar.h1Streak);
+  add('cleanLeg', bar.cleanLeg);
+  add('slopes', bar.slopes);
+
+  return { score, parts };
+}
+
+// ─── Per-session state ───────────────────────────────────────────────────────
+
+interface SessionState {
+  day: number;
+  /** The veto that killed the day, or null while it is still alive. */
+  killed: string | null;
+  entries: number;
+  lastEntryBar: number;
+}
+
+function sessionState(ctx: EntryHookContext, open: SessionOpenContext): SessionState {
+  const day = istDayIndex(open.openBarTimestamp);
+  const cur = ctx.state[SESSION_KEY] as SessionState | undefined;
+  if (cur && cur.day === day) return cur;
+  const fresh: SessionState = { day, killed: null, entries: 0, lastEntryBar: -1 };
+  ctx.state[SESSION_KEY] = fresh;
+  return fresh;
+}
+
+// ─── Prior-day swing levels (room to resistance) ─────────────────────────────
 
 /** Prior-day swing highs (ascending) and swing lows (descending), from the system's pivots. */
 interface PriorDayLevels {
@@ -336,20 +808,10 @@ interface PriorDayLevels {
 }
 
 /**
- * Swing levels laid down on PREVIOUS trading days, newest session excluded.
- *
- * A `bearish` pivot records `current.high` and a `bullish` one `current.low`
- * (`calculatePivotPoints`), so the two types are exactly the swing highs and swing lows
- * being asked for here.
- *
- * Cached on `ctx.state` per IST day. The set of prior-day pivots is FIXED for the whole of
- * today — new pivots can only land on today, which this filters out — so one build per day
- * is not an optimisation that can go stale. Without it this would re-scan the entire pivot
- * history on every trigger bar.
- *
- * `ctx.pivots` is oldest-first, so the scan stops at the first pivot belonging to today
- * rather than walking the remainder. Note there is no lookback here at all: "nearest level
- * above" is well defined over whatever history is loaded, so nothing needs tuning.
+ * Swing levels laid down on PREVIOUS trading days, newest session excluded. A `bearish`
+ * pivot records a swing high and a `bullish` one a swing low. Cached per IST day: new pivots
+ * can only land on today, which is filtered out, so the set is fixed for the session.
+ * `ctx.pivots` is oldest-first, so the scan stops at the first pivot belonging to today.
  */
 function priorDayLevels(ctx: EntryHookContext): PriorDayLevels {
   const day = istDayIndex(ctx.candle.timestamp);
@@ -371,27 +833,6 @@ function priorDayLevels(ctx: EntryHookContext): PriorDayLevels {
   return fresh;
 }
 
-/**
- * Highest high and lowest low of the entry bar's own session, up to and including that bar.
- *
- * This is what decides whether a prior-day level is still intact. Bounded by bars-per-day
- * (75 on 5m), which is why `getSessionOpenContext` states no caching is warranted.
- */
-function sessionExtremes(ctx: EntryHookContext): { high: number; low: number } | null {
-  const open = getSessionOpenContext(ctx.fullCandles, ctx.absoluteIndex);
-  if (!open) return null;
-
-  let high = Number.NEGATIVE_INFINITY;
-  let low = Number.POSITIVE_INFINITY;
-  for (let i = open.openBarIndex; i <= ctx.absoluteIndex; i++) {
-    const bar = ctx.fullCandles[i];
-    if (bar.high > high) high = bar.high;
-    if (bar.low < low) low = bar.low;
-  }
-  if (!Number.isFinite(high) || !Number.isFinite(low)) return null;
-  return { high, low };
-}
-
 /** First value strictly above `mark` in an ASCENDING list — the nearest intact resistance. */
 function firstAbove(ascending: number[], mark: number): number | null {
   for (const v of ascending) if (v > mark) return v;
@@ -404,15 +845,12 @@ function firstBelow(descending: number[], mark: number): number | null {
   return null;
 }
 
+// ─── Bar-level helpers ───────────────────────────────────────────────────────
+
 /**
- * Clean bull bars within a segment: bull-bodied AND body-to-range at or above MIN_CLEAN_BRR.
- *
- * Both series are 'full'-detail only. `ctx.legs()` always builds at 'full', so they are
- * present on this path — but a Firestore-restored sequence has them stripped, so null is
- * returned rather than a silent zero, and the caller fails closed on it.
- *
- * Returns the total and the longest consecutive run, because "minimum three clean bull bars"
- * has both readings and only real data can say which one separates your winners.
+ * Clean bull bars within a segment: bull-bodied AND body-to-range ≥ MIN_CLEAN_BRR. Needs the
+ * 'full'-detail per-candle arrays (`ctx.legs()` always builds them); null when absent, which
+ * scores no clean-leg point rather than a silent zero.
  */
 function countCleanBullBars(seg: LegSegment): { total: number; maxRun: number } | null {
   const { bullBear, brr } = seg;
@@ -436,17 +874,10 @@ function countCleanBullBars(seg: LegSegment): { total: number; maxRun: number } 
 
 /**
  * The H/L labels over the current leg sequence, NEWEST-FIRST, the trigger bar's own label
- * first.
- *
- * Read off `ctx.signals` (dense, window-aligned, causal) rather than each segment's `hl`
- * array, because the gap between two segments — and the trigger bar itself, which may not
- * belong to any completed segment — would otherwise be invisible.
- *
- * The scan is bounded by the OLDEST segment's start, so the window is whatever Session
- * Settings' Leg Seq N spans, not a bar count hard-coded here.
+ * first. Read off `ctx.signals` (window-aligned) and bounded by the OLDEST segment's start,
+ * so the window is whatever Session Settings' Leg Seq N spans.
  */
 function recentLabels(ctx: EntryHookContext, segs: LegSegment[]): string[] {
-  // ctx.signals is aligned with ctx.candles (the window), while segment indices are absolute.
   const windowOffset = ctx.absoluteIndex - ctx.index; // absolute index of ctx.candles[0]
   const oldest = segs[segs.length - 1];
   const floorIdx = oldest ? Math.max(0, oldest.startIndex - windowOffset) : 0;
@@ -459,16 +890,14 @@ function recentLabels(ctx: EntryHookContext, segs: LegSegment[]): string[] {
   return out;
 }
 
-/** How many labels from the front of a newest-first list are 'H1', stopping at the first
- *  that is not. */
+/** How many labels from the front of a newest-first list are 'H1'. */
 function countLeadingH1(labels: string[]): number {
   let n = 0;
   while (n < labels.length && labels[n] === 'H1') n++;
   return n;
 }
 
-/** Highest bear count present in the window — the "L1, L2 … L7 and still no new low" read.
- *  0 when no L label fired at all. */
+/** Highest bear count in the window — the "L7 and still no new low" read. */
 function maxLCount(labels: string[]): number {
   let max = 0;
   for (const label of labels) {

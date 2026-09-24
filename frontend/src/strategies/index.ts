@@ -42,7 +42,7 @@ import { strongTrendH1 } from './strongTrendH1';
 export const ENTRY_HOOKS: Record<string, EntryHookEntry> = {
   'strong-trend-h1': {
     label: 'Strong-Trend H1',
-    description: 'Long only. Buys every H1 while the bull count keeps resetting to H1 — last two H signals both H1, 3+ clean bull bars in the leg, EMA21 and EMA50 both sloping up hard at the entry bar.',
+    description: 'Long only. Scores whether today is a strong bull trend day (prior-day contraction + late two-leg breakout, multi-day context, PDH break that holds, no big bear bars) and buys H1/H2 near EMA21 on qualifying days.',
     hook: strongTrendH1,
   },
   'hh-shallow-pullback': {

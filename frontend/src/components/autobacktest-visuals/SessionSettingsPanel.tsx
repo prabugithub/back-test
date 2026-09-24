@@ -1,5 +1,6 @@
 import { X, Settings2 } from 'lucide-react';
 import { MULTI_TRADE_DEFAULT_CAP, type AutoBacktestConfig } from '../../utils/autoBacktestEngine';
+import { DEFAULT_TREND_DAY_WINDOWS } from '../../strategies/strongTrendH1';
 import {
   DEFAULT_ENTRY_HOOK_LOOKBACK,
   ENTRY_HOOK_LOOKBACK_MIN,
@@ -11,6 +12,18 @@ import {
   EXIT_HOOK_LOOKBACK_MAX,
 } from '../../utils/exitHook';
 import { CardShell } from './CardShell';
+
+const TREND_DAY_INPUTS: {
+  key: keyof typeof DEFAULT_TREND_DAY_WINDOWS; label: string; title: string; min: number; max: number;
+}[] = [
+  { key: 'trendDayAdrDays', label: 'TD ADR Days', min: 3, max: 40, title: 'Strong-Trend H1: prior sessions averaged into the average daily range (ADR) that every day-range ratio is measured against' },
+  { key: 'trendDayMultiDayLookback', label: 'TD Multi-Day', min: 2, max: 20, title: 'Strong-Trend H1: sessions before yesterday that form the multi-day range — breaking out of it scores up, opening just under its high scores down' },
+  { key: 'trendDayLateBars', label: 'TD Late Bars', min: 6, max: 40, title: "Strong-Trend H1: yesterday's last N bars read for the late breakout (two bull legs, clean bars) and the buy-climax check" },
+  { key: 'trendDayPdhBreakBars', label: 'TD PDH Bars', min: 1, max: 30, title: "Strong-Trend H1: today's first N bars in which price must trade above the previous day's high (a gap above counts). No break in time = not a trend day" },
+  { key: 'trendDayFirstHourBars', label: 'TD 1st Hour', min: 3, max: 30, title: "Strong-Trend H1: bars treated as today's opening range / first hour for the trend-vs-chop read" },
+  { key: 'trendDayGapBarsMin', label: 'TD Gap Bars', min: 5, max: 60, title: 'Strong-Trend H1: consecutive bars not touching EMA21 after which an H1 far from the EMA is allowed on a strong day (Brooks 20 gap bars)' },
+  { key: 'trendDayMaxEntries', label: 'TD Max/Day', min: 1, max: 10, title: 'Strong-Trend H1: most entries the hook approves in one session' },
+];
 
 interface SessionSettingsPanelProps {
   config: AutoBacktestConfig;
@@ -305,6 +318,18 @@ export function SessionSettingsPanel({ config, onChange, isOpen, onClose }: Sess
                   className="w-16 px-1.5 py-1 text-xs border rounded text-center"
                 />
               </div>
+              {/* Strong-trend-day windows — read only by the Strong-Trend H1 entry hook. */}
+              {TREND_DAY_INPUTS.map(({ key, label, title, min, max }) => (
+                <div key={key} className="flex items-center justify-between gap-1">
+                  <span className="text-[10px] text-gray-500" title={title}>{label}</span>
+                  <input
+                    type="number" min={min} max={max}
+                    value={config[key] ?? DEFAULT_TREND_DAY_WINDOWS[key]}
+                    onChange={e => onChange({ [key]: Number(e.target.value) })}
+                    className="w-12 px-1.5 py-1 text-xs border rounded text-center"
+                  />
+                </div>
+              ))}
             </div>
             <div className="flex items-center justify-between gap-2 mt-2">
               <span className="text-[10px] text-gray-500" title="Full keeps per-candle BRR/CLV/UWR/LWR arrays for every leg/pullback (in-memory + export); Averages keeps only the per-segment averages (also what is persisted to the cloud session)">Leg Seq Detail</span>

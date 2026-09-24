@@ -378,6 +378,16 @@ export interface AutoBacktestConfig {
   // Clamped to [50, 5000] on read; see resolveExitHookLookback (default 400).
   exitHookLookback?: number;
 
+  // Strong-trend-day windows read by the Strong-Trend H1 entry hook (strategies/strongTrendH1.ts).
+  // Optional — undefined falls back to DEFAULT_TREND_DAY_WINDOWS (in that file), so saved configs need no migration.
+  trendDayAdrDays?: number;          // prior sessions averaged for the average daily range (default 10)
+  trendDayMultiDayLookback?: number; // sessions before yesterday forming the multi-day range (default 5)
+  trendDayLateBars?: number;         // yesterday's last N bars read for the late breakout / climax (default 18)
+  trendDayPdhBreakBars?: number;     // today's first N bars in which price must trade above PDH (default 6)
+  trendDayFirstHourBars?: number;    // bars counted as today's opening range / first hour (default 12)
+  trendDayGapBarsMin?: number;       // bars without an EMA21 touch before an H1 far from the EMA is allowed (default 20)
+  trendDayMaxEntries?: number;       // max entries the hook approves per session (default 3)
+
   // Per-regime rule sets
   uptrend: RegimeRules;   // Bull-Trend, Bull-Trending-range
   downtrend: RegimeRules; // Bear-Trend, Bear-Trending-range
