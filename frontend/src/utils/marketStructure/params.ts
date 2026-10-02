@@ -13,12 +13,13 @@ export interface StructureParams {
   ampRatio: number;           // expanding (≥) / shrinking (≤ 1/x) impulse-size ratio
   tightFrac: number;          // tight range: height ≤ this × previous trend's median impulse
   wedgeConvergence: number;   // wedge: channel width narrows by at least this fraction
+  escapeFrac: number;         // breakout attempt confirms once a close clears the edge by this × box height
 }
 
 export type StructureConfig = Pick<AutoBacktestConfig,
   | 'structureMaxPivots' | 'structureMinSwings' | 'structureBreakFrac'
   | 'structureStairsMaxDepth' | 'structureStairsMaxTime' | 'structureAmpRatio'
-  | 'structureTightFrac' | 'structureWedgeConvergence' | 'minPivotGapBars'>;
+  | 'structureTightFrac' | 'structureWedgeConvergence' | 'structureEscapeFrac' | 'minPivotGapBars'>;
 
 export interface StructureParamDef {
   key: keyof StructureConfig;
@@ -38,6 +39,8 @@ export const STRUCTURE_PARAM_DEFS: readonly StructureParamDef[] = [
     title: 'Swings a segment needs before its sub-regime (stairs, wedge, triangle…) is named. Until then it shows only Up / Down / Range.' },
   { key: 'structureBreakFrac', label: 'Break buffer (× median swing)', min: 0, max: 1, step: 0.05, def: 0.25,
     title: 'A close must clear a key pivot level by this fraction of the segment\'s median swing size to count as a break of structure or a breakout.' },
+  { key: 'structureEscapeFrac', label: 'Breakout escape (× box height)', min: 0.1, max: 2, step: 0.05, def: 0.5,
+    title: 'A close beyond the range box only opens a breakout ATTEMPT (still Range). It becomes a trend once a close clears the broken edge by this × the box height — or once a pullback holds outside the box and price then closes beyond the attempt’s best close. A close back inside first is a failed breakout and the box widens instead.' },
   { key: 'structureStairsMaxDepth', label: 'Stairs max retrace', min: 0.1, max: 1, step: 0.05, def: 0.4,
     title: 'Trend is "stairs" when the mean pullback size / prior impulse size stays at or below this.' },
   { key: 'structureStairsMaxTime', label: 'Stairs max pullback time', min: 0.2, max: 3, step: 0.1, def: 1,
@@ -67,10 +70,11 @@ export function resolveStructureParams(config: Partial<StructureConfig>): Struct
     ampRatio: clamp(config.structureAmpRatio, d.structureAmpRatio),
     tightFrac: clamp(config.structureTightFrac, d.structureTightFrac),
     wedgeConvergence: clamp(config.structureWedgeConvergence, d.structureWedgeConvergence),
+    escapeFrac: clamp(config.structureEscapeFrac, d.structureEscapeFrac),
   };
 }
 
 export function paramsKey(p: StructureParams, minGapBars: number): string {
   return [minGapBars, p.maxPivots, p.minSwings, p.breakFrac, p.stairsMaxDepth, p.stairsMaxTime,
-    p.ampRatio, p.tightFrac, p.wedgeConvergence].join('|');
+    p.ampRatio, p.tightFrac, p.wedgeConvergence, p.escapeFrac].join('|');
 }

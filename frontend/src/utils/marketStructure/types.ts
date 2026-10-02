@@ -82,7 +82,7 @@ export interface PrevSegmentInfo {
 }
 
 export type TransitionReason =
-  | 'init' | 'bos' | 'breakout' | 'failed-breakout' | 'confirmed' | 'sub-change';
+  | 'init' | 'bos' | 'attempt' | 'breakout' | 'failed-breakout';
 
 /** Market structure as of one bar. Immutable — consecutive bars share the object when
  *  nothing changed. */
@@ -91,16 +91,18 @@ export interface StructureState {
   segmentId: number;
   broad: StructureBroad;
   sub: StructureSub | null;   // null while the segment has too few swings
-  /** Trend only: false until the breakout is confirmed by a pullback holding above (below)
-   *  the broken range edge. Range states are always true. */
+  /** False while a range has an open breakout attempt (not yet escaped). Trends are always
+   *  confirmed — a breakout only becomes a trend once it escapes. */
   confirmed: boolean;
+  /** Range only: direction of an open breakout attempt. broad stays 'range' until it escapes. */
+  breakoutAttempt: 'up' | 'down' | null;
+  attemptStart: number | null;  // bar the attempt began on
+  attemptEdge: number | null;   // the broken box edge
   segmentStart: number;       // bar index of the segment's first swing point (anchor)
   transitionBar: number;      // bar the current broad state began on (causal band start)
   transitionReason: TransitionReason;
   /** Trend only: the protected swing (HL in up, LH in down). A close beyond it − buffer = BOS. */
   keyLevel: number | null;
-  /** Unconfirmed trend only: the broken range edge a close must not fall back through. */
-  breakoutLevel: number | null;
   rangeHigh: number | null;   // max swing high in the segment
   rangeLow: number | null;    // min swing low in the segment
   /** The adaptive window — every swing point of the current segment (capped by maxPivots). */
@@ -111,7 +113,7 @@ export interface StructureState {
   evidence: StructureEvidence;
 }
 
-/** A contiguous run of bars with the same (segment, broad, sub, confirmed) — for drawing. */
+/** A contiguous run of bars with the same (segment, broad, sub, attempt) — for drawing. */
 export interface StructureSegment {
   startIndex: number;
   endIndex: number;
@@ -119,6 +121,7 @@ export interface StructureSegment {
   broad: StructureBroad;
   sub: StructureSub | null;
   confirmed: boolean;
+  breakoutAttempt: 'up' | 'down' | null;
   rangeHigh: number | null;
   rangeLow: number | null;
   keyLevel: number | null;

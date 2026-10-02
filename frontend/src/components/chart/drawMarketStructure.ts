@@ -18,7 +18,8 @@ const COLORS = {
 function label(s: StructureSegment): string {
   const broad = s.broad === 'up' ? 'UP' : s.broad === 'down' ? 'DOWN' : 'RANGE';
   const sub = s.sub ? ` · ${STRUCTURE_SUB_LABELS[s.sub]}` : '';
-  return `${broad}${s.confirmed ? '' : '?'}${sub}`;
+  const attempt = s.breakoutAttempt ? ` → ${s.breakoutAttempt === 'up' ? 'UP' : 'DOWN'}?` : '';
+  return `${broad}${attempt}${sub}`;
 }
 
 export function drawMarketStructure(
@@ -54,13 +55,14 @@ export function drawMarketStructure(
     ctx.fillStyle = c.fill;
     ctx.fillRect(left, 0, right - left, height);
 
-    // Unconfirmed breakout — diagonal hatch over the band.
-    if (!s.confirmed) {
+    // Open breakout attempt — the range band hatched in the attempt's colour.
+    if (s.breakoutAttempt) {
+      const h = COLORS[s.breakoutAttempt];
       ctx.save();
       ctx.beginPath();
       ctx.rect(left, 0, right - left, height);
       ctx.clip();
-      ctx.strokeStyle = c.fill.replace(/0\.0\d\)/, '0.25)');
+      ctx.strokeStyle = h.fill.replace(/0\.0\d\)/, '0.3)');
       ctx.lineWidth = 1;
       for (let x = left - height; x < right; x += 10) {
         ctx.beginPath();

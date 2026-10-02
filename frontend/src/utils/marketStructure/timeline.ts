@@ -9,10 +9,16 @@
 //      box, key level and sub-regime are refreshed over ALL points in the segment (the
 //      adaptive window: it grows until the structure breaks, capped by maxPivots).
 //   2. close step — the bar's close is validated against the segment's pivot levels:
-//        up    → range  : close < keyLevel (protected HL) − buffer        (break of structure)
-//        range → up     : close > rangeHigh + buffer                      (breakout, unconfirmed)
-//        up(unconf.)    : first swing low holding ≥ broken rangeHigh − buffer confirms it;
-//                         a close back < rangeHigh − buffer is a failed breakout → range resumes
+//        up    → range   : close < keyLevel (protected HL) − buffer       (break of structure)
+//        range           : close > rangeHigh + buffer opens a breakout ATTEMPT — the state
+//                          stays range (same segment, same box history) until price escapes:
+//                            · distance — close ≥ edge + escapeFrac × box height, or
+//                            · hold     — a swing low holds ≥ edge − buffer, then a close
+//                                         above the attempt's best close (follow-through)
+//                          A close back < edge − buffer first is a failed breakout: the attempt
+//                          clears and the box has simply widened to include the excursion
+//                          (a 3-push correction's marginal lower lows stay ONE range).
+//        range → up      : escape confirmed
 //      and the mirrors for down. Up ↔ down always passes through range.
 //
 // buffer = breakFrac × median swing size of the segment (fallback: recent swings overall).
@@ -27,20 +33,28 @@ import type {
   Swing, SwingPoint, TransitionReason,
 } from './types';
 
+interface Attempt {
+  dir: 'up' | 'down';
+  edge: number;        // broken box edge, frozen at the attempt start
+  height: number;      // box height at the attempt start
+  buffer: number;      // break buffer at the attempt start
+  startBar: number;
+  best: number;        // best close beyond the edge so far (max for up, min for down)
+  holdTarget: number | null; // armed when a pullback holds outside the box: a close beyond it confirms
+}
+
 interface Seg {
   id: number;
   broad: StructureBroad;
-  confirmed: boolean;
   transitionBar: number;
   reason: TransitionReason;
   points: SwingPoint[];          // replaced (never mutated) on change — states hold references
   keyLevel: number | null;
-  breakoutLevel: number | null;
   trendExtreme: number | null;   // highest high (up) / lowest low (down) since the trend began
   pendingSwing: number | null;   // lowest low since last HH (up) / highest high since last LL (down)
   failedBreakouts: number;
   prev: PrevSegmentInfo | null;
-  savedRange: Seg | null;        // the range a still-unconfirmed breakout left — restored on failure
+  attempt: Attempt | null;       // range only: a breakout not yet confirmed
 }
 
 /** Append a swing point, collapsing consecutive same-type points to the more extreme one. */
@@ -206,11 +220,14 @@ function computeTimeline(candles: Candle[], minGapBars: number, params: Structur
   // Recent swing points across segments — the fallback scale before a segment has swings.
   let recent: SwingPoint[] = [];
 
-  let seg: Seg = {
-    id: nextId++, broad: 'range', confirmed: true, transitionBar: 0, reason: 'init',
-    points: [], keyLevel: null, breakoutLevel: null, trendExtreme: null, pendingSwing: null,
-    failedBreakouts: 0, prev: null, savedRange: null,
-  };
+  const newSeg = (
+    broad: StructureBroad, bar: number, reason: TransitionReason, points: SwingPoint[], prev: PrevSegmentInfo | null,
+  ): Seg => ({
+    id: nextId++, broad, transitionBar: bar, reason, points,
+    keyLevel: null, trendExtreme: null, pendingSwing: null, failedBreakouts: 0, prev, attempt: null,
+  });
+
+  let seg: Seg = newSeg('range', 0, 'init', [], null);
   let cls = classify(seg, params, 0);
   let current: StructureState | null = null;
   let dirty = true;
@@ -235,55 +252,35 @@ function computeTimeline(candles: Candle[], minGapBars: number, params: Structur
       seg.points = mergePoint(seg.points, sp, params.maxPivots);
       if (seg.points === before) continue; // less extreme same-type pivot — no new information
 
-      const buf = cls.evidence.buffer;
       if (seg.broad === 'up') {
         if (sp.type === 'high') {
           if (seg.trendExtreme === null || sp.price > seg.trendExtreme) {
-            const hadHigh = seg.trendExtreme !== null;
             seg.trendExtreme = sp.price;
-            // Follow-through: a pullback low then a NEW high confirms a breakout whose
-            // pullback dipped back under the broken edge without a close through it.
-            if (!seg.confirmed && hadHigh && seg.pendingSwing !== null) {
-              seg.confirmed = true;
-              seg.reason = 'confirmed';
-              seg.transitionBar = i;
-            }
             // A new high makes the low that launched it the protected level.
-            if (seg.confirmed && seg.pendingSwing !== null) seg.keyLevel = seg.pendingSwing;
+            if (seg.pendingSwing !== null) seg.keyLevel = seg.pendingSwing;
             seg.pendingSwing = null;
           }
         } else {
           seg.pendingSwing = seg.pendingSwing === null ? sp.price : Math.min(seg.pendingSwing, sp.price);
-          if (!seg.confirmed && seg.breakoutLevel !== null && sp.price >= seg.breakoutLevel - buf) {
-            seg.confirmed = true;
-            seg.keyLevel = sp.price;
-            seg.pendingSwing = null;
-            seg.reason = 'confirmed';
-            seg.transitionBar = i;
-          }
         }
       } else if (seg.broad === 'down') {
         if (sp.type === 'low') {
           if (seg.trendExtreme === null || sp.price < seg.trendExtreme) {
-            const hadLow = seg.trendExtreme !== null;
             seg.trendExtreme = sp.price;
-            if (!seg.confirmed && hadLow && seg.pendingSwing !== null) {
-              seg.confirmed = true;
-              seg.reason = 'confirmed';
-              seg.transitionBar = i;
-            }
-            if (seg.confirmed && seg.pendingSwing !== null) seg.keyLevel = seg.pendingSwing;
+            if (seg.pendingSwing !== null) seg.keyLevel = seg.pendingSwing;
             seg.pendingSwing = null;
           }
         } else {
           seg.pendingSwing = seg.pendingSwing === null ? sp.price : Math.max(seg.pendingSwing, sp.price);
-          if (!seg.confirmed && seg.breakoutLevel !== null && sp.price <= seg.breakoutLevel + buf) {
-            seg.confirmed = true;
-            seg.keyLevel = sp.price;
-            seg.pendingSwing = null;
-            seg.reason = 'confirmed';
-            seg.transitionBar = i;
-          }
+        }
+      } else if (seg.attempt) {
+        // Pullback during a breakout attempt: holding outside the box arms follow-through;
+        // one reaching back inside disarms it.
+        const a = seg.attempt;
+        const pullback = a.dir === 'up' ? sp.type === 'low' : sp.type === 'high';
+        if (pullback) {
+          const holds = a.dir === 'up' ? sp.price >= a.edge - a.buffer : sp.price <= a.edge + a.buffer;
+          seg.attempt = { ...a, holdTarget: holds ? a.best : null };
         }
       }
       reclassify();
@@ -295,18 +292,7 @@ function computeTimeline(candles: Candle[], minGapBars: number, params: Structur
 
     if (seg.broad === 'up' || seg.broad === 'down') {
       const up = seg.broad === 'up';
-      if (!seg.confirmed && seg.breakoutLevel !== null
-        && (up ? c < seg.breakoutLevel - buf : c > seg.breakoutLevel + buf)) {
-        // Failed breakout — back inside the box. Resume the range, keeping the swings
-        // printed meanwhile.
-        const r = seg.savedRange!;
-        const lastBar = r.points.length ? r.points[r.points.length - 1].barIndex : -1;
-        let pts = r.points;
-        for (const p of seg.points) if (p.barIndex > lastBar) pts = mergePoint(pts, p, params.maxPivots);
-        seg = { ...r, points: pts, failedBreakouts: r.failedBreakouts + 1, reason: 'failed-breakout', transitionBar: i };
-        reclassify();
-      } else if (seg.confirmed && seg.keyLevel !== null
-        && (up ? c < seg.keyLevel - buf : c > seg.keyLevel + buf)) {
+      if (seg.keyLevel !== null && (up ? c < seg.keyLevel - buf : c > seg.keyLevel + buf)) {
         // Break of structure — the trend's extreme anchors the new range.
         const want = up ? 'high' : 'low';
         let anchor = -1;
@@ -316,39 +302,75 @@ function computeTimeline(candles: Candle[], minGapBars: number, params: Structur
           if (anchor < 0 || (up ? p.price > seg.points[anchor].price : p.price < seg.points[anchor].price)) anchor = k;
         }
         const prev = prevInfo(seg);
-        seg = {
-          id: nextId++, broad: 'range', confirmed: true, transitionBar: i, reason: 'bos',
-          points: anchor >= 0 ? seg.points.slice(anchor) : [],
-          keyLevel: null, breakoutLevel: null, trendExtreme: null, pendingSwing: null,
-          failedBreakouts: 0, prev, savedRange: null,
-        };
+        seg = newSeg('range', i, 'bos', anchor >= 0 ? seg.points.slice(anchor) : [], prev);
         reclassify();
       }
     } else {
-      const { hi, lo } = boxOf(seg.points);
-      // A range can only be broken once it has BOTH edges — after a BOS the box starts as
-      // the trend's extreme alone, and the opposite edge must print (Brooks: an LH/HL forms)
-      // before the move counts as a new trend rather than one long leg.
-      const twoSided = hi !== null && lo !== null;
-      const upBreak = twoSided && c > hi! + buf;
-      const downBreak = twoSided && !upBreak && c < lo! - buf;
-      if (upBreak || downBreak) {
-        const up = upBreak;
-        // The breakout impulse starts at the range's last opposite swing.
-        const want = up ? 'low' : 'high';
-        let start = -1;
-        for (let k = seg.points.length - 1; k >= 0; k--) {
-          if (seg.points[k].type === want) { start = k; break; }
+      // Range: progress an open attempt first.
+      if (seg.attempt) {
+        const a = seg.attempt;
+        const up = a.dir === 'up';
+        const best = up ? Math.max(a.best, c) : Math.min(a.best, c);
+        const failed = up ? c < a.edge - a.buffer : c > a.edge + a.buffer;
+        const escaped = up
+          ? c >= a.edge + params.escapeFrac * a.height || (a.holdTarget !== null && c > a.holdTarget)
+          : c <= a.edge - params.escapeFrac * a.height || (a.holdTarget !== null && c < a.holdTarget);
+        if (failed) {
+          // Back inside: the range resumes, its box already widened by the excursion.
+          seg.attempt = null;
+          seg.failedBreakouts++;
+          seg.reason = 'failed-breakout';
+          seg.transitionBar = i;
+          dirty = true;
+        } else if (escaped) {
+          // Confirmed: the trend starts at the range's last opposite swing before the attempt.
+          const want = up ? 'low' : 'high';
+          let start = -1;
+          for (let k = seg.points.length - 1; k >= 0; k--) {
+            const p = seg.points[k];
+            if (p.type === want && p.barIndex < a.startBar) { start = k; break; }
+          }
+          // Protected level: the latest pullback that held outside the box, else the broken edge.
+          let held: number | null = null;
+          for (const p of seg.points) {
+            if (p.barIndex >= a.startBar && p.type === want
+              && (up ? p.price >= a.edge - a.buffer : p.price <= a.edge + a.buffer)) held = p.price;
+          }
+          const prev = prevInfo(seg);
+          const pts = start >= 0 ? seg.points.slice(start) : seg.points.filter(p => p.barIndex >= a.startBar);
+          seg = newSeg(up ? 'up' : 'down', i, 'breakout', pts, prev);
+          seg.keyLevel = held ?? a.edge;
+          const ext = boxOf(pts);
+          seg.trendExtreme = up ? ext.hi : ext.lo;
+          reclassify();
+        } else if (best !== a.best) {
+          seg.attempt = { ...a, best };
+          dirty = true;
         }
-        const prev = prevInfo(seg);
-        const savedRange = seg;
-        seg = {
-          id: nextId++, broad: up ? 'up' : 'down', confirmed: false, transitionBar: i, reason: 'breakout',
-          points: start >= 0 ? seg.points.slice(start) : [],
-          keyLevel: null, breakoutLevel: up ? hi : lo, trendExtreme: null, pendingSwing: null,
-          failedBreakouts: 0, prev, savedRange,
-        };
-        reclassify();
+      }
+
+      if (seg.broad === 'range' && !seg.attempt) {
+        const { hi, lo } = boxOf(seg.points);
+        // A range can only be broken once it has BOTH edges — after a BOS the box starts as
+        // the trend's extreme alone, and the opposite edge must print (Brooks: an LH/HL forms)
+        // before a move out of it counts as anything but one long leg.
+        if (hi !== null && lo !== null) {
+          const up = c > hi + buf;
+          const down = !up && c < lo - buf;
+          if (up || down) {
+            // Escape is measured against the box height, floored at the swing scale (the
+            // trend this range came out of, else recent swings): a range born seconds after
+            // a BOS has a sliver of a box, and half a sliver is no escape at all.
+            const scale = Math.max(hi - lo, seg.prev?.medianImpulse ?? 0, fallbackMedian());
+            seg.attempt = {
+              dir: up ? 'up' : 'down', edge: up ? hi : lo, height: scale, buffer: buf,
+              startBar: i, best: c, holdTarget: null,
+            };
+            seg.reason = 'attempt';
+            seg.transitionBar = i;
+            dirty = true;
+          }
+        }
       }
     }
 
@@ -359,12 +381,14 @@ function computeTimeline(candles: Candle[], minGapBars: number, params: Structur
         segmentId: seg.id,
         broad: seg.broad,
         sub: cls.sub,
-        confirmed: seg.confirmed,
+        confirmed: seg.attempt === null,
+        breakoutAttempt: seg.attempt?.dir ?? null,
+        attemptStart: seg.attempt?.startBar ?? null,
+        attemptEdge: seg.attempt?.edge ?? null,
         segmentStart: seg.points.length ? seg.points[0].barIndex : seg.transitionBar,
         transitionBar: seg.transitionBar,
         transitionReason: seg.reason,
         keyLevel: seg.keyLevel,
-        breakoutLevel: seg.confirmed ? null : seg.breakoutLevel,
         rangeHigh: box.hi,
         rangeLow: box.lo,
         segmentPivots: seg.points,

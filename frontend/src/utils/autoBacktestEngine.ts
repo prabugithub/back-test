@@ -411,6 +411,7 @@ export interface AutoBacktestConfig {
   structureAmpRatio?: number;
   structureTightFrac?: number;
   structureWedgeConvergence?: number;
+  structureEscapeFrac?: number;
   // Which classifier picks the regime rule-set (and feeds ltMarket everywhere in the engine).
   // 'ema' (default, undefined) = analyzeMarketStructureAt; 'pivot' = the pivot structure
   // mapped via structureToLtMarket. htMarket stays EMA-based either way.

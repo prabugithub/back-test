@@ -473,6 +473,11 @@ A pivot-only classifier: Up / Down / Range plus a 9-regime sub-type. It runs as 
 
 - **Look-ahead safety relies on `calculatePivotPoints` being a causal fold**, where a pivot is known on the bar it fires on. The timeline consumes `pivots[k]` at `barIndex`, never earlier. `scripts/structureVerify.ts` recomputes sampled bars on truncated series and asserts identity. Any change to pivot confirmation timing (e.g. a lagged fractal) must re-check this.
 - **The window is the whole current segment (adaptive)**, capped by `structureMaxPivots`. It is not a fixed lookback. Do not add a fixed-N window.
+- **Breakouts are ATTEMPTS on the range segment, not trend segments.** `Seg.attempt` holds `{dir, edge, height, buffer, startBar, best, holdTarget}`. While it is open, `broad` stays `'range'`, `confirmed` is false and `breakoutAttempt` is set.
+  - A trend segment is created only on escape: a close clearing the edge by `escapeFrac` × height, or a held pullback followed by a close beyond `best`. `height` is floored at the swing scale.
+  - A failed attempt clears in place, and the box keeps the excursion.
+  - There is no `savedRange` restore and no unconfirmed trend any more, so trends are always `confirmed`. A Market-step "Up" gate therefore never passes an attempt.
+  - `scripts/structureFixture.ts` (a synthetic NIFTY Jul 2024 replica) and `structureSmoke.ts` §5/§6 assert that a 3-push correction plus a failed gap stay one range.
 - **`StructureState` objects are immutable and shared between consecutive bars.** `segmentPivots` arrays are replaced on change, never mutated. Mutating one corrupts every earlier bar's state.
 - **Engine chokepoint:** every engine read of `ltMarket` goes through `resolveLtMarketAt(candles, idx, pivots, config)`. That covers `evaluateAutoSignals`, `previewEntryHook`, `resolveExitRules`, the reversal exit, the exit-hook env and `getCurrentMarketState`.
   - With `regimeSource` `'ema'` (the default, undefined) it **is** `analyzeMarketStructureAt`, byte-identical. With `'pivot'` it swaps in `structureToLtMarket(getStructureAt(...))`. `htMarket` is always EMA.

@@ -114,7 +114,7 @@ Each pivot marker shows:
 
 **Experimental, off by default.** Toggle it under Indicators → **Market Structure (exp.)**. It shades the chart the way a hand-drawn structure read does: **red = Down, blue = Range, green = Up**.
 - A vertical line marks each structure change.
-- The label at the top reads like `UP · Stairs` or `RANGE · Tight range`. A `?` suffix plus a hatched band means a breakout is still unconfirmed.
+- The label at the top reads like `UP · Stairs` or `RANGE · Tight range`. `RANGE → UP?` / `RANGE → DOWN?`, drawn as the blue range band hatched in green or red, means a breakout attempt that has not escaped yet.
 - Range segments show their box edges as dashed lines. Trend segments show their protected HL/LH as a dotted line.
 - `✕ failed BO` marks where a breakout fell back into the box.
 - The toolbar shows a **PS:** badge with the current bar's read.
@@ -592,11 +592,10 @@ This is a structure classifier built **only from pivots**: pivot price, bar inde
 **How it reads the market**
 
 The read is re-validated every bar. The window is **adaptive**: it is the whole current structure segment, however many pivots that is (often 20–30+), capped by *Max pivots / segment*.
-- **Range → Up:** a close above the range box's high + buffer. The breakout stays *unconfirmed* until either:
-  - a pullback low holds at or above the broken edge, or
-  - a pullback is followed by a new high.
-
-  A close back inside the box before that is a **failed breakout**, and the range resumes. Down is the mirror case.
+- **Breakout attempt (still Range):** a close above the range box's high + buffer opens an *attempt*, shown as `RANGE → UP?`. The state stays **Range**, in the same segment with the same box history. It only becomes **Up** once price *escapes*, by either:
+  - **Distance:** a close at least *Breakout escape* × the box height beyond the broken edge. The box height is floored at the swing scale (the previous trend's median impulse, else recent swings), so a newly formed sliver of a box is not easy to escape.
+  - **Hold + follow-through:** a pullback low holds at or above the broken edge − buffer, and then a close goes above the attempt's best close.
+- **Failed breakout:** a close back inside the box (past the edge − buffer) before escaping. The attempt clears and the box keeps the excursion. A correction after a strong trend therefore stays **one** range: each marginal lower low is a failed `DOWN?` attempt and the range low ratchets down to the lowest correction low. A gap out of the range with no follow-through is likewise a failed attempt, not a new trend. Down is the mirror case.
 - **Up → Range (break of structure):** a close below the protected HL − buffer. The protected HL is the low that launched the latest HH. Down → Range is the mirror case.
 - **Up ↔ Down** always passes through Range. A range can only break once it has both a swing high and a swing low.
 - The buffer is *Break buffer* × the segment's median swing size.

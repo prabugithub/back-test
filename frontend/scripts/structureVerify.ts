@@ -67,7 +67,7 @@ for (const s of segs) {
 const dist: Record<string, number> = {};
 let maxPivots = 0;
 for (const s of states) {
-  const k = `${s.broad}${s.confirmed ? '' : '?'} · ${s.sub ?? 'forming'}`;
+  const k = `${s.broad}${s.breakoutAttempt ? `→${s.breakoutAttempt}?` : ''} · ${s.sub ?? 'forming'}`;
   dist[k] = (dist[k] ?? 0) + 1;
   maxPivots = Math.max(maxPivots, s.segmentPivots.length);
 }
@@ -77,7 +77,15 @@ for (const [k, v] of Object.entries(dist).sort((a, b) => b[1] - a[1])) {
 }
 const allSegs = getStructureSegments(candles, config);
 const ids = new Set(allSegs.map(s => s.segmentId));
-console.log(`segments=${ids.size}  runs=${allSegs.length}  max pivots in one window=${maxPivots}`);
+// Trend segments (by segment id) spanning fewer than 10 bars — the "flip" count.
+const trendSpan = new Map<number, { broad: string; start: number; end: number }>();
+for (const s of allSegs) {
+  if (s.broad === 'range') continue;
+  const t = trendSpan.get(s.segmentId);
+  if (t) t.end = s.endIndex; else trendSpan.set(s.segmentId, { broad: s.broad, start: s.startIndex, end: s.endIndex });
+}
+const shortTrends = [...trendSpan.values()].filter(t => t.end - t.start + 1 < 10).length;
+console.log(`segments=${ids.size}  runs=${allSegs.length}  trend segments=${trendSpan.size} (short <10 bars: ${shortTrends})  max pivots in one window=${maxPivots}`);
 
 // Look-ahead: truncated recompute must match.
 let mismatches = 0;

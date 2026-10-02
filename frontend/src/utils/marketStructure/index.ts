@@ -33,14 +33,14 @@ export function getStructureAt(candles: Candle[], index: number, config: Partial
   return getStructureTimeline(candles, config)[index] ?? null;
 }
 
-/** Collapse the timeline into contiguous runs of the same (segment, broad, sub, confirmed). */
+/** Collapse the timeline into contiguous runs of the same (segment, broad, sub, attempt). */
 export function getStructureSegments(candles: Candle[], config: Partial<StructureConfig>): StructureSegment[] {
   const states = getStructureTimeline(candles, config);
   const out: StructureSegment[] = [];
   let cur: StructureSegment | null = null;
   for (let i = 0; i < states.length; i++) {
     const s = states[i];
-    if (cur && cur.segmentId === s.segmentId && cur.broad === s.broad && cur.sub === s.sub && cur.confirmed === s.confirmed) {
+    if (cur && cur.segmentId === s.segmentId && cur.broad === s.broad && cur.sub === s.sub && cur.breakoutAttempt === s.breakoutAttempt) {
       cur.endIndex = i;
       cur.rangeHigh = s.rangeHigh;
       cur.rangeLow = s.rangeLow;
@@ -49,7 +49,7 @@ export function getStructureSegments(candles: Candle[], config: Partial<Structur
     }
     cur = {
       startIndex: i, endIndex: i, segmentId: s.segmentId, broad: s.broad, sub: s.sub,
-      confirmed: s.confirmed, rangeHigh: s.rangeHigh, rangeLow: s.rangeLow, keyLevel: s.keyLevel,
+      confirmed: s.confirmed, breakoutAttempt: s.breakoutAttempt, rangeHigh: s.rangeHigh, rangeLow: s.rangeLow, keyLevel: s.keyLevel,
       transitionReason: s.transitionReason,
     };
     out.push(cur);
@@ -78,7 +78,8 @@ export function describeStructure(state: StructureState | null): string {
   if (!state) return '—';
   const broad = state.broad === 'up' ? 'UP' : state.broad === 'down' ? 'DOWN' : 'RANGE';
   const sub = state.sub ? ` · ${SUB_SHORT[state.sub]}` : '';
-  return `${broad}${state.confirmed ? '' : ' (unconf.)'}${sub}`;
+  const attempt = state.breakoutAttempt ? ` → ${state.breakoutAttempt === 'up' ? 'UP' : 'DOWN'}?` : '';
+  return `${broad}${attempt}${sub}`;
 }
 
 const SUB_SHORT: Record<NonNullable<StructureState['sub']>, string> = {
