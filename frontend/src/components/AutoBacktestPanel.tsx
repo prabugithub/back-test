@@ -2,7 +2,7 @@ import { useMemo, useState, useEffect } from 'react';
 import { createPortal } from 'react-dom';
 import {
   Zap, TrendingUp, TrendingDown, Minus, RefreshCw, BarChart2, Save, Trash2, FolderOpen,
-  Settings2, Compass, LogIn, ShieldCheck, LogOut, ShieldAlert, Download, Calendar, X,
+  Settings2, Compass, LogIn, ShieldCheck, LogOut, ShieldAlert, Download, Calendar, X, Waves,
 } from 'lucide-react';
 import { useSessionStore } from '../stores/sessionStore';
 import { EntryMetricsDashboard } from './EntryMetricsDashboard';
@@ -20,10 +20,12 @@ import {
 } from '../utils/autoBacktestEngine';
 import { useFilterPreviewData, type PreviewFilterKey } from '../hooks/useFilterPreviewData';
 import { FilterPreviewStrip } from './autobacktest-visuals/FilterPreviewStrip';
+import { HookDebugToggle } from './autobacktest-visuals/HookDebugToggle';
 import { Chip } from './autobacktest-visuals/Chip';
 import { ToggleSwitch } from './autobacktest-visuals/ToggleSwitch';
 import { AccordionSection } from './autobacktest-visuals/AccordionSection';
-import { StrategySummaryBar, countActiveConfirmationFilters } from './autobacktest-visuals/StrategySummaryBar';
+import { StrategySummaryBar, countActiveConfirmationFilters, countLegPatternSlots } from './autobacktest-visuals/StrategySummaryBar';
+import { LegPatternStep } from './autobacktest-visuals/legpattern/LegPatternStep';
 import { SessionSettingsPanel } from './autobacktest-visuals/SessionSettingsPanel';
 import {
   MarketStep, EntryStep, ConfirmationStep, ExitStep, RiskStep,
@@ -75,6 +77,7 @@ const WORKFLOW_STEPS: StepDef[] = [
   { key: 'market', label: 'Market', icon: <Compass size={14} /> },
   { key: 'entry', label: 'Entry', icon: <LogIn size={14} /> },
   { key: 'confirmation', label: 'Confirmation', icon: <ShieldCheck size={14} /> },
+  { key: 'pattern', label: 'Leg Pattern', icon: <Waves size={14} /> },
   { key: 'exit', label: 'Exit', icon: <LogOut size={14} /> },
   { key: 'risk', label: 'Risk', icon: <ShieldAlert size={14} /> },
 ];
@@ -85,6 +88,7 @@ const STEP_COMPONENTS: Record<WorkflowStep, React.ComponentType<RegimeStepProps>
   market: MarketStep,
   entry: EntryStep,
   confirmation: ConfirmationStep,
+  pattern: LegPatternStep,
   exit: ExitStep,
   risk: RiskStep,
 };
@@ -150,6 +154,7 @@ export function AutoBacktestPanel({ onNavigate, hidden }: AutoBacktestPanelProps
   const currentIndex = useSessionStore(s => s.currentIndex);
   const runBatchAutoBacktest = useSessionStore(s => s.runBatchAutoBacktest);
   const isBatchRunning = useSessionStore(s => s.isBatchBacktestRunning);
+  const hookDebugMode = useSessionStore(s => s.hookDebugMode);
   const batchProgress = useSessionStore(s => s.batchBacktestProgress);
   const trades = useSessionStore(s => s.trades);
   const sessionConfig = useSessionStore(s => s.sessionConfig);
@@ -233,7 +238,7 @@ export function AutoBacktestPanel({ onNavigate, hidden }: AutoBacktestPanelProps
   );
 
   const activeRules = config[activeRegime];
-  const previewBars = useFilterPreviewData(candles, currentIndex, activeRules, config);
+  const previewBars = useFilterPreviewData(candles, currentIndex, activeRules, config, activeRegime);
   const latestBar = previewBars[previewBars.length - 1];
 
   const updateGlobal = (patch: Partial<AutoBacktestConfig>) =>
@@ -245,7 +250,7 @@ export function AutoBacktestPanel({ onNavigate, hidden }: AutoBacktestPanelProps
   const applyPreset = (name: string) => {
     const preset = AUTO_BT_PRESETS[name];
     if (!preset) return;
-    setAutoBacktestConfig({
+    const next: AutoBacktestConfig = {
       ...defaultAutoBacktestConfig,
       ...preset,
       enabled: config.enabled,
@@ -255,7 +260,21 @@ export function AutoBacktestPanel({ onNavigate, hidden }: AutoBacktestPanelProps
       useAutoQty: config.useAutoQty,
       riskPerTrade: config.riskPerTrade,
       minQuantity: config.minQuantity,
-    });
+    };
+    // Carry the custom entry AND exit hooks across. No preset defines either, so spreading
+    // defaultAutoBacktestConfig would silently switch a configured hook off — the run would
+    // then quietly go back to the built-in chain with no indication the strategy had been
+    // dropped. Presets describe filter thresholds; they have no opinion on your hooks.
+    for (const k of ['uptrend', 'downtrend', 'range', 'reversal'] as RegimeKey[]) {
+      next[k] = {
+        ...next[k],
+        entryHookId: config[k].entryHookId,
+        entryHookMode: config[k].entryHookMode,
+        exitHookId: config[k].exitHookId,
+        exitHookMode: config[k].exitHookMode,
+      };
+    }
+    setAutoBacktestConfig(next);
   };
 
   const handleExportConfig = () => {
@@ -277,9 +296,11 @@ export function AutoBacktestPanel({ onNavigate, hidden }: AutoBacktestPanelProps
   const regimes: RegimeKey[] = ['uptrend', 'downtrend', 'range', 'reversal'];
   const confirmationCount = countActiveConfirmationFilters(activeRules);
   const exitMechanismCount = countActiveExitMechanisms(activeRules);
+  const patternSlotCount = countLegPatternSlots(activeRules);
   const stepsWithBadge: StepDef[] = WORKFLOW_STEPS.map(s =>
     s.key === 'confirmation' ? { ...s, badge: confirmationCount }
       : s.key === 'exit' ? { ...s, badge: exitMechanismCount }
+      : s.key === 'pattern' ? { ...s, badge: patternSlotCount }
       : s
   );
 
@@ -617,10 +638,12 @@ export function AutoBacktestPanel({ onNavigate, hidden }: AutoBacktestPanelProps
             </div>
           )}
 
+          <HookDebugToggle />
+
           <button
             onClick={runBatchAutoBacktest}
             disabled={isBatchRunning || candles.length === 0 || !config.enabled}
-            className="w-full py-2.5 px-3 bg-indigo-600 hover:bg-indigo-700 disabled:opacity-50 disabled:cursor-not-allowed text-white text-xs font-bold rounded-lg flex items-center justify-center gap-2 transition-all duration-150 active:scale-[0.99] shadow-sm hover:shadow-md"
+            className={`w-full py-2.5 px-3 ${hookDebugMode ? 'bg-amber-600 hover:bg-amber-700' : 'bg-indigo-600 hover:bg-indigo-700'} disabled:opacity-50 disabled:cursor-not-allowed text-white text-xs font-bold rounded-lg flex items-center justify-center gap-2 transition-all duration-150 active:scale-[0.99] shadow-sm hover:shadow-md`}
           >
             {isBatchRunning ? (
               <>
@@ -628,12 +651,12 @@ export function AutoBacktestPanel({ onNavigate, hidden }: AutoBacktestPanelProps
                   <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
                   <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8z" />
                 </svg>
-                Running...
+                {hookDebugMode ? 'Running on main thread…' : 'Running...'}
               </>
             ) : (
               <>
                 <Zap size={13} />
-                Run Full Backtest (instant)
+                {hookDebugMode ? 'Run Full Backtest (main thread)' : 'Run Full Backtest (instant)'}
               </>
             )}
           </button>

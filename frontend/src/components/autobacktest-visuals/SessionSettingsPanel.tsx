@@ -1,6 +1,29 @@
 import { X, Settings2 } from 'lucide-react';
 import { MULTI_TRADE_DEFAULT_CAP, type AutoBacktestConfig } from '../../utils/autoBacktestEngine';
+import { DEFAULT_TREND_DAY_WINDOWS } from '../../strategies/strongTrendH1';
+import {
+  DEFAULT_ENTRY_HOOK_LOOKBACK,
+  ENTRY_HOOK_LOOKBACK_MIN,
+  ENTRY_HOOK_LOOKBACK_MAX,
+} from '../../utils/entryHook';
+import {
+  DEFAULT_EXIT_HOOK_LOOKBACK,
+  EXIT_HOOK_LOOKBACK_MIN,
+  EXIT_HOOK_LOOKBACK_MAX,
+} from '../../utils/exitHook';
 import { CardShell } from './CardShell';
+
+const TREND_DAY_INPUTS: {
+  key: keyof typeof DEFAULT_TREND_DAY_WINDOWS; label: string; title: string; min: number; max: number;
+}[] = [
+  { key: 'trendDayAdrDays', label: 'TD ADR Days', min: 3, max: 40, title: 'Strong-Trend H1: prior sessions averaged into the average daily range (ADR) that every day-range ratio is measured against' },
+  { key: 'trendDayMultiDayLookback', label: 'TD Multi-Day', min: 2, max: 20, title: 'Strong-Trend H1: sessions before yesterday that form the multi-day range — breaking out of it scores up, opening just under its high scores down' },
+  { key: 'trendDayLateBars', label: 'TD Late Bars', min: 6, max: 40, title: "Strong-Trend H1: yesterday's last N bars read for the late breakout (two bull legs, clean bars) and the buy-climax check" },
+  { key: 'trendDayPdhBreakBars', label: 'TD PDH Bars', min: 1, max: 30, title: "Strong-Trend H1: today's first N bars in which price must trade above the previous day's high (a gap above counts). No break in time = not a trend day" },
+  { key: 'trendDayFirstHourBars', label: 'TD 1st Hour', min: 3, max: 30, title: "Strong-Trend H1: bars treated as today's opening range / first hour for the trend-vs-chop read" },
+  { key: 'trendDayGapBarsMin', label: 'TD Gap Bars', min: 5, max: 60, title: 'Strong-Trend H1: consecutive bars not touching EMA21 after which an H1 far from the EMA is allowed on a strong day (Brooks 20 gap bars)' },
+  { key: 'trendDayMaxEntries', label: 'TD Max/Day', min: 1, max: 10, title: 'Strong-Trend H1: most entries the hook approves in one session' },
+];
 
 interface SessionSettingsPanelProps {
   config: AutoBacktestConfig;
@@ -198,7 +221,7 @@ export function SessionSettingsPanel({ config, onChange, isOpen, onClose }: Sess
                 />
               </div>
               <div className="flex items-center justify-between gap-1">
-                <span className="text-[10px] text-gray-500" title="Bars looked back for the IQR-trimmed body-to-range-ratio average instrumentation on trade records (brrAvgIQRAtEntry)">Bar Quality</span>
+                <span className="text-[10px] text-gray-500" title="Bars looked back for the body-to-range-ratio average instrumentation on trade records — sizes both the plain mean (brrAvgAtEntry) and the IQR-trimmed mean (brrAvgIQRAtEntry)">Bar Quality</span>
                 <input
                   type="number" min={5} max={50} value={config.barQualityLookback ?? 20}
                   onChange={e => onChange({ barQualityLookback: Number(e.target.value) })}
@@ -238,6 +261,14 @@ export function SessionSettingsPanel({ config, onChange, isOpen, onClose }: Sess
                 />
               </div>
               <div className="flex items-center justify-between gap-1">
+                <span className="text-[10px] text-gray-500" title="Minimum bars between two pivots of the SAME type. A qualifying signal closer than this to the last pivot of the same type is dropped (the first one is kept), so a single impulse can't print an LL and then an HL on adjacent bars. Raise it for a sparser structure skeleton. 1 = off (legacy).">Min Pivot Gap</span>
+                <input
+                  type="number" min={1} max={10} value={config.minPivotGapBars ?? 2}
+                  onChange={e => onChange({ minPivotGapBars: Number(e.target.value) })}
+                  className="w-12 px-1.5 py-1 text-xs border rounded text-center"
+                />
+              </div>
+              <div className="flex items-center justify-between gap-1">
                 <span className="text-[10px] text-gray-500" title="Minimum bars a completed breakout leg needs before its strength metrics count — H/L entries with a shorter (or no) leg are blocked while any leg-strength filter is active">Leg Min Bars</span>
                 <input
                   type="number" min={2} max={20} value={config.legMinBarCount ?? 5}
@@ -261,6 +292,44 @@ export function SessionSettingsPanel({ config, onChange, isOpen, onClose }: Sess
                   className="w-12 px-1.5 py-1 text-xs border rounded text-center"
                 />
               </div>
+              <div className="flex items-center justify-between gap-1">
+                <span className="text-[10px] text-gray-500" title="How many candles (ending at the trigger bar) a Custom Entry Hook receives as ctx.candles, so your algorithm never has to maintain its own history">Entry Hook Candles</span>
+                <input
+                  type="number"
+                  min={ENTRY_HOOK_LOOKBACK_MIN}
+                  max={ENTRY_HOOK_LOOKBACK_MAX}
+                  step={50}
+                  value={config.entryHookLookback ?? DEFAULT_ENTRY_HOOK_LOOKBACK}
+                  onChange={e => onChange({ entryHookLookback: Number(e.target.value) })}
+                  className="w-16 px-1.5 py-1 text-xs border rounded text-center"
+                />
+              </div>
+              {/* Deliberately a smaller default than the entry hook's: this window is rebuilt
+                  on every bar of every OPEN TRADE, not only on signal bars. */}
+              <div className="flex items-center justify-between gap-1">
+                <span className="text-[10px] text-gray-500" title="How many candles (ending at the current bar) a Custom Exit Hook receives as ctx.candles. Rebuilt every bar a trade is open, so keep it no larger than your trade management actually reads">Exit Hook Candles</span>
+                <input
+                  type="number"
+                  min={EXIT_HOOK_LOOKBACK_MIN}
+                  max={EXIT_HOOK_LOOKBACK_MAX}
+                  step={50}
+                  value={config.exitHookLookback ?? DEFAULT_EXIT_HOOK_LOOKBACK}
+                  onChange={e => onChange({ exitHookLookback: Number(e.target.value) })}
+                  className="w-16 px-1.5 py-1 text-xs border rounded text-center"
+                />
+              </div>
+              {/* Strong-trend-day windows — read only by the Strong-Trend H1 entry hook. */}
+              {TREND_DAY_INPUTS.map(({ key, label, title, min, max }) => (
+                <div key={key} className="flex items-center justify-between gap-1">
+                  <span className="text-[10px] text-gray-500" title={title}>{label}</span>
+                  <input
+                    type="number" min={min} max={max}
+                    value={config[key] ?? DEFAULT_TREND_DAY_WINDOWS[key]}
+                    onChange={e => onChange({ [key]: Number(e.target.value) })}
+                    className="w-12 px-1.5 py-1 text-xs border rounded text-center"
+                  />
+                </div>
+              ))}
             </div>
             <div className="flex items-center justify-between gap-2 mt-2">
               <span className="text-[10px] text-gray-500" title="Full keeps per-candle BRR/CLV/UWR/LWR arrays for every leg/pullback (in-memory + export); Averages keeps only the per-segment averages (also what is persisted to the cloud session)">Leg Seq Detail</span>

@@ -15,6 +15,7 @@ import { calculatePivotPoints, getPivotPointsUpTo } from '../utils/indicators';
 import { analyzeMarketStructure, analyzeMarketStructureAt } from '../utils/pivotAnalysis';
 import { buildEntryInstrumentation } from '../utils/entryInstrumentation';
 import { buildNetPositionMirror, rebuildOpenPositionsFromTrades } from '../utils/netPosition';
+import { setHookDebugMode as persistHookDebugMode } from '../utils/hookDebugMode';
 import {
   executeLiveOrder,
   registerMonitorIfNeeded,
@@ -23,7 +24,7 @@ import {
 } from '../services/liveExecutionService';
 import type { Trade, Position, OpenPosition, TradeJournal, ExitReason } from '../types';
 import type { SessionStore, SessionConfig, StoreSet, StoreGet } from './sessionStore';
-import { isMultiTradeMode, type EntryMetricsSnapshot, type RegimeKey } from '../utils/autoBacktestEngine';
+import { isMultiTradeMode, resolveMinPivotGapBars, type EntryMetricsSnapshot, type RegimeKey } from '../utils/autoBacktestEngine';
 
 const generateTradeId = () =>
   `${Date.now()}-${Math.random().toString(36).substring(2, 11)}`;
@@ -351,7 +352,10 @@ export function createSharedActions(set: StoreSet, get: StoreGet) {
         isInitialWith = instrumentation.isInitialWith;
       } else {
         const visibleCandlesForEntry = candles.slice(0, currentIndex + 1);
-        const { ltMarket } = analyzeMarketStructure(visibleCandlesForEntry, calculatePivotPoints(visibleCandlesForEntry));
+        const { ltMarket } = analyzeMarketStructure(
+          visibleCandlesForEntry,
+          calculatePivotPoints(visibleCandlesForEntry, resolveMinPivotGapBars(autoBacktestConfig)),
+        );
         isInitialWith =
           (type === 'BUY' && ltMarket.startsWith('Bull')) ||
           (type === 'SELL' && ltMarket.startsWith('Bear'));
@@ -533,7 +537,7 @@ export function createSharedActions(set: StoreSet, get: StoreGet) {
       // every bar of the step() pipeline while a position is open, so re-deriving
       // pivots/EMA from a fresh candles.slice(0, index + 1) here every bar was the
       // same O(n)-per-bar cost as the auto-backtest engine's equivalent checks.
-      const pivots = getPivotPointsUpTo(candles, index);
+      const pivots = getPivotPointsUpTo(candles, index, resolveMinPivotGapBars(state.autoBacktestConfig));
       const { ltMarket } = analyzeMarketStructureAt(candles, index, pivots);
       const direction = position.quantity > 0 ? 'LONG' : 'SHORT';
 
@@ -840,6 +844,13 @@ export function createSharedActions(set: StoreSet, get: StoreGet) {
     },
 
     setTradeQuantity: (tradeQuantity: number) => set({ tradeQuantity }),
+
+    // Persists to localStorage as well as the store — see utils/hookDebugMode for why it
+    // lives there rather than in autoBacktestConfig or uiSettings.
+    setHookDebugMode: (on: boolean) => {
+      persistHookDebugMode(on);
+      set({ hookDebugMode: on });
+    },
     setRiskPerTrade: (riskPerTrade: number) => set({ riskPerTrade }),
     setManualLevels: (manualLevels: SessionStore['manualLevels']) => set({ manualLevels }),
 

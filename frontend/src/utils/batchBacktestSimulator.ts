@@ -2,10 +2,13 @@
 
 import type { Candle, Trade, BacktestPosition, OpenPosition, ExitReason } from '../types';
 import type { TradeJournal } from '../types';
-import { type AutoBacktestConfig, type AutoSignal, type RegimeKey, MULTI_TRADE_DEFAULT_CAP, evaluateAutoSignals, evaluateTrailStop, evaluateAutoExitSignal } from './autoBacktestEngine';
+import { type AutoBacktestConfig, type AutoSignal, type RegimeKey, MULTI_TRADE_DEFAULT_CAP, evaluateAutoSignals, evaluateTrailStop, evaluateAutoExitSignal, resolveTradeQuantity, resolveEntryHook, resolveExitHook } from './autoBacktestEngine';
+import { createHookRunState } from './entryHook';
+import { createExitHookRunState } from './exitHook';
 import { buildNetPositionMirror } from './netPosition';
-import { calculateMAPosition, calculateBarQuality, averageBarQualityIQR, calculateEMASlope, calculateEMAInteraction } from './pivotAnalysis';
+import { calculateMAPosition, calculateBarQuality, averageBarQuality, averageBarQualityIQR, calculateEMASlope, calculateEMAInteraction } from './pivotAnalysis';
 import { buildLegSequence } from './legSequence';
+import { buildSessionOpenFields } from './sessionDay';
 
 interface SimPosition {
   instrument: string;
@@ -38,6 +41,30 @@ export interface BatchSimResult {
   finalRealizedPnL: number;
   tradeCount: number;   // completed round-trips (trades with pnl)
   totalPnL: number;
+  // Custom entry hook diagnostics. Present whenever a hook was reached at all — NOT only on
+  // failure. A hook that throws or returns an invalid decision never aborts the run (it just
+  // takes no trade on that bar), and a hook blocked upstream by the regime's structure
+  // filters is never called at all; both look like "nothing happened" without these numbers.
+  // Absent only when no regime used a hook, which is what keeps an unhooked run's result
+  // shape unchanged.
+  hookDiagnostics?: {
+    callCount: number;     // bars that actually reached the hook — 0 means a config problem
+    errorCount: number;
+    error?: string;        // first trapped exception
+    rejectedCount: number;
+    rejectReason?: string; // first validation failure
+  };
+  // Custom EXIT hook diagnostics, same shape and the same reasoning. Reported separately
+  // from the entry hook's because the two fail for different reasons: an entry hook at 0
+  // calls was blocked by a structure filter, an exit hook at 0 calls means no trade was ever
+  // open under a regime that had it on — usually the entry side taking nothing at all.
+  exitHookDiagnostics?: {
+    callCount: number;
+    errorCount: number;
+    error?: string;
+    rejectedCount: number;
+    rejectReason?: string;
+  };
 }
 
 function candleTimeMinutes(timestampSec: number): number {
@@ -70,9 +97,18 @@ export function runBatchSimulation(
   const reportEvery = Math.max(1, Math.floor(total / 20));
   // Mirrors isMultiTradeMode() in the store — the batch worker has no isLiveMode.
   const multi = config.enabled && config.skipIfPositionOpen === false;
+  // One per RUN, threaded through every bar: this is what makes ctx.state persist across
+  // bars so a hook can keep cooldowns and counters, and what collects trapped hook errors.
+  const hookRunState = createHookRunState();
+  // Separate scratch/bookkeeping for the exit hook. Also one per RUN, and shared across every
+  // open trade — a hook keeping per-trade counters keys them by ctx.position.id.
+  const exitHookRunState = createExitHookRunState();
 
   function enterPosition(candle: Candle, signal: AutoSignal, qty: number, candleIndex: number) {
-    const entryPrice = candle.close;
+    // signal.entryPrice IS candle.close for every built-in path — the engine sets it from
+    // the bar close. Reading it from the signal instead lets a custom entry hook name a fill
+    // price inside the bar (runEntryHook refuses one outside the bar's high/low).
+    const entryPrice = signal.entryPrice;
     // Multi-trade mode: a new signal sees no existing exposure — it opens its own
     // trade rather than blending. Single-position mode blends into the open one.
     const position: SimPosition | null = multi ? null : (openPositions[0] ?? null);
@@ -160,7 +196,12 @@ export function runBatchSimulation(
       const entryMetrics = signal.entryMetrics;
       const emaInteractionFallback = calculateEMAInteraction(candles, candleIndex, 20, config.emaInteractionLookback ?? 20);
       const barQualitySamples = calculateBarQuality(candles, candleIndex, config.barQualityLookback ?? 20);
+      trade.brrAvgAtEntry = entryMetrics?.brrAvg ?? averageBarQuality(barQualitySamples).brrAvg;
       trade.brrAvgIQRAtEntry = entryMetrics?.brrAvgIQR ?? averageBarQualityIQR(barQualitySamples).brrAvgIQR;
+      trade.rangeAvgAtEntry = entryMetrics?.rangeAvg ?? averageBarQuality(barQualitySamples).rangeAvg;
+      trade.rangeAvgIQRAtEntry = entryMetrics?.rangeAvgIQR ?? averageBarQualityIQR(barQualitySamples).rangeAvgIQR;
+      trade.bodyAvgAtEntry = entryMetrics?.bodyAvg ?? averageBarQuality(barQualitySamples).bodyAvg;
+      trade.bodyAvgIQRAtEntry = entryMetrics?.bodyAvgIQR ?? averageBarQualityIQR(barQualitySamples).bodyAvgIQR;
       trade.ema21SlopeAtEntry = entryMetrics?.ema21Slope ?? calculateEMASlope(candles, candleIndex, 21, config.ema21SlopeLookback ?? 10);
       trade.ema50SlopeAtEntry = entryMetrics?.ema50Slope ?? calculateEMASlope(candles, candleIndex, 50, config.ema50SlopeLookback ?? 20);
       trade.ema20GapBarRatioAtEntry = entryMetrics?.ema20GapBarRatio ?? emaInteractionFallback.gapBarRatio;
@@ -175,6 +216,9 @@ export function runBatchSimulation(
         config.legSequenceDetail ?? 'full'
       );
       if (legSequence.length) trade.legSequenceAtEntry = legSequence;
+      // Session-open context (open bar + gap up/down + bars into the session).
+      // Same helper the store-side path spreads, so both stamp identical values.
+      Object.assign(trade, buildSessionOpenFields(candles, candleIndex));
     }
 
     trades.push(trade);
@@ -287,10 +331,22 @@ export function runBatchSimulation(
     // Evaluated on bar close, after the SL/TP touch check, before square-off.
     // The reversal state must be persisted even when no exit fires, or the
     // confirm-bars counter would reset every bar.
-    const { exit, state } = evaluateAutoExitSignal(candles, i, pos, config);
+    const { exit, adjust, state } = evaluateAutoExitSignal(candles, i, pos, config, exitHookRunState);
     pos.exitWithTrendSeen = state.exitWithTrendSeen;
     pos.exitAgainstBars = state.exitAgainstBars;
-    if (exit) return { reason: exit.reason, fillPrice: candle.close };
+    // Stop/target moves from a custom exit hook, applied whether or not the trade closes.
+    // This runs AFTER the touch check above, so a moved level first bites on the next bar —
+    // see the timing note in utils/exitHook/types.ts.
+    if (adjust) {
+      if (adjust.stopLoss !== undefined) {
+        pos.stopLoss = adjust.stopLoss;
+        pos.slTrailed = true;
+      }
+      if (adjust.target !== undefined) pos.target = adjust.target;
+    }
+    // fillPrice is the bar close for the built-in reasons and may be a hook-named price
+    // inside the bar; runExitHook has already refused anything outside its high/low.
+    if (exit) return { reason: exit.reason, fillPrice: exit.fillPrice ?? candle.close };
 
     // ── 3. Auto square-off ──────────────────────────────────────────────────
     if (config.autoSquareOff && candleTimeMinutes(candle.timestamp) >= parseHHMM(config.squareOffTime)) {
@@ -326,18 +382,13 @@ export function runBatchSimulation(
       candleMin > parseHHMM(config.tradeEndTime)
     ) continue;
 
-    const signal = evaluateAutoSignals(candles, i, config);
+    const signal = evaluateAutoSignals(candles, i, config, hookRunState);
     if (!signal) continue;
 
-    // Qty calculation — mirrors runAutoBacktestCheck (autoBacktestActions.ts lines 56-67)
-    let qty: number;
-    if (config.useAutoQty) {
-      const riskPoints = Math.abs(signal.entryPrice - signal.sl);
-      qty = riskPoints > 0 ? Math.floor(config.riskPerTrade / riskPoints) : 0;
-      if (qty < config.minQuantity) continue;
-    } else {
-      qty = tradeQuantity;
-    }
+    // Sizing lives in resolveTradeQuantity, shared with the store path so the two can't
+    // drift — and so a custom entry hook's explicit quantity is honoured identically here.
+    const { qty, skipReason } = resolveTradeQuantity(signal, config, tradeQuantity);
+    if (skipReason) continue;
 
     enterPosition(candle, signal, qty, i);
   }
@@ -362,5 +413,31 @@ export function runBatchSimulation(
     finalRealizedPnL: multiRealizedPnL,
     tradeCount: trades.filter(t => t.pnl !== undefined).length,
     totalPnL,
+    // Gated on a hook being CONFIGURED, not on it having run. A hook that was configured and
+    // never called is the single most valuable thing to report — it is what a structure
+    // filter blocking the hook upstream looks like — so `callCount: 0` must reach the caller
+    // rather than collapsing to `undefined`.
+    hookDiagnostics: (['uptrend', 'downtrend', 'range', 'reversal'] as RegimeKey[])
+      .some(k => config[k].enabled && resolveEntryHook(config[k]) !== null)
+      ? {
+          callCount: hookRunState.callCount,
+          errorCount: hookRunState.errorCount,
+          error: hookRunState.error,
+          rejectedCount: hookRunState.rejectedCount,
+          rejectReason: hookRunState.rejectReason,
+        }
+      : undefined,
+    // Same gate on the exit side: CONFIGURED, not "ran". An exit hook that was never called
+    // is exactly what "my entry side took no trades" looks like from here.
+    exitHookDiagnostics: (['uptrend', 'downtrend', 'range', 'reversal'] as RegimeKey[])
+      .some(k => config[k].enabled && resolveExitHook(config[k]) !== null)
+      ? {
+          callCount: exitHookRunState.callCount,
+          errorCount: exitHookRunState.errorCount,
+          error: exitHookRunState.error,
+          rejectedCount: exitHookRunState.rejectedCount,
+          rejectReason: exitHookRunState.rejectReason,
+        }
+      : undefined,
   };
 }

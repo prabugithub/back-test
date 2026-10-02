@@ -23,10 +23,16 @@ export interface TradeJournal {
   screenshotUrl?: string;
 }
 
-// Why a trade was closed. REVERSAL/OPP_SIGNAL/LEG_DECAY come from the auto-BT
+// Why a trade was closed. REVERSAL/OPP_SIGNAL/EXIT_HOOK come from the auto-BT
 // exit engine (autoBacktestEngine.ts evaluateAutoExitSignal) and only ever apply
 // to auto-entered backtest positions.
-export type ExitReason = 'SL' | 'TP' | 'MANUAL' | 'TIME_OVER' | 'REVERSAL' | 'OPP_SIGNAL' | 'LEG_DECAY';
+//
+// LEG_DECAY is RETIRED: the built-in Leg Decay Exit it came from was removed when the
+// custom exit hook replaced it (that logic now ships as the 'leg-decay' hook in
+// src/strategies/exits/). Nothing produces it any more, but trades booked before the
+// change are persisted in Firestore carrying it, so the value stays in the union and in
+// every label/badge map — dropping it would render those historical trades unlabelled.
+export type ExitReason = 'SL' | 'TP' | 'MANUAL' | 'TIME_OVER' | 'REVERSAL' | 'OPP_SIGNAL' | 'EXIT_HOOK' | 'LEG_DECAY';
 
 // One segment of the recent-price-action leg sequence captured at entry — either a
 // completed Al Brooks impulse leg or the pullback (retrace) between two legs. Segments
@@ -52,6 +58,11 @@ export interface LegSegment {
   highBreakCount: number;          // bars whose high broke the prior bar's high, within the segment
   lowBreakCount: number;           // bars whose low broke the prior bar's low, within the segment
   bullCount: number;               // bull candles (close > open) within the segment; bears+dojis = barCount - bullCount
+  // Al Brooks H/L labels that fired inside this segment, oldest→newest, '-'-joined
+  // (e.g. 'H1-H2-H3'); '' when none fired. Same convention as pivotHighSeqAtEntry.
+  // Collapsed form of `hl` below — unlike the array, this survives Firestore.
+  // A count can legitimately restart mid-segment ('L1-L2-L1') when the swing broke.
+  hlSeq: string;
   // Per-candle quality series (oldest→newest), present only in 'full' detail mode —
   // stripped before Firestore persistence, retained in exports.
   brr?: number[];
@@ -62,6 +73,21 @@ export interface LegSegment {
   // (close <= open). Applies to both 'leg' and 'pullback' segments, so an impulse's
   // counter-candles and a pullback's with-trend candles are both visible.
   bullBear?: (0 | 1)[];
+  // Per-candle Al Brooks label (oldest→newest), index-aligned with bullBear/brr/…:
+  // 'H1'|'H2'|…|'L1'|… on the bar the signal fired, null on every other bar. At most
+  // one label per candle — H and L are mutually exclusive per bar (the outside-bar
+  // tiebreak in runAlBrooks decides by close direction).
+  hl?: (string | null)[];
+  // Per-candle raw prices (oldest→newest), index-aligned with bullBear/hl/brr/…: the
+  // segment's candles as-is. The segment-level startPrice/endPrice/high/low above are
+  // the aggregates of these — note `h`/`l` here are the PER-CANDLE series, while
+  // `high`/`low` are the segment extremes. 'full' detail only, like the arrays above:
+  // stripped before Firestore persistence, retained in exports. No collapsed form is
+  // needed — startPrice/endPrice/high/low already persist.
+  o?: number[];
+  h?: number[];
+  l?: number[];
+  c?: number[];
 }
 
 // Trade record
@@ -92,7 +118,12 @@ export interface Trade {
   withTrendSeen?: boolean;
   journal?: TradeJournal;
   atrDepthAtEntry?: number;
+  brrAvgAtEntry?: number;    // plain mean body-to-range ratio over the same window as brrAvgIQRAtEntry — every bar counted, so a single freak doji/marubozu shows up here; read the pair together (a wide gap = outlier-skewed window)
   brrAvgIQRAtEntry?: number; // IQR-trimmed mean body-to-range ratio over the last N bars ending at entry — outliers outside [Q1-1.5*IQR, Q3+1.5*IQR] dropped before averaging; a robust variant of a plain brrAvg
+  rangeAvgAtEntry?: number;     // plain mean bar range (high-low, actual points) over the same window as brrAvgAtEntry
+  rangeAvgIQRAtEntry?: number;  // IQR-trimmed mean bar range (points) — robust variant of rangeAvgAtEntry
+  bodyAvgAtEntry?: number;      // plain mean bar body (|close-open|, actual points) over the same window as brrAvgAtEntry
+  bodyAvgIQRAtEntry?: number;   // IQR-trimmed mean bar body (points) — robust variant of bodyAvgAtEntry
   ema21SlopeAtEntry?: number; // EMA21 points-per-bar slope over the configured lookback ending at entry
   ema50SlopeAtEntry?: number; // EMA50 points-per-bar slope over the configured lookback ending at entry
   ema20GapBarRatioAtEntry?: number;      // fraction of bars in window not touching EMA20 (Brooks gap bar — strong trend)
@@ -101,6 +132,15 @@ export interface Trade {
   pivotHighSeqAtEntry?: string;    // last up-to-4 bearish trend labels (HH/LH), oldest→newest, joined with '-'
   pivotLowSeqAtEntry?: string;     // last up-to-4 bullish trend labels (HL/LL), oldest→newest, joined with '-'
   pivotGapAvgBarsAtEntry?: number; // mean bar-count gap between consecutive same-type pivots across both sequences
+  // Session-open context: which bar opened the entry's trading day, how far it
+  // gapped from the previous day's close, and how deep into the session the
+  // entry was. Gap fields are absent (not 0) when no previous day is loaded.
+  openBarTimestampAtEntry?: number; // timestamp of the entry day's first bar (Unix seconds, same unit as Candle)
+  dayOpenAtEntry?: number;          // open price of that first bar — the session open
+  prevDayCloseAtEntry?: number;     // close of the last bar of the previous trading day
+  gapPointsAtEntry?: number;        // signed dayOpen - prevDayClose; positive = gap up, negative = gap down
+  gapPercentAtEntry?: number;       // gapPointsAtEntry as a percentage of prevDayCloseAtEntry
+  barsSinceOpenAtEntry?: number;    // bars from the day's open bar to the entry bar (0 = entered on the open bar)
   // Recent-price-action context: the last up-to-N Al Brooks impulse legs plus the
   // pullback candles between them, contiguous back from the entry bar, newest→oldest
   // (index 0 = closest to entry, walking back in time). Per-candle arrays are present
@@ -191,7 +231,7 @@ export interface CandlesResponse {
   cached: boolean;
 }
 
-export type DrawingTool = 'none' | 'select' | 'trendline' | 'horizontal' | 'rectangle' | 'fibonacci' | 'riskReward' | 'freehand' | 'text' | 'callout' | 'channel';
+export type DrawingTool = 'none' | 'select' | 'trendline' | 'horizontal' | 'rectangle' | 'fibonacci' | 'riskReward' | 'freehand' | 'text' | 'callout' | 'channel' | 'measure';
 
 export interface Point {
   x: number;

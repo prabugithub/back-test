@@ -1,5 +1,7 @@
 import type { RegimeKey, RegimeRules } from '../../utils/autoBacktestEngine';
 import { Chip, type ChipTone } from './Chip';
+import { getEntryHookLabel } from '../../strategies';
+import { getExitHookLabel } from '../../strategies/exits';
 import type { WorkflowStep } from './RegimeWorkflowSteps';
 
 interface StrategySummaryBarProps {
@@ -27,6 +29,15 @@ function formatMaFilterLabel(rules: RegimeRules): string | null {
 
 function isActive(mode: string | undefined, offValue = 'none'): boolean {
   return mode !== undefined && mode !== offValue;
+}
+
+/** Slots the leg pattern actually pins down, for the Leg Pattern step's badge. Kept
+ *  separate from countActiveConfirmationFilters because that one is a flat on/off tally
+ *  and a slot list would make its number mean something different. */
+export function countLegPatternSlots(rules: RegimeRules): number {
+  const cfg = rules.legPattern;
+  if (!cfg?.enabled) return 0;
+  return cfg.legs?.length ?? 0;
 }
 
 export function countActiveConfirmationFilters(rules: RegimeRules): number {
@@ -73,6 +84,16 @@ export function StrategySummaryBar({ regime, rules, onJumpToStep }: StrategySumm
 
   const maLabel = formatMaFilterLabel(rules);
   const confirmationCount = countActiveConfirmationFilters(rules);
+  const hookMode = rules.entryHookMode ?? 'off';
+  const hookId = rules.entryHookId;
+  const hookOn = hookMode !== 'off' && !!hookId;
+  // In 'replace' mode none of the filters below the hook actually run, so reporting a count
+  // of them would be actively misleading — say they are bypassed instead.
+  const bypassed = hookOn && hookMode === 'replace';
+
+  const exitHookMode = rules.exitHookMode ?? 'off';
+  const exitHookId = rules.exitHookId;
+  const exitHookOn = exitHookMode !== 'off' && !!exitHookId;
 
   return (
     <div className="flex flex-wrap items-center gap-1.5 px-3 py-1.5">
@@ -80,15 +101,22 @@ export function StrategySummaryBar({ regime, rules, onJumpToStep }: StrategySumm
         {directionLabel}
       </Chip>
       <Chip tone="indigo" onClick={jump('entry')}>
-        {entryLabel}
+        {bypassed ? 'Entry: Every H/L signal' : entryLabel}
       </Chip>
-      {maLabel && (
+      {hookOn && (
+        <Chip tone="purple" onClick={jump('entry')}>
+          Hook: {getEntryHookLabel(hookId) ?? hookId} ({hookMode})
+        </Chip>
+      )}
+      {maLabel && !bypassed && (
         <Chip tone="indigo" onClick={jump('entry')}>
           {maLabel}
         </Chip>
       )}
-      <Chip tone={confirmationCount > 0 ? 'amber' : 'gray-muted'} onClick={jump('confirmation')}>
-        {confirmationCount} confirmation filter{confirmationCount === 1 ? '' : 's'} active
+      <Chip tone={bypassed ? 'gray-muted' : confirmationCount > 0 ? 'amber' : 'gray-muted'} onClick={jump('confirmation')}>
+        {bypassed
+          ? 'Confirmation filters bypassed by hook'
+          : `${confirmationCount} confirmation filter${confirmationCount === 1 ? '' : 's'} active`}
       </Chip>
       <Chip tone="neutral" onClick={jump('risk')}>
         {formatSlLabel(rules)}
@@ -96,6 +124,13 @@ export function StrategySummaryBar({ regime, rules, onJumpToStep }: StrategySumm
       <Chip tone="neutral" onClick={jump('exit')}>
         RR: {rules.targetRR}×
       </Chip>
+      {/* In 'replace' mode the built-in signal exits never run, so the chip says which
+          mode it is rather than implying they are stacked. */}
+      {exitHookOn && (
+        <Chip tone="purple" onClick={jump('exit')}>
+          Exit hook: {getExitHookLabel(exitHookId) ?? exitHookId} ({exitHookMode})
+        </Chip>
+      )}
     </div>
   );
 }

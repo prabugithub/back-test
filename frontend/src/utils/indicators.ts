@@ -143,15 +143,42 @@ export interface PivotPoint {
   barIndex: number; // index into the candles array this pivot fired on — enables O(1) bar-distance math
 }
 
+/** Minimum bars between two EMITTED pivots of the SAME type. 1 = legacy (no suppression).
+ *  Surfaced as AutoBacktestConfig.minPivotGapBars (Session Settings → Instrumentation
+ *  Lookbacks); read through resolveMinPivotGapBars in autoBacktestEngine.ts. */
+export const DEFAULT_MIN_PIVOT_GAP_BARS = 2;
+export const MIN_PIVOT_GAP_BARS_MIN = 1;
+export const MIN_PIVOT_GAP_BARS_MAX = 10;
+
 /**
  * Calculate Reversal Pivot Points (Bullish and Bearish)
  * Based on advanced candlestick pattern analysis
  * Detects reversal patterns using multiple candle confirmation
+ *
+ * `minGapBars` enforces a minimum bar separation between two pivots of the SAME type,
+ * KEEP-FIRST: the first bar of a run of qualifying same-type signals is emitted and every
+ * later signal within the window is dropped outright. Without it a single uninterrupted
+ * impulse emits a pivot on bar i and another on bar i+1, and the second one gets a full
+ * HL/HH label purely because that bar's low/high sat above the previous BAR's — not
+ * because any retracement happened. Bullish and bearish are tracked separately, so a
+ * genuine fast reversal (swing low then swing high two bars later) still comes through.
+ *
+ * Suppression only ever reads state built from bars strictly BEFORE i, so the function
+ * stays a left-to-right fold and the causal prefix invariant relied on by
+ * getPivotPointsUpTo still holds exactly — see the memoization note further down.
  */
-export function calculatePivotPoints(candles: Candle[]): PivotPoint[] {
+export function calculatePivotPoints(
+  candles: Candle[],
+  minGapBars: number = DEFAULT_MIN_PIVOT_GAP_BARS,
+): PivotPoint[] {
   const result: PivotPoint[] = [];
   let lastBullPrice = 0;
   let lastBearPrice = 0;
+  // Bar index of the last pivot actually PUSHED for each type (not merely detected).
+  // Advancing these on emit only is what makes the rule keep-first rather than a window
+  // that slides forward on every suppressed signal and never re-arms.
+  let lastBullBarIndex = -Infinity;
+  let lastBearBarIndex = -Infinity;
 
   // Validate we have enough candles
   if (!candles || candles.length < 5) {
@@ -176,11 +203,11 @@ export function calculatePivotPoints(candles: Candle[]): PivotPoint[] {
     // BULLISH REVERSAL PIVOT LOGIC
     // ============================================
 
-    // Check if previous candle was a pivot to avoid consecutive signals
-    const isPreviousBullPivot =
-      prev.close > prev2.high &&
-      prev.close > prev.open &&
-      prev3.close < prev3.open;
+    // Check if previous candle was a pivot to avoid consecutive signals.
+    // This used to re-derive a looser approximation of the emit predicate from the raw
+    // candles, which both missed real consecutive pivots and blocked bars that were never
+    // pivots. It now just asks whether bar i-1 was actually emitted.
+    const isPreviousBullPivot = lastBullBarIndex === i - 1;
 
     // Condition 1: Current breaks previous high (simple pattern)
     const condition1_bull =
@@ -206,7 +233,7 @@ export function calculatePivotPoints(candles: Candle[]): PivotPoint[] {
     // Combined bullish signal
     const bullishPivot = (condition1_bull_or || condition1_bull) && condition3_bull;
 
-    if (bullishPivot) {
+    if (bullishPivot && i - lastBullBarIndex >= minGapBars) {
       // Logic for Long SL Distance: abs(min(low[0-4]) - close[0]) + 2
       const minLow = Math.min(current.low, prev.low, prev2.low);
       const slDistance = Math.ceil(Math.abs(current.close - minLow) + 2);
@@ -215,7 +242,10 @@ export function calculatePivotPoints(candles: Candle[]): PivotPoint[] {
       if (lastBullPrice > 0) {
         label = current.low > lastBullPrice ? 'HL' : 'LL';
       }
+      // Both baselines advance on emit only, so a suppressed bar never becomes the
+      // reference for the next label or for the gap window.
       lastBullPrice = current.low;
+      lastBullBarIndex = i;
 
       result.push({
         time: current.timestamp,
@@ -231,11 +261,9 @@ export function calculatePivotPoints(candles: Candle[]): PivotPoint[] {
     // BEARISH REVERSAL PIVOT LOGIC
     // ============================================
 
-    // Check if previous candle was a pivot to avoid consecutive signals
-    const isPreviousBearPivot =
-      prev.close < prev2.low &&
-      prev.close < prev.open &&
-      prev3.close > prev3.open;
+    // Check if previous candle was a pivot to avoid consecutive signals — see the
+    // bullish mirror above for why this is emitted-state rather than re-derived.
+    const isPreviousBearPivot = lastBearBarIndex === i - 1;
 
     // Condition 1: Current breaks previous low (simple pattern)
     const condition1_bear =
@@ -261,7 +289,7 @@ export function calculatePivotPoints(candles: Candle[]): PivotPoint[] {
     // Combined bearish signal
     const bearishPivot = condition1_bear_or || (condition1_bear && condition3_bear);
 
-    if (bearishPivot) {
+    if (bearishPivot && i - lastBearBarIndex >= minGapBars) {
       // Logic for Short SL Distance: abs(max(high[0-4]) - close[0]) + 2
       const maxHigh = Math.max(current.high, prev.high, prev2.high);
       const slDistance = Math.ceil(Math.abs(current.close - maxHigh) + 2);
@@ -271,6 +299,7 @@ export function calculatePivotPoints(candles: Candle[]): PivotPoint[] {
         label = current.high > lastBearPrice ? 'HH' : 'LH';
       }
       lastBearPrice = current.high;
+      lastBearBarIndex = i;
 
       result.push({
         time: current.timestamp,
@@ -311,6 +340,18 @@ export interface AlBrooksLegsByBar {
  *  sequence. */
 export interface CompletedLeg extends AlBrooksLeg {
   direction: 'bull' | 'bear';
+  /** Bar at which this leg FROZE — the bar whose break confirmed the pullback had begun.
+   *
+   *  This is the only causal filter key, and it is NOT `endIndex`. `endIndex` is the swing
+   *  extreme, which can precede the freeze by many bars: a bull leg topping at bar 20 and
+   *  freezing on the lowBreak at bar 25 has `endIndex: 20, completedAt: 25`. Asking "which
+   *  legs existed as of bar 22" by testing `endIndex <= 22` would admit it — pure lookahead,
+   *  and it materialises as a completed impulse leg appearing where a run over the real
+   *  prefix would still show the forming trailing pullback.
+   *
+   *  Pushes happen inside the bar loop in bar order, so this is monotone non-decreasing
+   *  across `legHistory` and a binary search on it is valid. */
+  completedAt: number;
 }
 
 export interface AlBrooksMarker {
@@ -326,6 +367,21 @@ export interface AlBrooksMarker {
    *  first leg completes. */
   legStartIndex?: number;
   legEndIndex?: number;
+}
+
+/** Everything one runAlBrooks pass produces. Extracted because this exact shape is the
+ *  return type of runAlBrooks, the alBrooksCache value type and getFullAlBrooks' return —
+ *  three places that must stay in lockstep. */
+export interface AlBrooksRun {
+  markers: AlBrooksMarker[];
+  legs: AlBrooksLegsByBar;
+  legHistory: CompletedLeg[];
+  /** Dense per-bar H/L label, index-aligned with `candles`; null on bars where nothing
+   *  fired (including bars 0-20, which the state machine never reaches). At most one
+   *  label per bar — the outside-bar tiebreak makes H and L mutually exclusive.
+   *  UNFILTERED: records every signal the counter produced, including ones the
+   *  pullback-depth filter suppressed from `markers`, so the count never shows a hole. */
+  signalsByBar: (AlBrooksSignal | null)[];
 }
 
 /**
@@ -366,24 +422,29 @@ export function calculateAlBrooksLegs(candles: Candle[]): AlBrooksLegsByBar {
   return runAlBrooks(candles, false, 1.0).legs;
 }
 
-/** Chronological history of every completed leg (both sides), in the order they froze.
- *  See CompletedLeg. Depth filter is irrelevant to leg tracking, so no params. */
-export function calculateAlBrooksLegHistory(candles: Candle[]): CompletedLeg[] {
-  return runAlBrooks(candles, false, 1.0).legHistory;
+/** One full pass, all outputs — the chronological leg history (see CompletedLeg) plus
+ *  the dense per-bar H/L labels, so callers needing more than one of them don't run the
+ *  state machine twice. Fixed at (false, 1.0): only `markers` depends on the depth
+ *  filter, and these are the raw, unsuppressed signals. */
+export function calculateAlBrooksRun(candles: Candle[]): AlBrooksRun {
+  return runAlBrooks(candles, false, 1.0);
 }
 
 function runAlBrooks(
   candles: Candle[],
   usePullbackDepth: boolean,
   atrDepthMultiplier: number
-): { markers: AlBrooksMarker[]; legs: AlBrooksLegsByBar; legHistory: CompletedLeg[] } {
+): AlBrooksRun {
   const result: AlBrooksMarker[] = [];
   const bullLegs: (AlBrooksLeg | null)[] = new Array(candles?.length ?? 0).fill(null);
   const bearLegs: (AlBrooksLeg | null)[] = new Array(candles?.length ?? 0).fill(null);
   // Chronological log of completed legs (pushed as each freezes below). Purely
   // observational — never read back into the signal state machine.
   const legHistory: CompletedLeg[] = [];
-  const done = { markers: result, legs: { bull: bullLegs, bear: bearLegs }, legHistory };
+  // Per-bar H/L label — allocated before the short-input guard below so callers always
+  // get a correctly sized array. Also purely observational.
+  const signalsByBar: (AlBrooksSignal | null)[] = new Array(candles?.length ?? 0).fill(null);
+  const done = { markers: result, legs: { bull: bullLegs, bear: bearLegs }, legHistory, signalsByBar };
 
   if (!candles || candles.length < 22) return done;
 
@@ -473,7 +534,7 @@ function runAlBrooks(
     if (lowBreak) {
       if (hActiveStart !== null) {
         hCompletedLeg = { startIndex: hActiveStart, endIndex: hActiveMaxHighBar };
-        legHistory.push({ direction: 'bull', ...hCompletedLeg });
+        legHistory.push({ direction: 'bull', ...hCompletedLeg, completedAt: i });
         hActiveStart = null;
       }
       hCandidateStart = null;
@@ -481,7 +542,7 @@ function runAlBrooks(
     if (highBreak) {
       if (lActiveStart !== null) {
         lCompletedLeg = { startIndex: lActiveStart, endIndex: lActiveMinLowBar };
-        legHistory.push({ direction: 'bear', ...lCompletedLeg });
+        legHistory.push({ direction: 'bear', ...lCompletedLeg, completedAt: i });
         lActiveStart = null;
       }
       lCandidateStart = null;
@@ -531,11 +592,17 @@ function runAlBrooks(
       // active leg when hSwingHigh breaks.
       hCandidateStart = i;
 
+      // Recorded BEFORE the depth gate: hCount already advanced, so gating here would
+      // leave a hole (H1 → H3) in the very sequence that exists to show the count.
+      // A single slot per bar is lossless only because of the tiebreak above.
+      const signal = `H${hCount}`;
+      signalsByBar[i] = signal;
+
       const depthOk = c.low <= ema21 + getAtr(c.timestamp) * atrDepthMultiplier;
       if (!usePullbackDepth || depthOk) {
         result.push({
           time: c.timestamp,
-          signal: `H${hCount}`,
+          signal,
           legStartIndex: hCompletedLeg?.startIndex,
           legEndIndex: hCompletedLeg?.endIndex,
         });
@@ -550,11 +617,14 @@ function runAlBrooks(
 
       lCandidateStart = i;
 
+      const signal = `L${lCount}`;
+      signalsByBar[i] = signal; // unfiltered, same reasoning as the H side above
+
       const depthOk = c.high >= ema21 - getAtr(c.timestamp) * atrDepthMultiplier;
       if (!usePullbackDepth || depthOk) {
         result.push({
           time: c.timestamp,
-          signal: `L${lCount}`,
+          signal,
           legStartIndex: lCompletedLeg?.startIndex,
           legEndIndex: lCompletedLeg?.endIndex,
         });
@@ -608,7 +678,11 @@ function runAlBrooks(
 // calculatePivotPoints/calculateEMA/calculateATR/runAlBrooks are all strictly
 // causal — the value at bar i is a fold over candles[0..i] only, never anything
 // after it (verified: each loop only ever reads i, i-1, i-2, i-3 and running
-// state built from earlier iterations). That means calling e.g.
+// state built from earlier iterations). calculatePivotPoints' same-type gap
+// suppression does not change this: it compares i against lastBull/BearBarIndex,
+// which are only ever written on an emit at some bar < i, so the decision at bar i
+// is still a function of candles[0..i] alone and a pivot, once emitted, is never
+// moved or withdrawn. That means calling e.g.
 // calculatePivotPoints(candles.slice(0, i + 1)) for every i from 0..N produces,
 // bar for bar, exactly the same PivotPoint[] prefix as calling it ONCE on the
 // full `candles` array and reading off the entries up to bar i — but the naive
@@ -625,21 +699,32 @@ function runAlBrooks(
 // identically to calling the un-cached function directly. Nothing here changes
 // any computed value, only how often it's recomputed.
 
-const pivotPointsCache = new WeakMap<Candle[], PivotPoint[]>();
+// Keyed by minGapBars as well as the candles array, same two-level shape as emaCache /
+// atrCache below — a changed Session Settings gap must not be served a stale pivot list.
+const pivotPointsCache = new WeakMap<Candle[], Map<number, PivotPoint[]>>();
 
-function getFullPivotPoints(candles: Candle[]): PivotPoint[] {
-  let cached = pivotPointsCache.get(candles);
+function getFullPivotPoints(candles: Candle[], minGapBars: number): PivotPoint[] {
+  let byGap = pivotPointsCache.get(candles);
+  if (!byGap) {
+    byGap = new Map();
+    pivotPointsCache.set(candles, byGap);
+  }
+  let cached = byGap.get(minGapBars);
   if (!cached) {
-    cached = calculatePivotPoints(candles);
-    pivotPointsCache.set(candles, cached);
+    cached = calculatePivotPoints(candles, minGapBars);
+    byGap.set(minGapBars, cached);
   }
   return cached;
 }
 
 /** Pivots visible as of `endIndex` (inclusive) — identical to
- *  calculatePivotPoints(candles.slice(0, endIndex + 1)), amortized O(log n). */
-export function getPivotPointsUpTo(candles: Candle[], endIndex: number): PivotPoint[] {
-  const full = getFullPivotPoints(candles);
+ *  calculatePivotPoints(candles.slice(0, endIndex + 1), minGapBars), amortized O(log n). */
+export function getPivotPointsUpTo(
+  candles: Candle[],
+  endIndex: number,
+  minGapBars: number = DEFAULT_MIN_PIVOT_GAP_BARS,
+): PivotPoint[] {
+  const full = getFullPivotPoints(candles, minGapBars);
   // barIndex is strictly ascending in `full`, so binary-search the cut point
   // instead of an O(full.length) filter on every call.
   let lo = 0, hi = full.length;
@@ -700,13 +785,13 @@ export function getAtrValueAt(candles: Candle[], index: number, period: number =
   return i >= 0 && i < full.length ? full[i].value : 0;
 }
 
-const alBrooksCache = new WeakMap<Candle[], Map<string, { markers: AlBrooksMarker[]; legs: AlBrooksLegsByBar; legHistory: CompletedLeg[] }>>();
+const alBrooksCache = new WeakMap<Candle[], Map<string, AlBrooksRun>>();
 
 function getFullAlBrooks(
   candles: Candle[],
   usePullbackDepth: boolean,
   atrDepthMultiplier: number
-): { markers: AlBrooksMarker[]; legs: AlBrooksLegsByBar; legHistory: CompletedLeg[] } {
+): AlBrooksRun {
   const key = `${usePullbackDepth}|${atrDepthMultiplier}`;
   let byKey = alBrooksCache.get(candles);
   if (!byKey) {
@@ -739,6 +824,38 @@ export function getAlBrooksMarkersUpTo(
     if (full[mid].time <= maxTime) lo = mid + 1; else hi = mid;
   }
   return full.slice(0, lo);
+}
+
+/**
+ * The leg history + per-bar H/L labels visible as of `endIndex` (inclusive) — identical to
+ * `calculateAlBrooksRun(candles.slice(0, endIndex + 1))`'s two leg-sequence fields, but
+ * amortized O(log n) off the shared cache instead of a fresh O(n) state-machine pass.
+ *
+ * The filter key is `completedAt`, NOT `endIndex`. See the note on CompletedLeg: a leg's
+ * `endIndex` is its swing extreme and can precede its freeze bar by many bars, so an
+ * `endIndex <= i` filter would hand back legs that had not completed yet at bar `i`. That
+ * is lookahead, and its symptom — a completed impulse leg standing where the forming
+ * trailing pullback belongs — is exactly the shape leg-pattern rules key on.
+ *
+ * `signalsByBar` needs no filtering: it is dense, absolutely indexed, and written at fire
+ * time from bars <= i, so it is causal by construction. Callers reading past `endIndex`
+ * would be reading their own future, which `buildLegSequence` never does.
+ */
+export function getAlBrooksRunUpTo(
+  candles: Candle[],
+  endIndex: number
+): Pick<AlBrooksRun, 'legHistory' | 'signalsByBar'> {
+  const full = getFullAlBrooks(candles, false, 1.0);
+  if (endIndex < 0) return { legHistory: [], signalsByBar: full.signalsByBar };
+  // legHistory is pushed inside the bar loop in bar order, so completedAt is monotone
+  // non-decreasing — binary search for the first entry that froze after endIndex.
+  const h = full.legHistory;
+  let lo = 0, hi = h.length;
+  while (lo < hi) {
+    const mid = (lo + hi) >> 1;
+    if (h[mid].completedAt <= endIndex) lo = mid + 1; else hi = mid;
+  }
+  return { legHistory: h.slice(0, lo), signalsByBar: full.signalsByBar };
 }
 
 /** Per-bar completed-leg lookup as of `endIndex` — identical to reading

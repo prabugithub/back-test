@@ -255,6 +255,7 @@ export function useChartDrawings({
       case 'text': return isPointOnText(point, p1, drawing.text || '');
       case 'callout': return isPointOnCallout(point, p1, p2, drawing.text || '');
       case 'channel': return isPointOnChannel(point, pts);
+      case 'measure': return isPointInRectangle(point, p1, p2);
       default: return false;
     }
   };
@@ -298,6 +299,7 @@ export function useChartDrawings({
       case 'text': return '#212121';
       case 'callout': return '#673AB7';
       case 'channel': return '#4CAF50';
+      case 'measure': return '#2962FF';
       default: return '#000000';
     }
   }, []);
@@ -650,6 +652,90 @@ export function useChartDrawings({
     ctx.textBaseline = 'alphabetic';
   };
 
+  // Format a duration in seconds as TradingView does: "2d 3h 15m".
+  const formatDuration = (secs: number): string => {
+    const s = Math.abs(Math.round(secs));
+    const d = Math.floor(s / 86400), h = Math.floor((s % 86400) / 3600), m = Math.floor((s % 3600) / 60);
+    const parts: string[] = [];
+    if (d) parts.push(`${d}d`);
+    if (h) parts.push(`${h}h`);
+    if (m || parts.length === 0) parts.push(`${m}m`);
+    return parts.join(' ');
+  };
+
+  // Bar index of a point: derived from its pixel x (which is anchored on barTime, so it
+  // survives reloads) when on-screen, else the stored logical index.
+  const getLogicalIndex = (raw: Point, px: Point): number | undefined => {
+    if (chartApi && Math.abs(px.x) < 10000) {
+      const l = chartApi.timeScale().coordinateToLogical(px.x);
+      if (l !== null) return l as number;
+    }
+    return raw.time;
+  };
+
+  // TradingView-style measure: shaded box + arrows, label with price change, %,
+  // bar count and elapsed time. Blue when p2 is above p1, red when below.
+  const drawMeasure = (ctx: CanvasRenderingContext2D, raw: Point[], pts: Point[], isSelected: boolean) => {
+    if (pts.length < 2) return;
+    const p1 = pts[0], p2 = pts[1];
+    const pr1 = raw[0].price, pr2 = raw[1].price;
+    const diff = pr1 !== undefined && pr2 !== undefined ? pr2 - pr1 : 0;
+    const up = diff >= 0;
+    const base = up ? '#2962FF' : '#F23645';
+    const minX = Math.min(p1.x, p2.x), maxX = Math.max(p1.x, p2.x), minY = Math.min(p1.y, p2.y), maxY = Math.max(p1.y, p2.y);
+
+    ctx.fillStyle = base + '26';
+    ctx.fillRect(minX, minY, maxX - minX, maxY - minY);
+    if (isSelected) { ctx.strokeStyle = base; ctx.lineWidth = 1; ctx.strokeRect(minX, minY, maxX - minX, maxY - minY); }
+
+    // Arrows along the middle: vertical toward p2's price, horizontal toward p2's time
+    const midX = (minX + maxX) / 2, midY = (minY + maxY) / 2;
+    const arrow = (x1: number, y1: number, x2: number, y2: number) => {
+      ctx.strokeStyle = base; ctx.fillStyle = base; ctx.lineWidth = 1.5;
+      ctx.beginPath(); ctx.moveTo(x1, y1); ctx.lineTo(x2, y2); ctx.stroke();
+      const len = Math.hypot(x2 - x1, y2 - y1);
+      if (len < 8) return;
+      const a = Math.atan2(y2 - y1, x2 - x1), hs = 6;
+      ctx.beginPath(); ctx.moveTo(x2, y2);
+      ctx.lineTo(x2 - hs * Math.cos(a - Math.PI / 6), y2 - hs * Math.sin(a - Math.PI / 6));
+      ctx.lineTo(x2 - hs * Math.cos(a + Math.PI / 6), y2 - hs * Math.sin(a + Math.PI / 6));
+      ctx.closePath(); ctx.fill();
+    };
+    arrow(midX, p1.y, midX, p2.y);
+    arrow(p1.x, midY, p2.x, midY);
+
+    // Label
+    const lines: string[] = [];
+    if (pr1 !== undefined && pr2 !== undefined) {
+      const pct = pr1 !== 0 ? (diff / pr1) * 100 : 0;
+      const sign = diff >= 0 ? '+' : '';
+      lines.push(`${sign}${diff.toFixed(2)} (${sign}${pct.toFixed(2)}%)`);
+    }
+    const l1 = getLogicalIndex(raw[0], p1), l2 = getLogicalIndex(raw[1], p2);
+    const bars = l1 !== undefined && l2 !== undefined ? Math.round(l2 - l1) : undefined;
+    const t1 = raw[0].barTime, t2 = raw[1].barTime;
+    const timePart = t1 !== undefined && t2 !== undefined ? `, ${t2 < t1 ? '-' : ''}${formatDuration(t2 - t1)}` : '';
+    if (bars !== undefined) lines.push(`${bars} bar${Math.abs(bars) === 1 ? '' : 's'}${timePart}`);
+    if (lines.length === 0) return;
+
+    ctx.font = '12px Inter, system-ui, sans-serif';
+    const pad = 8, lh = 16;
+    const w = Math.max(...lines.map(l => ctx.measureText(l).width)) + pad * 2;
+    const h = lines.length * lh + pad;
+    const bx = midX - w / 2;
+    // Below the box when measuring up, above it when measuring down (TradingView convention)
+    let by = up ? maxY + 6 : minY - h - 6;
+    if (by < 2) by = maxY + 6;
+    if (by + h > ctx.canvas.height - 2) by = Math.max(2, minY - h - 6);
+    ctx.fillStyle = base;
+    ctx.beginPath();
+    if (ctx.roundRect) ctx.roundRect(bx, by, w, h, 4); else ctx.rect(bx, by, w, h);
+    ctx.fill();
+    ctx.fillStyle = '#FFFFFF'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+    lines.forEach((l, i) => ctx.fillText(l, midX, by + pad / 2 + lh * i + lh / 2));
+    ctx.textAlign = 'start'; ctx.textBaseline = 'alphabetic';
+  };
+
   const renderCanvas = useCallback(() => {
     if (!canvasRef.current || !chartApi || !seriesApi) return;
     const ctx = canvasRef.current.getContext('2d');
@@ -687,6 +773,7 @@ export function useChartDrawings({
         case 'text': drawText(ctx, pts[0], d.text || '', col, isSel); break;
         case 'callout': drawCallout(ctx, pts[0], pts[1], d.text || '', col, isSel); break;
         case 'channel': drawChannel(ctx, pts, col, isSel); break;
+        case 'measure': drawMeasure(ctx, d.points, pts, isSel); break;
       }
       if (isSel && d.type !== 'text') {
         ctx.fillStyle = '#FFF'; ctx.strokeStyle = '#2196F3'; ctx.lineWidth = 2;
@@ -701,6 +788,7 @@ export function useChartDrawings({
         case 'trendline': drawLine(ctx, pts[0], pts[1], col); break;
         case 'rectangle': drawRectangle(ctx, pts[0], pts[1], col); break;
         case 'riskReward': drawRiskReward(ctx, pts[0], pts[1]); break;
+        case 'measure': drawMeasure(ctx, currentDrawing, pts, false); break;
       }
     }
     onCustomRender?.(ctx);

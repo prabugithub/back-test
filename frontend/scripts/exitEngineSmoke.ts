@@ -8,10 +8,12 @@ import {
   evaluateTrailStop,
   evaluateAutoExitSignal,
   countActiveExitMechanisms,
-  passesMinMax,
+  resolveMinPivotGapBars,
   type AutoBacktestConfig,
   type RegimeRules,
 } from '../src/utils/autoBacktestEngine';
+import { createExitHookRunState } from '../src/utils/exitHook';
+import { registerExitHook } from '../src/strategies/exits';
 import { runBatchSimulation } from '../src/utils/batchBacktestSimulator';
 import { calculatePivotPoints, calculateAlBrooks } from '../src/utils/indicators';
 import { analyzeMarketStructure } from '../src/utils/pivotAnalysis';
@@ -83,7 +85,7 @@ const cfg = (uptrend: Partial<RegimeRules>): AutoBacktestConfig => ({
 
   // Expected candidate, replicated independently: latest bullish pivot among
   // pivots confirmed through bar i-1, 3-bar cluster min low, minus buffer.
-  const pivots = calculatePivotPoints(candles.slice(0, i)).filter(p => p.type === 'bullish');
+  const pivots = calculatePivotPoints(candles.slice(0, i), resolveMinPivotGapBars(config)).filter(p => p.type === 'bullish');
   assert(pivots.length > 0, 'synthetic uptrend produced bullish pivots');
   const b = pivots[pivots.length - 1].barIndex;
   const expected = Math.min(candles[b].low, candles[b - 1].low, candles[b - 2].low) - 2;
@@ -160,33 +162,99 @@ const cfg = (uptrend: Partial<RegimeRules>): AutoBacktestConfig => ({
   }
 }
 
-// ─── 4. Leg-decay exit ────────────────────────────────────────────────────────
+// ─── 4. Custom exit hook ──────────────────────────────────────────────────────
+// Replaces the old built-in leg-decay scenario: that mechanism is gone, and its logic now
+// ships as the 'leg-decay' hook, which this section exercises through the same registry the
+// UI and the worker use. Dedicated coverage of the hook API itself lives in exitHookSmoke.ts.
 {
-  console.log('\n[4] evaluateAutoExitSignal — LEG_DECAY re-grades post-entry legs');
+  console.log('\n[4] evaluateAutoExitSignal — custom exit hook');
   const candles = wave(160, 100, 0.5);
-  // ER 'min' @ 1.5 is unsatisfiable (ER ∈ [0,1]) → fails whenever a post-entry
-  // completed bull leg exists, isolating the leg-selection machinery.
-  const config = cfg({
-    exitLegDecay: true, exitLegDecayMinBarsInTrade: 3, exitLegDecayMinFails: 1,
-    exitDecayEfficiencyFilter: 'min', exitDecayEfficiencyThreshold: 1.5,
-  });
   const entryBarIndex = 60;
-  let decayIndex = -1;
-  for (let i = 63; i < 160 && decayIndex < 0; i++) {
-    const r = evaluateAutoExitSignal(candles, i, { quantity: 1, entryBarIndex, entryRegime: 'uptrend' }, config);
-    if (r.exit) {
-      assert(r.exit.reason === 'LEG_DECAY', `exit reason is LEG_DECAY (${r.exit.detail})`);
-      decayIndex = i;
-    }
-  }
-  assert(decayIndex > 0, `a post-entry completed leg was found and graded (exit @ ${decayIndex})`);
-  assert(decayIndex - entryBarIndex >= 3, 'min-bars-in-trade respected');
-  const offConfig = cfg({ exitLegDecay: true, exitLegDecayMinBarsInTrade: 3, exitLegDecayMinFails: 1 });
+  const pos = () => ({ quantity: 1, averagePrice: candles[entryBarIndex].close, entryBarIndex, entryRegime: 'uptrend' as const });
+
+  // 'replace' mode with a hook that always holds → no exit ever, even with the built-in
+  // mechanisms switched on, because replace skips them entirely.
+  registerExitHook('smoke-hold', { label: 'hold', hook: () => false });
+  const holdCfg = cfg({
+    exitOnReversal: true, exitReversalRequireWithTrend: false,
+    exitHookMode: 'replace', exitHookId: 'smoke-hold',
+  });
   let anyExit = false;
   for (let i = 63; i < 160; i++) {
-    if (evaluateAutoExitSignal(candles, i, { quantity: 1, entryBarIndex, entryRegime: 'uptrend' }, offConfig).exit) anyExit = true;
+    if (evaluateAutoExitSignal(candles, i, pos(), holdCfg).exit) anyExit = true;
   }
-  assert(!anyExit, 'no decay checks enabled → never exits');
+  assert(!anyExit, "'replace' hook that holds suppresses the built-in exits too");
+
+  // 'replace' mode with a hook that exits after N bars in the trade.
+  registerExitHook('smoke-time', {
+    label: 'time',
+    hook: ctx => (ctx.position.barsInTrade ?? 0) >= 10 ? { reason: 'smoke time stop' } : false,
+  });
+  const timeCfg = cfg({ exitHookMode: 'replace', exitHookId: 'smoke-time' });
+  let exitIndex = -1;
+  for (let i = 63; i < 160 && exitIndex < 0; i++) {
+    const r = evaluateAutoExitSignal(candles, i, pos(), timeCfg);
+    if (r.exit) {
+      assert(r.exit.reason === 'EXIT_HOOK', `exit reason is EXIT_HOOK (${r.exit.detail})`);
+      assert(r.exit.detail.includes('smoke time stop'), 'the hook\'s own reason reaches the detail');
+      exitIndex = i;
+    }
+  }
+  assert(exitIndex === entryBarIndex + 10, `exited exactly at barsInTrade 10 (bar ${exitIndex})`);
+
+  // An unregistered id runs NO signal exits rather than falling back to the built-ins.
+  const brokenCfg = cfg({
+    exitOnReversal: true, exitReversalRequireWithTrend: false,
+    exitHookMode: 'replace', exitHookId: 'smoke-not-registered',
+  });
+  let brokenExit = false;
+  for (let i = 63; i < 160; i++) {
+    if (evaluateAutoExitSignal(candles, i, pos(), brokenCfg).exit) brokenExit = true;
+  }
+  assert(!brokenExit, 'an unregistered hook id takes no exits instead of falling back');
+
+  // A stop move comes back on `adjust` without closing the trade.
+  registerExitHook('smoke-trail', {
+    label: 'trail',
+    hook: ctx => ({ exit: false, sl: ctx.candle.close - 25 }),
+  });
+  const trailCfg = cfg({ exitHookMode: 'replace', exitHookId: 'smoke-trail' });
+  const adj = evaluateAutoExitSignal(candles, 80, pos(), trailCfg);
+  assert(adj.exit === null, 'exit:false holds the trade');
+  assert(adj.adjust?.stopLoss === candles[80].close - 25, 'the stop move is returned on adjust');
+
+  // 'gate' mode: a silent false lets a pending built-in exit stand; { exit: false } vetoes it.
+  registerExitHook('smoke-silent', { label: 'silent', hook: () => false });
+  registerExitHook('smoke-veto', { label: 'veto', hook: () => ({ exit: false }) });
+  const gateBase = {
+    exitOnReversal: true, exitReversalConfirmBars: 1, exitReversalRequireWithTrend: false,
+  } as Partial<RegimeRules>;
+  const shortPos = () => ({ quantity: -1, averagePrice: candles[entryBarIndex].close, entryBarIndex, entryRegime: 'uptrend' as const });
+  let standIndex = -1;
+  for (let i = 63; i < 160 && standIndex < 0; i++) {
+    const r = evaluateAutoExitSignal(candles, i, shortPos(), cfg({ ...gateBase, exitHookMode: 'gate', exitHookId: 'smoke-silent' }));
+    if (r.exit) {
+      assert(r.exit.reason === 'REVERSAL', 'a silent false lets the pending REVERSAL stand');
+      standIndex = i;
+    }
+  }
+  assert(standIndex > 0, `the gate scenario produced a pending exit (bar ${standIndex})`);
+  const vetoed = evaluateAutoExitSignal(candles, standIndex, shortPos(), cfg({ ...gateBase, exitHookMode: 'gate', exitHookId: 'smoke-veto' }));
+  assert(vetoed.exit === null, '{ exit: false } vetoes the same pending exit');
+
+  // A throwing hook is trapped: no exit, and the run continues.
+  registerExitHook('smoke-throw', { label: 'throw', hook: () => { throw new Error('boom'); } });
+  const throwState = createExitHookRunState();
+  const threw = evaluateAutoExitSignal(candles, 80, pos(), cfg({ exitHookMode: 'replace', exitHookId: 'smoke-throw' }), throwState);
+  assert(threw.exit === null, 'a throwing hook takes no exit');
+  assert(throwState.errorCount === 1 && (throwState.error ?? '').includes('boom'), 'the exception is trapped and recorded');
+
+  // Fail-closed: a fill price outside the bar is refused outright.
+  registerExitHook('smoke-badprice', { label: 'bad price', hook: ctx => ({ price: ctx.candle.high + 100 }) });
+  const badState = createExitHookRunState();
+  const bad = evaluateAutoExitSignal(candles, 80, pos(), cfg({ exitHookMode: 'replace', exitHookId: 'smoke-badprice' }), badState);
+  assert(bad.exit === null, 'a fill price outside the bar is refused');
+  assert(badState.rejectedCount === 1, 'the rejection is counted');
 }
 
 // ─── 5. Batch simulator integration ──────────────────────────────────────────
@@ -201,7 +269,7 @@ const cfg = (uptrend: Partial<RegimeRules>): AutoBacktestConfig => ({
   const candles = [...up, ...down];
 
   const offResult = runBatchSimulation(candles, cfg({ slFixedPoints: 50 }), 60, 'SMOKE', 1, '1');
-  const newReasons = new Set(['REVERSAL', 'OPP_SIGNAL', 'LEG_DECAY']);
+  const newReasons = new Set(['REVERSAL', 'OPP_SIGNAL', 'EXIT_HOOK']);
   assert(offResult.trades.every(t => !newReasons.has(t.exitReason ?? '') && !t.slTrailed),
     `exits off → no engine exit reasons, no trailed SLs (${offResult.trades.length} trades)`);
 
@@ -221,9 +289,10 @@ const cfg = (uptrend: Partial<RegimeRules>): AutoBacktestConfig => ({
   console.log('\n[6] helpers');
   assert(countActiveExitMechanisms(clean({})) === 0, 'countActiveExitMechanisms: 0 when all off');
   assert(countActiveExitMechanisms(clean({ exitOnReversal: true, exitTrailPivot: true })) === 2, '…counts toggled mechanisms');
-  assert(passesMinMax('none', 5, 99) && passesMinMax('min', 5, 5) && !passesMinMax('min', 5, 4.9)
-    && passesMinMax('max', 5, 5) && !passesMinMax('max', 5, 5.1) && passesMinMax('min', 5, undefined),
-    'passesMinMax semantics (none/min/max/undefined-passthrough)');
+  assert(countActiveExitMechanisms(clean({ exitHookMode: 'replace', exitHookId: 'leg-decay' })) === 1,
+    '…counts a configured exit hook as a mechanism');
+  assert(countActiveExitMechanisms(clean({ exitHookMode: 'replace' })) === 0,
+    '…a mode with no hook id is identity, not a mechanism');
 }
 
 console.log(`\n${passed} passed, ${failed} failed`);

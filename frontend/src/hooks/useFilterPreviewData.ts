@@ -19,8 +19,13 @@ import {
   passesPivotGap,
   getEmaAt,
   getAtrAt,
+  passesLegPattern,
+  previewEntryHook,
+  type LegPatternCtx,
+  type RegimeKey,
 } from '../utils/autoBacktestEngine';
 import { calculateAlBrooks } from '../utils/indicators';
+import { buildLegWindow as buildLegPatternWindow, type LegWindow as LegPatternWindow } from '../utils/legPattern';
 
 // One entry per Quality Setup Filter that has a live-preview diagram. Extend this list
 // as more filters get their own ThresholdFilterControl (see plan phases 2-4).
@@ -37,7 +42,9 @@ export type PreviewFilterKey =
   | 'atrDepth'
   | 'highSeq'
   | 'lowSeq'
-  | 'pivotGap';
+  | 'pivotGap'
+  | 'legPattern'
+  | 'entryHook';
 
 export interface FilterPreviewBar {
   candle: Candle;
@@ -66,7 +73,10 @@ export function useFilterPreviewData(
   candles: Candle[],
   currentIndex: number,
   rules: RegimeRules,
-  config: AutoBacktestConfig
+  config: AutoBacktestConfig,
+  // Which rule-set is being previewed. Only reaches a custom entry hook as ctx.regime —
+  // every built-in filter is regime-agnostic.
+  regime: RegimeKey
 ): FilterPreviewBar[] {
   return useMemo(() => {
     if (candles.length === 0) return [];
@@ -78,6 +88,25 @@ export function useFilterPreviewData(
     // Mirrors evaluateAutoSignals' trend-anchor logic (autoBacktestEngine.ts) so the preview
     // never disagrees with what the real engine would compute for a pullback entry.
     const alBrooks = calculateAlBrooks(candles.slice(0, end + 1));
+
+    // Leg-pattern windows for the previewed bars. Built on demand and memoized per
+    // (bar, detail) so a two-slot pattern doesn't rebuild the same window twice, and
+    // never built at all when the regime has no active pattern.
+    const legWindows = new Map<string, LegPatternWindow>();
+    const legPatternCtxFor = (bar: number): LegPatternCtx => needsPerCandle => {
+      const key = `${bar}|${needsPerCandle ? 'full' : 'avg'}`;
+      let w = legWindows.get(key);
+      if (!w) {
+        w = buildLegPatternWindow(candles, bar, {
+          windowLegs: config.legSequenceCount ?? 10,
+          needsPerCandle,
+          baselineLookback: config.barRangeLookback,
+          overlapLookback: config.barOverlapLookback,
+        });
+        legWindows.set(key, w);
+      }
+      return w;
+    };
 
     const bars: FilterPreviewBar[] = [];
     for (let i = start; i <= end; i++) {
@@ -108,7 +137,18 @@ export function useFilterPreviewData(
         highSeq: passesSeqFilter(rules.highSeqFilter, rules.highSeqPatterns, metrics.pivotHighSeq ?? []),
         lowSeq: passesSeqFilter(rules.lowSeqFilter, rules.lowSeqPatterns, metrics.pivotLowSeq ?? []),
         pivotGap: passesPivotGap(rules, metrics.pivotGapAvgBars),
+        // Uses the SAME passesLegPattern the engine calls, so the strip can never drift
+        // from the real gate. The window is built per previewed bar and cached for the
+        // duration of this call; the whole column is skipped when no pattern is active,
+        // so an unconfigured regime pays nothing for it.
+        legPattern: passesLegPattern(rules, legPatternCtxFor(i), isLong),
       };
+      // Custom entry hook. Unlike every key above, this one is CONDITIONAL: the hook is only
+      // consulted on bars that carry an H/L signal, so writing `false` on the other bars
+      // would drag overallPass down for bars the engine never even asked about. undefined
+      // means "not consulted here" and the key is left off entirely.
+      const hookPass = previewEntryHook(candles, i, config, rules, regime, metrics);
+      if (hookPass !== undefined) pass.entryHook = hookPass;
       bars.push({
         candle: candles[i],
         pass,
@@ -118,5 +158,5 @@ export function useFilterPreviewData(
       });
     }
     return bars;
-  }, [candles, currentIndex, rules, config]);
+  }, [candles, currentIndex, rules, config, regime]);
 }
