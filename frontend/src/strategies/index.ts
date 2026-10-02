@@ -33,6 +33,9 @@
  * `ctx.candles` is the last `entryHookLookback` candles (Session Settings → Custom Entry
  * Hook, default 1200), oldest-first, ending at the trigger bar. Nothing reachable from
  * `ctx` describes a bar after the trigger. See utils/entryHook/types.ts for the full shape.
+ *
+ * `ctx.structure()` is the pivot-only market structure (Up / Down / Range + sub-regime,
+ * the whole current segment's swings, key level and range box) — see utils/marketStructure.
  */
 import type { EntryHook, EntryHookEntry } from '../utils/entryHook';
 import { deepPullbackContinuation, takeEverySignal } from './example';

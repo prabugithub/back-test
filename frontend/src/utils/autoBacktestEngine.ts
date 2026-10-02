@@ -66,6 +66,13 @@ import {
   averagePivotGapBars,
 } from './pivotAnalysis';
 import {
+  getStructureAt,
+  structureToLtMarket,
+  type StructureBroad,
+  type StructureState,
+  type StructureSub,
+} from './marketStructure';
+import {
   buildLegWindow,
   getMatcher,
   legPatternActive,
@@ -192,6 +199,12 @@ export interface RegimeRules {
   // is what lets a rule-set refuse to fire outside its intended structure).
   // Optional — old saved configs predate this field; treated as 'any' when unset.
   ltStructureFilter?: 'any' | 'bull_trend' | 'bear_trend' | 'range' | 'reversal';
+
+  // Pivot market-structure gate (utils/marketStructure) — the pivot-only Up/Down/Range
+  // classifier plus its 9-regime sub-type. Independent of regimeSource: this gates on the
+  // pivot read even when the EMA read picks the regime. Optional; undefined = 'any' / [].
+  pivotStructureFilter?: 'any' | StructureBroad;
+  pivotSubFilter?: StructureSub[];
 
   // Risk
   slMethod: 'pivot' | 'atr' | 'fixed';
@@ -388,6 +401,21 @@ export interface AutoBacktestConfig {
   trendDayGapBarsMin?: number;       // bars without an EMA21 touch before an H1 far from the EMA is allowed (default 20)
   trendDayMaxEntries?: number;       // max entries the hook approves per session (default 3)
 
+  // Pivot market-structure classifier (utils/marketStructure) — pivot-only thresholds, all
+  // ratios of the segment's own swings. Optional; defaults live in STRUCTURE_PARAM_DEFS.
+  structureMaxPivots?: number;
+  structureMinSwings?: number;
+  structureBreakFrac?: number;
+  structureStairsMaxDepth?: number;
+  structureStairsMaxTime?: number;
+  structureAmpRatio?: number;
+  structureTightFrac?: number;
+  structureWedgeConvergence?: number;
+  // Which classifier picks the regime rule-set (and feeds ltMarket everywhere in the engine).
+  // 'ema' (default, undefined) = analyzeMarketStructureAt; 'pivot' = the pivot structure
+  // mapped via structureToLtMarket. htMarket stays EMA-based either way.
+  regimeSource?: 'ema' | 'pivot';
+
   // Per-regime rule sets
   uptrend: RegimeRules;   // Bull-Trend, Bull-Trending-range
   downtrend: RegimeRules; // Bear-Trend, Bear-Trending-range
@@ -405,6 +433,37 @@ export function resolveMinPivotGapBars(
   const raw = config.minPivotGapBars ?? DEFAULT_MIN_PIVOT_GAP_BARS;
   if (!Number.isFinite(raw)) return DEFAULT_MIN_PIVOT_GAP_BARS;
   return Math.min(MIN_PIVOT_GAP_BARS_MAX, Math.max(MIN_PIVOT_GAP_BARS_MIN, Math.floor(raw)));
+}
+
+// ─── Regime source ────────────────────────────────────────────────────────────
+
+/** The single chokepoint every engine call site reads market structure through. With
+ *  regimeSource 'ema' (the default) it IS analyzeMarketStructureAt; with 'pivot' the
+ *  ltMarket label comes from the pivot classifier instead (htMarket unchanged). */
+export function resolveLtMarketAt(
+  candles: Candle[],
+  currentIndex: number,
+  pivots: PivotPoint[],
+  config: AutoBacktestConfig,
+): { ltMarket: string; htMarket: string } {
+  const read = analyzeMarketStructureAt(candles, currentIndex, pivots);
+  if (config.regimeSource !== 'pivot') return read;
+  return { ltMarket: structureToLtMarket(getStructureAt(candles, currentIndex, config)), htMarket: read.htMarket };
+}
+
+/** Pivot structure gate. A no-op (true) when neither filter is set. */
+export function passesPivotStructure(rules: RegimeRules, state: StructureState | null): boolean {
+  const broad = rules.pivotStructureFilter ?? 'any';
+  const subs = rules.pivotSubFilter ?? [];
+  if (broad === 'any' && subs.length === 0) return true;
+  if (!state) return false;
+  if (broad !== 'any' && state.broad !== broad) return false;
+  if (subs.length > 0 && (state.sub === null || !subs.includes(state.sub))) return false;
+  return true;
+}
+
+export function pivotStructureActive(rules: RegimeRules): boolean {
+  return (rules.pivotStructureFilter ?? 'any') !== 'any' || (rules.pivotSubFilter?.length ?? 0) > 0;
 }
 
 // ─── Regime key mapping ───────────────────────────────────────────────────────
@@ -880,8 +939,13 @@ export function evaluateAutoSignals(
   const atr = getAtrAt(candles, currentIndex);
 
   // Detect regime from LT market structure
-  const { ltMarket, htMarket } = analyzeMarketStructureAt(candles, currentIndex, pivots);
+  const { ltMarket, htMarket } = resolveLtMarketAt(candles, currentIndex, pivots, config);
   const matchedRegime = getRegimeKey(ltMarket);
+  // Pivot structure — read lazily: only a regime with a pivot-structure gate pays for it
+  // (the timeline itself is built once per candles array and cached).
+  let pivotStructureMemo: StructureState | null | undefined;
+  const pivotStructure = () =>
+    pivotStructureMemo === undefined ? (pivotStructureMemo = getStructureAt(candles, currentIndex, config)) : pivotStructureMemo;
 
   // Shared indicators at this bar
   const currentPivot = pivots.find(p => p.time === currentTs) ?? null;
@@ -933,6 +997,7 @@ export function evaluateAutoSignals(
         needsPerCandle,
         baselineLookback: config.barRangeLookback,
         overlapLookback: config.barOverlapLookback,
+        structureConfig: config,
       });
       legWindowCache.set(key, cached);
     }
@@ -990,6 +1055,7 @@ export function evaluateAutoSignals(
     if (!regimeRules.enabled) continue;
     if (!passesStructureFilter(regimeRules.htStructureFilter, htMarket)) continue;
     if (!passesStructureFilter(regimeRules.ltStructureFilter, ltMarket)) continue;
+    if (pivotStructureActive(regimeRules) && !passesPivotStructure(regimeRules, pivotStructure())) continue;
 
     // ── Custom entry hook, 'replace' mode ────────────────────────────────────
     // The whole passesXxx chain and the leg-strength block below are skipped: the hook IS
@@ -1403,7 +1469,7 @@ export function previewEntryHook(
   if (!resolved.hook) return false; // unknown id — fails closed, same as the engine
 
   const pivots = getPivotPointsUpTo(candles, currentIndex, resolveMinPivotGapBars(config));
-  const { ltMarket, htMarket } = analyzeMarketStructureAt(candles, currentIndex, pivots);
+  const { ltMarket, htMarket } = resolveLtMarketAt(candles, currentIndex, pivots, config);
   const { bull, bear } = getAlBrooksLegsAt(candles, currentIndex);
   const leg = trigger.side === 'long' ? bull : bear;
   const atr = getAtrAt(candles, currentIndex);
@@ -1751,7 +1817,7 @@ const resolveExitRules = (
   // Restored old session with an open auto position but no stamped regime —
   // fall back to the regime the current LT structure maps to.
   const pivots = getPivotPointsUpTo(candles, currentIndex, resolveMinPivotGapBars(config));
-  const { ltMarket } = analyzeMarketStructureAt(candles, currentIndex, pivots);
+  const { ltMarket } = resolveLtMarketAt(candles, currentIndex, pivots, config);
   return config[getRegimeKey(ltMarket)];
 };
 
@@ -1867,7 +1933,7 @@ export function evaluateAutoExitSignal(
   // 1. REVERSAL — LT structure against the position for N consecutive checks
   if (runBuiltIns && rules.exitOnReversal) {
     const pivots = getPivotPointsUpTo(candles, currentIndex, resolveMinPivotGapBars(config));
-    const { ltMarket } = analyzeMarketStructureAt(candles, currentIndex, pivots);
+    const { ltMarket } = resolveLtMarketAt(candles, currentIndex, pivots, config);
     const isAgainst = isLong ? ltMarket.startsWith('Bear') : ltMarket.startsWith('Bull');
     const isWith = isLong ? ltMarket.startsWith('Bull') : ltMarket.startsWith('Bear');
     if (isWith) state.exitWithTrendSeen = true;
@@ -1945,7 +2011,7 @@ function runExitHookAt(
 
   const env = (): ExitHookEnv => {
     const pivots = getPivotPointsUpTo(candles, currentIndex, resolveMinPivotGapBars(config));
-    const { ltMarket, htMarket } = analyzeMarketStructureAt(candles, currentIndex, pivots);
+    const { ltMarket, htMarket } = resolveLtMarketAt(candles, currentIndex, pivots, config);
     // The newest COMPLETED leg on the POSITION's side — the same window the old built-in
     // leg-decay check graded, which is what lets the ported 'leg-decay' hook behave
     // identically to the mechanism it replaced.
@@ -2012,11 +2078,13 @@ export function getCurrentMarketState(
   // Resolve from the active AutoBacktestConfig via resolveMinPivotGapBars so the header
   // readout classifies structure off the same pivot set the engine trades off.
   minPivotGapBars: number = DEFAULT_MIN_PIVOT_GAP_BARS,
+  // Optional so the readout honours Session Settings → Regime source. Omitted = EMA read.
+  config?: AutoBacktestConfig,
 ): { ltMarket: string; htMarket: string; regime: RegimeKey } {
   if (currentIndex < 25 || candles.length < 26) {
     return { ltMarket: 'Range', htMarket: 'Range', regime: 'range' };
   }
   const pivots = getPivotPointsUpTo(candles, currentIndex, minPivotGapBars);
-  const { ltMarket, htMarket } = analyzeMarketStructureAt(candles, currentIndex, pivots);
+  const { ltMarket, htMarket } = config ? resolveLtMarketAt(candles, currentIndex, pivots, config) : analyzeMarketStructureAt(candles, currentIndex, pivots);
   return { ltMarket, htMarket, regime: getRegimeKey(ltMarket) };
 }

@@ -11,6 +11,7 @@
 import type { Candle } from '../../types';
 import { buildLegSequence } from '../legSequence';
 import { getAlBrooksRunUpTo } from '../indicators';
+import { BROAD_CODE, SUB_CODE, getStructureAt, type StructureConfig } from '../marketStructure';
 import { buildLegWindow as buildWindowFromSegments, type LegWindow } from './adapter';
 
 export { buildLegWindow as buildLegWindowFromSegments, deriveDirArray, goodRuns, maxRunIn, IMPULSE, PULLBACK } from './adapter';
@@ -34,6 +35,9 @@ export interface LegWindowOptions {
   baselineLookback?: number;
   /** Candle-overlap window for the score's constant term. Session Settings' `barOverlapLookback`. */
   overlapLookback?: number;
+  /** Session config for the pivot market-structure read behind the structureBroad /
+   *  structureSub window clauses. Omitted → those clauses are unmeasurable (fail). */
+  structureConfig?: Partial<StructureConfig>;
 }
 
 /**
@@ -67,8 +71,13 @@ export function buildLegWindow(
     opts.needsPerCandle ? 'full' : 'avg',
     run
   );
-  return buildWindowFromSegments(segments, candles, currentIndex, {
+  const window = buildWindowFromSegments(segments, candles, currentIndex, {
     baselineLookback: opts.baselineLookback,
     overlapLookback: opts.overlapLookback,
   });
+  if (opts.structureConfig) {
+    const st = getStructureAt(candles, currentIndex, opts.structureConfig);
+    if (st) window.structure = { broad: BROAD_CODE[st.broad], sub: st.sub ? SUB_CODE[st.sub] : undefined };
+  }
+  return window;
 }

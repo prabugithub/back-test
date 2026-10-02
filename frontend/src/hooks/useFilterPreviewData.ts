@@ -102,6 +102,7 @@ export function useFilterPreviewData(
           needsPerCandle,
           baselineLookback: config.barRangeLookback,
           overlapLookback: config.barOverlapLookback,
+          structureConfig: config,
         });
         legWindows.set(key, w);
       }

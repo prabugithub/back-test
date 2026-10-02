@@ -56,12 +56,13 @@ export function LegPatternStep({ rules, up, meta, isShort, config }: RegimeStepP
         needsPerCandle: matcher?.needsPerCandle ?? false,
         baselineLookback,
         overlapLookback,
+        structureConfig: config,
       });
       return { window: w, agg: computeAggregates(w, null, legStrength) };
     } catch {
       return null;
     }
-  }, [candles, currentIndex, windowLegs, matcher, baselineLookback, overlapLookback, legStrength]);
+  }, [candles, currentIndex, windowLegs, matcher, baselineLookback, overlapLookback, legStrength, config]);
 
   const verdicts = useMemo(
     () => (matcher && live ? matcher.explain(live.window, !isShort) : null),

@@ -11,6 +11,7 @@ import {
   EXIT_HOOK_LOOKBACK_MIN,
   EXIT_HOOK_LOOKBACK_MAX,
 } from '../../utils/exitHook';
+import { STRUCTURE_PARAM_DEFS } from '../../utils/marketStructure';
 import { CardShell } from './CardShell';
 
 const TREND_DAY_INPUTS: {
@@ -341,6 +342,41 @@ export function SessionSettingsPanel({ config, onChange, isOpen, onClose }: Sess
                 <option value="full">Full (per-candle)</option>
                 <option value="avg">Averages only</option>
               </select>
+            </div>
+          </CardShell>
+
+          {/* Pivot-only market-structure classifier (utils/marketStructure). Read by the
+              Market-step Pivot Structure gate, leg-pattern structure clauses, hook
+              ctx.structure() and the experimental chart layer. */}
+          <CardShell title="Market Structure (pivot)">
+            <div className="flex items-center justify-between gap-2 mb-2">
+              <span
+                className="text-[10px] text-gray-500"
+                title="Which classifier picks the regime rule-set (Uptrend / Downtrend / Range) on each bar, and feeds ltMarket to the LT Structure filter, reversal exit and trade records. EMA = the original EMA21-slope read. Pivot = the pivot-only structure below (Up + Stairs/Expanding → Bull-Trend, other Up → Bull-Trending-range, Range → Range; Reversal is never selected). HT Structure stays EMA-based either way."
+              >
+                Regime source
+              </span>
+              <select
+                value={config.regimeSource ?? 'ema'}
+                onChange={e => onChange({ regimeSource: e.target.value as AutoBacktestConfig['regimeSource'] })}
+                className="flex-1 max-w-[9rem] px-2 py-1 text-xs border rounded-lg"
+              >
+                <option value="ema">EMA (current)</option>
+                <option value="pivot">Pivot structure</option>
+              </select>
+            </div>
+            <div className="grid grid-cols-2 gap-x-3 gap-y-2">
+              {STRUCTURE_PARAM_DEFS.map(({ key, label, title, min, max, step, def }) => (
+                <div key={key} className="flex items-center justify-between gap-1">
+                  <span className="text-[10px] text-gray-500" title={title}>{label}</span>
+                  <input
+                    type="number" min={min} max={max} step={step}
+                    value={config[key] ?? def}
+                    onChange={e => onChange({ [key]: Number(e.target.value) })}
+                    className="w-14 px-1.5 py-1 text-xs border rounded text-center"
+                  />
+                </div>
+              ))}
             </div>
           </CardShell>
         </div>

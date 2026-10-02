@@ -97,6 +97,8 @@ export function computeAggregates(
     avgDirClv: f.length > 0 ? clvTotal / f.length : 0,
     maxGoodRun,
     goodLegPct: scores ? goodLegPct(window, scores, legStrength) : undefined,
+    structureBroad: window.structure?.broad,
+    structureSub: window.structure?.sub,
   };
 }
 

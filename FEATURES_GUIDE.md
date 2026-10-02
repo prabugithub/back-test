@@ -110,6 +110,17 @@ Each pivot marker shows:
 - Suggested SL (lowest/highest of current + previous candle ± 2 pts)
 - SL distance
 
+### Market Structure (exp.) — pivot structure bands
+
+**Experimental, off by default.** Toggle it under Indicators → **Market Structure (exp.)**. It shades the chart the way a hand-drawn structure read does: **red = Down, blue = Range, green = Up**.
+- A vertical line marks each structure change.
+- The label at the top reads like `UP · Stairs` or `RANGE · Tight range`. A `?` suffix plus a hatched band means a breakout is still unconfirmed.
+- Range segments show their box edges as dashed lines. Trend segments show their protected HL/LH as a dotted line.
+- `✕ failed BO` marks where a breakout fell back into the box.
+- The toolbar shows a **PS:** badge with the current bar's read.
+
+The layer is read-only: it draws on the canvas and never touches the store, markers or trades. The classifier is described under **Pivot Market Structure** in section 6.
+
 ### Al Brooks H/L System
 
 Pullback counting for trend-following setups.
@@ -573,6 +584,60 @@ Two per-regime filters alongside the single most-recent Pivot Seq filter above, 
 
 - **High/Low Sequence** (`highSeqFilter`/`lowSeqFilter`: Off/Pick patterns, with `highSeqPatterns`/`lowSeqPatterns` holding the chosen whitelist) — matches the last 4 same-type pivots (4 consecutive swing highs for High Sequence, 4 consecutive swing lows for Low Sequence), oldest to newest, against a whitelist of allowed 4-in-a-row patterns (e.g. `HH-HH-HH-HH`, `LH-LH-HH-HH`) picked from all 16 possible combinations. With fewer than 4 pivots recorded yet in the session, the filter passes through — no rejection.
 - **Pivot Gap** (Off/Fast/Slow + a bars threshold, default `5`) — average bar-count gap between consecutive pivots across both the high and low sequences, a trend-pace check. **Fast** requires the average gap at or below the threshold (pivots forming quickly — accelerating/choppy). **Slow** requires it at or above (pivots spaced out — a slower, more mature trend).
+
+### Pivot Market Structure — Up / Down / Range + 9-regime taxonomy
+
+This is a structure classifier built **only from pivots**: pivot price, bar index, and the number of candles between pivots. It uses no EMA or ATR. Code: `utils/marketStructure/`. Regime definitions: `market-structure-taxonomy.md`.
+
+**How it reads the market**
+
+The read is re-validated every bar. The window is **adaptive**: it is the whole current structure segment, however many pivots that is (often 20–30+), capped by *Max pivots / segment*.
+- **Range → Up:** a close above the range box's high + buffer. The breakout stays *unconfirmed* until either:
+  - a pullback low holds at or above the broken edge, or
+  - a pullback is followed by a new high.
+
+  A close back inside the box before that is a **failed breakout**, and the range resumes. Down is the mirror case.
+- **Up → Range (break of structure):** a close below the protected HL − buffer. The protected HL is the low that launched the latest HH. Down → Range is the mirror case.
+- **Up ↔ Down** always passes through Range. A range can only break once it has both a swing high and a swing low.
+- The buffer is *Break buffer* × the segment's median swing size.
+
+**Sub-regimes**, read over the whole segment:
+
+| Context | Sub-regime | Rule |
+|---|---|---|
+| Trend | Wedge | The last three highs and last three lows both slope with the trend, and the channel narrows by at least *Wedge convergence*. Checked first. |
+| Trend | Expanding / Shrinking trend | Mean impulse size in the later half of the segment vs the earlier half (excluding the breakout impulse) is ≥ *Expand/shrink ratio*, or ≤ its inverse. |
+| Trend | Stairs | Mean pullback retrace ≤ *Stairs max retrace*, and mean pullback bars ÷ impulse bars ≤ *Stairs max pullback time*. |
+| Trend | Trending range | Anything else. |
+| Range | Tight range | Height ≤ *Tight range* × the previous trend's median impulse. |
+| Range | Expanding triangle | Highs rising and lows falling, each by more than one buffer. |
+| Range | Converging triangle | Highs falling and lows rising, each by more than one buffer. |
+| Range | Sideways | Anything else. |
+
+Before the segment has *Min swings for sub-regime* swings, the sub-regime is shown as forming (null).
+
+**Settings:** Session Settings → **Market Structure (pivot)**. It holds every threshold above plus **Regime source**.
+
+**Where it is used in the builder** (all opt-in; defaults change nothing):
+- **Market step → Pivot Structure:** Any / Up / Down / Range, plus optional sub-regime chips (`pivotStructureFilter`, `pivotSubFilter`). This is a hard gate per rule set and applies in Gate and Replace hook modes too. When any sub-regime is selected, a segment that is still forming fails the gate.
+- **Leg Pattern → window clauses:** *Pivot structure* and *Structure sub-regime* chips (`structureBroad` / `structureSub`, matched with `in`).
+- **Custom entry/exit hooks:** `ctx.structure()` returns broad, sub, confirmed, keyLevel, rangeHigh/Low, `segmentPivots` and `swings` (each with price, bar index and candle count) and evidence. `ctx.structureLegs()` returns the Brooks legs spanning the segment.
+- **Regime source = Pivot structure:** the pivot read replaces the EMA `ltMarket` for:
+  - regime selection,
+  - the LT Structure filter,
+  - the reversal exit,
+  - trade journals and the header readouts.
+
+  The mapping:
+  - Up + Stairs or Expanding → `Bull-Trend`; other Up → `Bull-Trending-range`.
+  - Down, mirrored → `Bear-Trend` / `Bear-Trending-range`.
+  - Range → `Range`. Reversal is never selected by the pivot source.
+
+  HT Structure stays EMA-based. Manual-mode Trend Reversal flagging and entry instrumentation's trend-aligned flag also stay EMA-based.
+
+**Tests:**
+- `npx tsx scripts/structureVerify.ts` prints the segment list and distribution and runs a look-ahead check.
+- `npx tsx scripts/structureSmoke.ts` checks the gate, regime source, leg-pattern clause and hook context against cached candles.
 
 ---
 

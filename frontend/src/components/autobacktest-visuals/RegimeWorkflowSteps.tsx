@@ -21,6 +21,12 @@ import { MaPositionDiagram } from './MaPositionDiagram';
 import { PivotSeqDiagram } from './PivotSeqDiagram';
 import { AtrDepthDiagram } from './AtrDepthDiagram';
 import { PivotGapDiagram } from './PivotGapDiagram';
+import {
+  RANGE_SUBS,
+  STRUCTURE_SUB_LABELS,
+  TREND_SUBS,
+  type StructureSub,
+} from '../../utils/marketStructure';
 
 const HIGH_SEQ_PATTERNS = generateBinaryPatterns('HH', 'LH');
 const LOW_SEQ_PATTERNS = generateBinaryPatterns('HL', 'LL');
@@ -142,7 +148,65 @@ export function MarketStep({ rules, up, meta }: RegimeStepProps) {
         onModeChange={v => up({ ltStructureFilter: v as RegimeRules['ltStructureFilter'] })}
         diagram={structureDiagram}
       />
+      <PivotStructureControl rules={rules} up={up} />
       {isShort && <p className="text-[10px] text-gray-400">Direction is Short — filter labels elsewhere flip automatically to match.</p>}
+    </div>
+  );
+}
+
+// Pivot-only structure gate (utils/marketStructure): broad Up/Down/Range plus an optional
+// multi-select of the 9-regime sub-types. Sub chips are narrowed to the chosen broad value.
+function PivotStructureControl({ rules, up }: Pick<RegimeStepProps, 'rules' | 'up'>) {
+  const broad = rules.pivotStructureFilter ?? 'any';
+  const subs = rules.pivotSubFilter ?? [];
+  const shown: readonly StructureSub[] =
+    broad === 'range' ? RANGE_SUBS : broad === 'any' ? [...TREND_SUBS, ...RANGE_SUBS] : TREND_SUBS;
+  const toggle = (sub: StructureSub) =>
+    up({ pivotSubFilter: subs.includes(sub) ? subs.filter(s => s !== sub) : [...subs, sub] });
+
+  return (
+    <div className="space-y-2">
+      <ModePickerControl
+        label="Pivot Structure"
+        tooltip="Pivot-only market structure (no EMA): Up = breakout above the range box, held by higher lows; Down = mirror; Range = after a break of structure (close through the protected HL/LH) until the box breaks. The window is the whole current structure segment, re-validated every bar. Thresholds: Session Settings → Market Structure. Independent of Regime source."
+        mode={broad}
+        offValue="any"
+        gridCols={4}
+        modeOptions={[
+          { value: 'any', label: 'Any' },
+          { value: 'up', label: 'Up' },
+          { value: 'down', label: 'Down' },
+          { value: 'range', label: 'Range' },
+        ]}
+        onModeChange={v => {
+          const nextShown: readonly StructureSub[] = v === 'range' ? RANGE_SUBS : v === 'any' ? [...TREND_SUBS, ...RANGE_SUBS] : TREND_SUBS;
+          up({ pivotStructureFilter: v, pivotSubFilter: subs.filter(s => nextShown.includes(s)) });
+        }}
+      />
+      <div className="border border-gray-200 rounded-xl p-3 space-y-2">
+        <p
+          className="text-[10px] text-gray-400 uppercase tracking-wide font-medium cursor-help"
+          title="Optional: allow entries only in these sub-regimes. None selected = any sub-regime (including a segment still forming). Any selected = the segment must already have enough swings to be named."
+        >
+          Sub-regime {subs.length > 0 ? `(${subs.length})` : '(any)'}
+        </p>
+        <div className="flex flex-wrap gap-1">
+          {shown.map(sub => (
+            <button
+              key={sub}
+              type="button"
+              onClick={() => toggle(sub)}
+              className={`px-1.5 py-1 text-[10px] rounded border transition-all duration-150 active:scale-95 ${
+                subs.includes(sub)
+                  ? 'bg-indigo-600 border-indigo-600 text-white font-medium'
+                  : 'bg-white border-gray-200 text-gray-600 hover:border-gray-300'
+              }`}
+            >
+              {STRUCTURE_SUB_LABELS[sub]}
+            </button>
+          ))}
+        </div>
+      </div>
     </div>
   );
 }

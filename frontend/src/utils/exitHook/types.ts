@@ -32,6 +32,7 @@
 import type { Candle, LegSegment } from '../../types';
 import type { PivotPoint } from '../indicators';
 import type { LegWindow as LegPatternWindow } from '../legPattern';
+import type { StructureState } from '../marketStructure';
 import type {
   AutoBacktestConfig,
   EntryMetricsSnapshot,
@@ -179,6 +180,18 @@ export interface ExitHookContext {
    * @param needsPerCandle build with the per-candle brr/dir arrays. Defaults to false.
    */
   legFeatures(needsPerCandle?: boolean): LegPatternWindow;
+
+  /**
+   * Pivot-only market structure at this bar (utils/marketStructure; thresholds in Session
+   * Settings → Market Structure). `broad` is up / down / range, `sub` the 9-regime taxonomy
+   * read (null while forming). `segmentPivots` / `swings` are the whole adaptive window —
+   * every swing point of the current structure segment with price, bar index and the candle
+   * count between pivots. `keyLevel` is the protected HL/LH, `rangeHigh`/`rangeLow` the box.
+   * Look-ahead safe; null only outside the series.
+   */
+  structure(): StructureState | null;
+  /** Brooks leg/pullback segments spanning the current structure segment, NEWEST-FIRST. */
+  structureLegs(): LegSegment[];
 
   /** The managing regime's rules. Read-only — mutating this corrupts every later bar. */
   rules: Readonly<RegimeRules>;

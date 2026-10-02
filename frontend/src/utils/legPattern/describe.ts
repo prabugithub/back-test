@@ -120,7 +120,10 @@ function describeWindowClause(c: WindowClause): string {
       const a = Array.isArray(v) ? v : [0, 0];
       return `${label} between ${num(Math.min(a[0], a[1]), step)} and ${num(Math.max(a[0], a[1]), step)}`;
     }
-    case 'in': return `${label} is one of ${(Array.isArray(v) ? v : []).join(', ')}`;
+    case 'in': {
+      const names = (Array.isArray(v) ? v : []).map(x => def?.options?.find(o => o.value === x)?.label ?? String(x));
+      return `${label} is one of ${names.join(', ')}`;
+    }
     case 'eq': return `${label} = ${num(v as number, step)}`;
     case 'neq': return `${label} ≠ ${num(v as number, step)}`;
     case 'gte': return `${label} ≥ ${num(v as number, step)}`;

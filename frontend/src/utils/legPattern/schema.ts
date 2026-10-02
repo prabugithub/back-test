@@ -38,6 +38,11 @@
 
 /** An inclusive numeric range. Either end may be absent — absent constrains nothing.
  *  `null` and `undefined` both mean "unset"; the UI writes `null`, JSON round-trips it. */
+import {
+  BROAD_CODE, SUB_CODE, STRUCTURE_BROAD_LABELS, STRUCTURE_SUB_LABELS,
+  type StructureBroad, type StructureSub,
+} from '../marketStructure/types';
+
 export interface Bounds {
   min?: number | null;
   max?: number | null;
@@ -225,7 +230,10 @@ export type WindowField =
   | 'nBull' | 'nBear' | 'legBalance'
   | 'dominance' | 'legEfficiency' | 'netMovePct' | 'sumAbsMove'
   | 'pullbackDepth' | 'moveEfficiency'
-  | 'avgBrr' | 'avgDirClv' | 'maxGoodRun' | 'goodLegPct';
+  | 'avgBrr' | 'avgDirClv' | 'maxGoodRun' | 'goodLegPct'
+  // Categorical — pivot market structure at the current bar (utils/marketStructure),
+  // carried as BROAD_CODE / SUB_CODE numbers and matched with `in` / `neq`.
+  | 'structureBroad' | 'structureSub';
 
 export type WindowOp =
   | 'between' | 'in' | 'eq' | 'neq' | 'gte' | 'gt' | 'lte' | 'lt' | 'is-null' | 'not-null';
@@ -244,6 +252,9 @@ export interface WindowFieldDef {
   uiMin: number;
   uiMax: number;
   tooltip: string;
+  /** Categorical field: the codes a clause may name, with their labels. The UI renders
+   *  chips (emitting op `in`) instead of min/max inputs. */
+  options?: readonly { value: number; label: string }[];
 }
 
 export const WINDOW_FIELDS: readonly WindowFieldDef[] = [
@@ -279,6 +290,12 @@ export const WINDOW_FIELDS: readonly WindowFieldDef[] = [
     tooltip: 'Longest conviction run found in any segment. Needs per-candle data.' },
   { key: 'goodLegPct', label: 'Strong-leg share', step: 0.05, int: false, uiMin: 0, uiMax: 1,
     tooltip: 'Share of impulse legs scoring at or above the leg-strength threshold. Undefined when the window has no impulse legs.' },
+  { key: 'structureBroad', label: 'Pivot structure', step: 1, int: true, uiMin: 1, uiMax: 3,
+    tooltip: 'Pivot-only market structure at the current bar (Session Settings → Market Structure). Pick the states this pattern may fire in.',
+    options: (Object.keys(BROAD_CODE) as StructureBroad[]).map(k => ({ value: BROAD_CODE[k], label: STRUCTURE_BROAD_LABELS[k] })) },
+  { key: 'structureSub', label: 'Structure sub-regime', step: 1, int: true, uiMin: 1, uiMax: 9,
+    tooltip: 'The 9-regime taxonomy read of the current structure segment. Unmeasurable (fails) while the segment is still forming.',
+    options: (Object.keys(SUB_CODE) as StructureSub[]).map(k => ({ value: SUB_CODE[k], label: STRUCTURE_SUB_LABELS[k] })) },
 ] as const;
 
 export const WINDOW_FIELD_BY_KEY: Readonly<Record<WindowField, WindowFieldDef>> =

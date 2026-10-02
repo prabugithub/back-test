@@ -467,6 +467,32 @@ The exit-side mirror of the entry hook, and what **replaced the built-in Leg Dec
 - **Run state is per-run and shared across open trades.** The batch simulator makes one `createExitHookRunState()` per `runBatchSimulation`; the interactive path keys one on the candle array's identity in a `WeakMap` (`_exitHookStates`), separate from the entry hook's map so the two hooks' scratch keys cannot collide.
 - **Tests:** `npm run backtest:exithook` (62 assertions) — `off` and a mode with no id both byte-identical to baseline; the window contract (`min(lookback, absoluteIndex+1)`, oldest-first, ends at the current bar, `signals` aligned) and **no lookahead** through `pivots`/`legs()`/`legWindow`; the derived position view (`barsInTrade`, side-signed `openPoints`, MFE/MAE); `exitHookLookback` honoured and clamped; `ctx.state` accumulating then resetting; every fail-closed path; a hook-moved stop reaching booked trades and exiting via the normal SL machinery as `SL`+`slTrailed`; and each shipped hook (`leg-decay`, `breakeven-trail`, `time-stop`, `hold-winners`) running clean over a full backtest. Note a pure sine fixture can never make `leg-decay` fire on a long — every completed leg has ER exactly 1.0 — so that case uses its own climb-then-flat fixture and a short.
 
+### Pivot market structure (`utils/marketStructure/`, regime source, Market gate, leg-pattern clause, hook ctx, chart layer)
+
+A pivot-only classifier: Up / Down / Range plus a 9-regime sub-type. It runs as a single forward state machine (`timeline.ts`), cached per `(candles array, params)` in a `WeakMap`. Its inputs are confirmed pivots (`getPivotPointsUpTo`) and each bar's close. **No EMA/ATR**: every threshold is a ratio of the segment's own swings. That is a user requirement; keep it that way.
+
+- **Look-ahead safety relies on `calculatePivotPoints` being a causal fold**, where a pivot is known on the bar it fires on. The timeline consumes `pivots[k]` at `barIndex`, never earlier. `scripts/structureVerify.ts` recomputes sampled bars on truncated series and asserts identity. Any change to pivot confirmation timing (e.g. a lagged fractal) must re-check this.
+- **The window is the whole current segment (adaptive)**, capped by `structureMaxPivots`. It is not a fixed lookback. Do not add a fixed-N window.
+- **`StructureState` objects are immutable and shared between consecutive bars.** `segmentPivots` arrays are replaced on change, never mutated. Mutating one corrupts every earlier bar's state.
+- **Engine chokepoint:** every engine read of `ltMarket` goes through `resolveLtMarketAt(candles, idx, pivots, config)`. That covers `evaluateAutoSignals`, `previewEntryHook`, `resolveExitRules`, the reversal exit, the exit-hook env and `getCurrentMarketState`.
+  - With `regimeSource` `'ema'` (the default, undefined) it **is** `analyzeMarketStructureAt`, byte-identical. With `'pivot'` it swaps in `structureToLtMarket(getStructureAt(...))`. `htMarket` is always EMA.
+  - New engine sites must use the resolver, not call `analyzeMarketStructureAt` directly.
+  - **Not routed (deliberately EMA):** `sharedActions.checkTrendReversal` (manual mode), `entryInstrumentation.ts` (trend-aligned flag) and `ChartToolbar`'s LT/HT badges.
+- **Market gate:** `RegimeRules.pivotStructureFilter?` and `pivotSubFilter?` are checked through `pivotStructureActive` / `passesPivotStructure`, right after the LT Structure filter in `evaluateAutoSignals`. The check sits before the hook branches, so it also gates `replace` mode. It is evaluated lazily, per bar.
+  - **Not yet in `useFilterPreviewData`'s preview strip.** Add it there if the strip should show it.
+- **Leg-pattern clause:** the `WindowField`s `structureBroad` and `structureSub` carry `BROAD_CODE` / `SUB_CODE`. **The codes are persisted, so the list is append-only.**
+  - `buildLegWindow` (`legPattern/index.ts`) fills `LegWindow.structure` only when it is given `structureConfig`. All 5 call sites pass it: the engine, both hook contexts, `useFilterPreviewData` and `LegPatternStep`. Without it the structure clauses are unmeasurable and fail, which matches the engine's unknown-fails convention.
+  - `WindowFieldDef.options` marks a field as categorical. `WindowClauseEditor` renders such fields as chips that emit `in`.
+- **Hook ctx:** `structure()` and `structureLegs()` on `EntryHookContext` and `ExitHookContext` are lazy and memoised. `structureLegs` is enrichment only (`buildLegSequence` over the segment span); the classifier never reads legs.
+- **Config:** 8 `structure*` fields plus `regimeSource` on `AutoBacktestConfig`. All are optional, with defaults and clamps in `STRUCTURE_PARAM_DEFS` (`params.ts`). The same table drives Session Settings → Market Structure (pivot).
+  - `marketStructure/` imports the engine **type-only**. The engine value-imports `marketStructure/`, so a value import the other way would close a cycle (worker build).
+  - `minPivotGapBars` clamping is duplicated in `index.ts` for the same reason.
+- **Chart layer (experimental):** the `Indicator` value is `'marketStructure'`. `AdvancedChart` builds `memoizedStructure` only while that indicator is on. On the primary replay chart it uses the full `candles` cut at `currentIndex`, so the timeline cache hits. The drawing lives in `components/chart/drawMarketStructure.ts`, a read-only canvas pass with no store writes and no markers.
+- **Tests:**
+  - `npx tsx scripts/structureVerify.ts`: segments, distribution, look-ahead check.
+  - `npx tsx scripts/structureSmoke.ts`: gate, regime source, leg-pattern clause and hook context on cached candles (9 assertions).
+  - With defaults, `backtest:eval` output is byte-identical to the pre-change build.
+
 ### Stop-loss primitives (`utils/stopLoss.ts`)
 
 `slLong` / `slShort` / `findRecentBullPivot` / `findRecentBearPivot` were **moved out of `autoBacktestEngine.ts`** into this leaf module, which also adds `resolvePivotForSl` and `prospectiveStop`. The engine imports them back, so every existing call site is unchanged and behavior is byte-identical (asserted by the entryhook/legpattern/exit/legseq suites, 180 assertions).

@@ -111,6 +111,9 @@ export interface LegWindow {
   /** Candle overlap at the current bar — the score's per-window constant term. */
   overlapAvg: number;
   currentIndex: number;
+  /** Pivot market structure codes at currentIndex (BROAD_CODE / SUB_CODE). Absent when the
+   *  window was built without a structure config — structure clauses then fail. */
+  structure?: { broad: number; sub: number | undefined };
   /**
    * Feature indices of the IMPULSE LEGS, newest-first — the pattern's addressing scheme.
    * legs[k] in a config resolves to features[impulseIndices[k]], and that leg's

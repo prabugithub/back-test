@@ -3,6 +3,7 @@ import { Chip, type ChipTone } from './Chip';
 import { getEntryHookLabel } from '../../strategies';
 import { getExitHookLabel } from '../../strategies/exits';
 import type { WorkflowStep } from './RegimeWorkflowSteps';
+import { STRUCTURE_BROAD_LABELS, STRUCTURE_SUB_LABELS } from '../../utils/marketStructure';
 
 interface StrategySummaryBarProps {
   regime: RegimeKey;
@@ -100,6 +101,12 @@ export function StrategySummaryBar({ regime, rules, onJumpToStep }: StrategySumm
       <Chip tone={directionTone} onClick={jump('market')}>
         {directionLabel}
       </Chip>
+      {((rules.pivotStructureFilter ?? 'any') !== 'any' || (rules.pivotSubFilter?.length ?? 0) > 0) && (
+        <Chip tone="indigo" onClick={jump('market')}>
+          Pivot: {rules.pivotStructureFilter && rules.pivotStructureFilter !== 'any' ? STRUCTURE_BROAD_LABELS[rules.pivotStructureFilter] : 'Any'}
+          {(rules.pivotSubFilter?.length ?? 0) > 0 && ` · ${rules.pivotSubFilter!.map(s => STRUCTURE_SUB_LABELS[s]).join('/')}`}
+        </Chip>
+      )}
       <Chip tone="indigo" onClick={jump('entry')}>
         {bypassed ? 'Entry: Every H/L signal' : entryLabel}
       </Chip>

@@ -22,8 +22,9 @@ import { useSessionStore } from '../stores/sessionStore';
 import { calculatePivotPoints } from '../utils/indicators';
 import { analyzeMarketStructure } from '../utils/pivotAnalysis';
 import { resolveMinPivotGapBars } from '../utils/autoBacktestEngine';
+import { describeStructure, getStructureAt } from '../utils/marketStructure';
 import { LayoutGrid } from 'lucide-react';import { type DrawingTool } from '../types';
-export type Indicator = 'none' | 'sma21' | 'sma60' | 'ema21' | 'ema60' | 'pivotPoints' | 'alBrooks';
+export type Indicator = 'none' | 'sma21' | 'sma60' | 'ema21' | 'ema60' | 'pivotPoints' | 'alBrooks' | 'marketStructure';
 
 interface ChartToolbarProps {
   activeTool: DrawingTool;
@@ -80,6 +81,11 @@ export function ChartToolbar({
   const togglePivotRR = useSessionStore((s) => s.togglePivotRR);
 
   const minPivotGapBars = useSessionStore((s) => resolveMinPivotGapBars(s.autoBacktestConfig));
+  const autoBacktestConfig = useSessionStore((s) => s.autoBacktestConfig);
+  // Experimental pivot-structure readout — only while its chart layer is on.
+  const pivotStructure = activeIndicators.includes('marketStructure')
+    ? getStructureAt(candles, currentIndex, autoBacktestConfig)
+    : null;
 
   // Calculate market structure for display
   const visibleCandles = candles.slice(0, currentIndex + 1);
@@ -113,6 +119,7 @@ export function ChartToolbar({
     { id: 'ema60', label: 'EMA 60', color: '#D81B60' },
     { id: 'pivotPoints', label: 'Pivot Points', color: '#6A1B9A' },
     { id: 'alBrooks', label: 'Al Brooks H/L', color: '#00BCD4' },
+    { id: 'marketStructure', label: 'Market Structure (exp.)', color: '#2563EB' },
   ];
 
   return (
@@ -262,6 +269,18 @@ export function ChartToolbar({
           <LayoutGrid size={10} />
           <span>HT: {htMarket}</span>
         </div>
+        {pivotStructure && (
+          <div
+            className={`px-2 py-0.5 rounded border text-[10px] font-bold flex items-center gap-1 ${
+              pivotStructure.broad === 'up' ? 'text-green-600 bg-green-50 border-green-200'
+                : pivotStructure.broad === 'down' ? 'text-red-600 bg-red-50 border-red-200'
+                : 'text-blue-600 bg-blue-50 border-blue-200'
+            }`}
+            title={`Pivot structure (experimental) — ${pivotStructure.segmentPivots.length} pivots in the current segment`}
+          >
+            <span>PS: {describeStructure(pivotStructure)}</span>
+          </div>
+        )}
 
         <div className="text-xs text-gray-500 min-w-[120px] text-right">
           {activeTool !== 'none' && activeTool !== 'select' && (

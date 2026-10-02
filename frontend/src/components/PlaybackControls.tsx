@@ -177,6 +177,7 @@ export function PlaybackControls({ onOpenHistory, onOpenDashboard, onOpenBacktes
   const autoBTEnabled = useSessionStore((s) => s.autoBacktestConfig.enabled);
   // Selector returns a plain number, so it stays referentially stable across renders.
   const minPivotGapBars = useSessionStore((s) => resolveMinPivotGapBars(s.autoBacktestConfig));
+  const autoBacktestConfig = useSessionStore((s) => s.autoBacktestConfig);
 
   const memoizedPivots = useMemo(() => {
     if (candles.length === 0) return [];
@@ -184,8 +185,8 @@ export function PlaybackControls({ onOpenHistory, onOpenDashboard, onOpenBacktes
   }, [candles, currentIndex, minPivotGapBars]);
 
   const marketState = useMemo(
-    () => getCurrentMarketState(candles, currentIndex, minPivotGapBars),
-    [candles, currentIndex, minPivotGapBars]
+    () => getCurrentMarketState(candles, currentIndex, minPivotGapBars, autoBacktestConfig),
+    [candles, currentIndex, minPivotGapBars, autoBacktestConfig]
   );
 
   const recentPivot = memoizedPivots.length > 0 ? memoizedPivots[memoizedPivots.length - 1] : null;

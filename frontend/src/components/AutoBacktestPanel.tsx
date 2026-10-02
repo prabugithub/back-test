@@ -16,6 +16,7 @@ import {
   AUTO_BT_PRESETS,
   REGIME_LABELS,
   getCurrentMarketState,
+  resolveMinPivotGapBars,
   countActiveExitMechanisms,
 } from '../utils/autoBacktestEngine';
 import { useFilterPreviewData, type PreviewFilterKey } from '../hooks/useFilterPreviewData';
@@ -233,8 +234,8 @@ export function AutoBacktestPanel({ onNavigate, hidden }: AutoBacktestPanelProps
 
   // Live market state
   const marketState = useMemo(
-    () => getCurrentMarketState(candles, currentIndex),
-    [candles, currentIndex]
+    () => getCurrentMarketState(candles, currentIndex, resolveMinPivotGapBars(config), config),
+    [candles, currentIndex, config]
   );
 
   const activeRules = config[activeRegime];

@@ -11,6 +11,7 @@ import type { Candle, LegSegment } from '../../types';
 import type { PivotPoint } from '../indicators';
 import { getAlBrooksRunUpTo } from '../indicators';
 import { buildLegSequence } from '../legSequence';
+import { getStructureAt, structureLegs, type StructureState } from '../marketStructure';
 import { buildLegWindow, type LegWindow as LegPatternWindow } from '../legPattern';
 import type {
   AutoBacktestConfig,
@@ -93,6 +94,10 @@ export function buildEntryHookContext(args: BuildHookContextArgs): EntryHookCont
   for (let i = start; i <= currentIndex; i++) signals.push(signalsByBar[i] ?? null);
 
   let legsCache: LegSegment[] | null = null;
+
+  let structureCache: StructureState | null | undefined;
+
+  let structureLegsCache: LegSegment[] | null = null;
   const legFeatureCache = new Map<string, LegPatternWindow>();
 
   return {
@@ -144,10 +149,21 @@ export function buildEntryHookContext(args: BuildHookContextArgs): EntryHookCont
           needsPerCandle,
           baselineLookback: config.barRangeLookback,
           overlapLookback: config.barOverlapLookback,
+          structureConfig: config,
         });
         legFeatureCache.set(key, cached);
       }
       return cached;
+    },
+
+    structure() {
+      if (structureCache === undefined) structureCache = getStructureAt(candles, currentIndex, config);
+      return structureCache;
+    },
+
+    structureLegs() {
+      if (structureLegsCache === null) structureLegsCache = structureLegs(candles, currentIndex, structureCache === undefined ? (structureCache = getStructureAt(candles, currentIndex, config)) : structureCache);
+      return structureLegsCache;
     },
 
     rules: args.rules,

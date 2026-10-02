@@ -13,6 +13,8 @@ import type { DrawingTool } from './ChartToolbar';
 import type { Indicator } from './ChartToolbar';
 import { calculateSMA, calculateEMA, calculatePivotPoints, calculateAlBrooks } from '../utils/indicators';
 import { resolveMinPivotGapBars } from '../utils/autoBacktestEngine';
+import { getStructureSegments } from '../utils/marketStructure';
+import { drawMarketStructure } from './chart/drawMarketStructure';
 import { resampleCandles } from '../utils/resampler';
 import { useChartDrawings } from '../hooks/useChartDrawings';
 import type { Point } from '../hooks/useChartDrawings';
@@ -63,6 +65,7 @@ export function AdvancedChart({
   const secondaryIndicators = useSessionStore((s) => s.secondaryIndicators) as Indicator[];
   const showSecondaryChart = useSessionStore((s) => s.showSecondaryChart);
   const minPivotGapBars = useSessionStore((s) => resolveMinPivotGapBars(s.autoBacktestConfig));
+  const autoBacktestConfig = useSessionStore((s) => s.autoBacktestConfig);
 
   // The chart is "active" if it's currently selected (or in single-chart mode, always active)
   const isActiveChart = !showSecondaryChart || activeChartId === chartId;
@@ -146,6 +149,18 @@ export function AdvancedChart({
     if (!activeIndicators.includes('pivotPoints') || visibleCandles.length === 0) return [];
     return calculatePivotPoints(visibleCandles, minPivotGapBars);
   }, [visibleCandles, activeIndicators, minPivotGapBars]);
+
+  // EXPERIMENTAL market-structure layer — computed only while its indicator is on. The
+  // primary replay chart classifies the FULL candles array (timeline cached once per array,
+  // look-ahead safe) and cuts at currentIndex, instead of re-running on every new slice.
+  const structureSource = !isSecondary && !isLiveMode ? candles : visibleCandles;
+  const memoizedStructure = useMemo(() => {
+    if (!activeIndicators.includes('marketStructure') || structureSource.length === 0) return [];
+    const end = structureSource === candles ? currentIndex : structureSource.length - 1;
+    return getStructureSegments(structureSource, autoBacktestConfig)
+      .filter(s => s.startIndex <= end)
+      .map(s => (s.endIndex > end ? { ...s, endIndex: end } : s));
+  }, [activeIndicators, structureSource, candles, currentIndex, autoBacktestConfig]);
 
   const memoizedAlBrooks = useMemo(() => {
     if (!activeIndicators.includes('alBrooks') || visibleCandles.length === 0) return [];
@@ -344,7 +359,12 @@ export function AdvancedChart({
         ctx.restore();
       }
     }
-  }, [chart, series, visibleCandles, activeIndicators, showMarkers, showPivotRR, memoizedPivots, isSecondary, secondaryTimeframe, chartId, highlightTimestamp, selectedSegment]);
+
+    // 5. EXPERIMENTAL — pivot market-structure bands (Indicators → Market Structure).
+    if (memoizedStructure.length > 0) {
+      drawMarketStructure(ctx, chart, series, structureSource, memoizedStructure);
+    }
+  }, [chart, series, visibleCandles, activeIndicators, showMarkers, showPivotRR, memoizedPivots, isSecondary, secondaryTimeframe, chartId, highlightTimestamp, selectedSegment, memoizedStructure, structureSource]);
 
   const {
     clearDrawings,
