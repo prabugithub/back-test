@@ -26,6 +26,8 @@
  * between them — so the previous leg is found by walking back, not by indexing segs[3].
  */
 import type { EntryHook } from '../utils/entryHook';
+import { getEmaValueAt } from '../utils/indicators';
+import { calculateEMASlope } from '../utils/pivotAnalysis';
 import type { LegSegment } from '../types';
 import { probe } from './debug';
 
@@ -47,12 +49,16 @@ const MAX_RETRACE = 0.5;
 
 /** H1 is the first attempt off a pullback and fails often in Brooks terms; require the
  *  second push or later. The built-in filter chain cannot express counts above 2 at all. */
-//const MIN_TRIGGER_COUNT = 2;
+ const MIN_TRIGGER_COUNT = 2;
+
+/** probe()'s own rounding is private to debug.ts; extras arrive raw, so round here. */
+const r = (v: number | null | undefined, dp: number): number | null =>
+  v === null || v === undefined || !Number.isFinite(v) ? null : Number(v.toFixed(dp));
 
 export const higherHighShallowPullback: EntryHook = ctx => {
   // ── 1. Trigger: long side, H2 or later ────────────────────────────────────
   if (ctx.trigger.side !== 'long') return false;
-  // if (ctx.trigger.count < MIN_TRIGGER_COUNT) return false;
+   if (ctx.trigger.count !== MIN_TRIGGER_COUNT) return false;
 
   const segs = ctx.legs();
 
@@ -84,6 +90,24 @@ export const higherHighShallowPullback: EntryHook = ctx => {
 
   const retrace = (current.high - pullback.low) / legRange;
 
+  // ── 7. Moving average at the ENTRY bar ────────────────────────────────────
+  // Why not just read ctx.metrics.ema21Slope: computeEntryMetrics anchors the EMA slopes
+  // at legWindow.endIndex when a completed breakout leg exists, so that number describes
+  // the MA at the swing extreme — often 5-15 bars back — not at the bar that would fill.
+  // These are measured at ctx.absoluteIndex, which is the entry bar itself.
+  //
+  // ctx.ema21 is already entry-bar anchored (getEmaAt(candles, currentIndex, 21) in the
+  // engine), so it is used as-is; EMA50 has no ctx field and is looked up from the cached
+  // per-bar series on fullCandles — never on ctx.candles, which is a fresh slice and would
+  // force a full recompute on every trigger bar.
+  //
+  // Both lookbacks come from Session Settings. The ?? defaults mirror computeEntryMetrics
+  // exactly so an entry-bar slope stays comparable with the leg-end one beside it.
+  const ema21 = ctx.ema21;
+  const ema50 = getEmaValueAt(ctx.fullCandles, ctx.absoluteIndex, 50);
+  const ema21Slope = calculateEMASlope(ctx.fullCandles, ctx.absoluteIndex, 21, ctx.config.ema21SlopeLookback ?? 10);
+  const ema50Slope = calculateEMASlope(ctx.fullCandles, ctx.absoluteIndex, 50, ctx.config.ema50SlopeLookback ?? 20);
+
   // Recorded here, after the arithmetic and before the verdict, so __hook.table() shows only
   // the bars that got this far and __hook.stats('retrace') gives the real depth distribution
   // to tune MAX_RETRACE against. Costs nothing when you are not looking at it.
@@ -94,6 +118,18 @@ export const higherHighShallowPullback: EntryHook = ctx => {
     pullbackLow: pullback.low,
     pullbackBars: pullback.barCount,
     legBars: current.barCount,
+    // MA value and slope AT ENTRY. The row's built-in ema21Slope column stays as it was —
+    // leg-end anchored — so the two sit side by side and the difference is visible.
+    ema21: r(ema21, 2),
+    ema50: r(ema50, 2),
+    ema60: r(ctx.ema60, 2),
+    ema21SlopeEntry: r(ema21Slope, 4),
+    ema50SlopeEntry: r(ema50Slope, 4),
+    // Slope per ATR: points-per-bar is instrument- and timeframe-scaled, so a threshold
+    // tuned on one symbol does not carry to another. This one does.
+    ema21SlopeAtr: ctx.atr > 0 ? r((ema21Slope ?? NaN) / ctx.atr, 3) : null,
+    // Signed distance from price to EMA21 in ATRs — how extended the entry is.
+    emaDistAtr: ema21 !== null && ctx.atr > 0 ? r((ctx.candle.close - ema21) / ctx.atr, 2) : null,
   });
 
   if (retrace > MAX_RETRACE) return false;
@@ -109,7 +145,11 @@ export const higherHighShallowPullback: EntryHook = ctx => {
   ctx.log(
     `HH ${current.high.toFixed(2)}>${previous.high.toFixed(2)} `
     + `retrace=${retrace.toFixed(2)} pbLow=${pullback.low.toFixed(2)} `
-    + `legBars=${current.barCount} pbBars=${pullback.barCount}`
+    + `legBars=${current.barCount} pbBars=${pullback.barCount} `
+    + `ema21=${ema21 === null ? 'na' : ema21.toFixed(2)} `
+    + `slope21=${ema21Slope === undefined ? 'na' : ema21Slope.toFixed(3)} `
+    + `ema50=${ema50 === null ? 'na' : ema50.toFixed(2)} `
+    + `slope50=${ema50Slope === undefined ? 'na' : ema50Slope.toFixed(3)}`
   );
 
   return true;

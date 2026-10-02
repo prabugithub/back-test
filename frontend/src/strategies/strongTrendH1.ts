@@ -204,8 +204,8 @@ const r = (v: number | null | undefined, dp: number): number | null =>
 
 export const strongTrendH1: EntryHook = ctx => {
   // ── 1. Trigger: long side, H1 or H2 ───────────────────────────────────────
-  if (ctx.trigger.side !== 'long') return false;
-  if (ctx.trigger.count !== 1 && ctx.trigger.count !== 2) return false;
+  // if (ctx.trigger.side !== 'long') return false;
+  // if (ctx.trigger.count !== 1 && ctx.trigger.count !== 2) return false;
 
   const win = windows(ctx);
   const open = getSessionOpenContext(ctx.fullCandles, ctx.absoluteIndex);
@@ -348,8 +348,9 @@ export const strongTrendH1: EntryHook = ctx => {
   if (today.pdhBreakBar === null) return false;       // not broken out yet — not a trend day yet
   if (day.entries >= win.trendDayMaxEntries && day.lastEntryBar !== ctx.absoluteIndex) return false;
   if (ema21 === null || entry <= ema21) return false; // must hold above the moving average
-  if (score < MIN_TREND_DAY_SCORE) return false;
-  if (!nearEma && !farGapBarH1) return false;
+  // if (score < MIN_TREND_DAY_SCORE) return false;
+  // if (!nearEma && !farGapBarH1) return false;
+  if (!farGapBarH1) return false;
 
   // No stop means the engine could not form one either; refuse here where the reason shows.
   if (risk === null || !(risk > 0)) return false;
