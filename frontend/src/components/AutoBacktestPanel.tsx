@@ -2,7 +2,7 @@ import { useMemo, useState, useEffect } from 'react';
 import { createPortal } from 'react-dom';
 import {
   Zap, TrendingUp, TrendingDown, Minus, RefreshCw, BarChart2, Save, Trash2, FolderOpen,
-  Settings2, Compass, LogIn, ShieldCheck, LogOut, ShieldAlert, Download, Calendar, X, Waves,
+  Settings2, Compass, LogIn, ShieldCheck, LogOut, ShieldAlert, Download, Calendar, X, Waves, Receipt,
 } from 'lucide-react';
 import { useSessionStore } from '../stores/sessionStore';
 import { EntryMetricsDashboard } from './EntryMetricsDashboard';
@@ -33,6 +33,11 @@ import {
   type RegimeStepProps, type WorkflowStep, type StepDef,
 } from './autobacktest-visuals/RegimeWorkflowSteps';
 import { PageNavTabs, type ActivePage } from './PageNavTabs';
+import { ChargesSettingsPanel } from './ChargesSettingsPanel';
+import { useChargesStore } from '../stores/chargesStore';
+import { computePositionsCharges } from '../utils/charges';
+import { groupTradesIntoPositions } from '../utils/tradeAnalysis';
+import { formatCurrency } from '../utils/formatters';
 
 interface AutoBacktestPanelProps {
   onNavigate: (page: ActivePage) => void;
@@ -178,6 +183,20 @@ export function AutoBacktestPanel({ onNavigate, hidden }: AutoBacktestPanelProps
   const [isSaveAsOpen, setIsSaveAsOpen] = useState(false);
   const [isDeleteConfirmOpen, setIsDeleteConfirmOpen] = useState(false);
   const [isSessionSettingsOpen, setIsSessionSettingsOpen] = useState(false);
+  const [isChargesPanelOpen, setIsChargesPanelOpen] = useState(false);
+  const showCharges = useChargesStore(s => s.showCharges);
+  const setShowCharges = useChargesStore(s => s.setShowCharges);
+  const chargesConfig = useChargesStore(s => s.config);
+
+  // Gross / charges / net over CLOSED positions of the current run — display-time
+  // overlay only; the batch result and stored trade P&L stay gross.
+  const chargesSummary = useMemo(() => {
+    if (!showCharges || trades.length === 0) return null;
+    const closed = groupTradesIntoPositions(trades).filter(p => p.status === 'CLOSED');
+    const { totals } = computePositionsCharges(closed, chargesConfig);
+    const gross = closed.reduce((sum, p) => sum + p.realizedPnL, 0);
+    return { gross, totals, net: gross - totals.total };
+  }, [showCharges, trades, chargesConfig]);
   const [hoveredFilterKey, setHoveredFilterKey] = useState<PreviewFilterKey | null>(null);
 
   // Date range control — lets the date span be changed without leaving this page
@@ -600,7 +619,7 @@ export function AutoBacktestPanel({ onNavigate, hidden }: AutoBacktestPanelProps
               </button>
               {showMetrics && (
                 <div className="px-3 pb-3">
-                  <EntryMetricsDashboard trades={trades} />
+                  <EntryMetricsDashboard trades={trades} chargesConfig={showCharges ? chargesConfig : undefined} />
                 </div>
               )}
             </div>
@@ -623,6 +642,35 @@ export function AutoBacktestPanel({ onNavigate, hidden }: AutoBacktestPanelProps
               <span className="text-gray-400">Enable to start scanning</span>
             )}
           </div>
+
+          {trades.length > 0 && !isBatchRunning && (
+            <div className={`rounded p-2 text-[11px] flex items-center gap-2 ${chargesSummary ? 'bg-amber-50 border border-amber-200' : 'bg-gray-50 border border-gray-200'}`}>
+              <Receipt size={12} className="text-amber-600 shrink-0" />
+              {chargesSummary ? (
+                <span className="flex-1 min-w-0 text-gray-600" title={`Brokerage ${chargesSummary.totals.brokerage.toFixed(2)} | STT ${chargesSummary.totals.stt.toFixed(2)} | Exch ${chargesSummary.totals.exchange.toFixed(2)} | GST ${chargesSummary.totals.gst.toFixed(2)} | Stamp ${chargesSummary.totals.stamp.toFixed(2)} | SEBI+IPFT ${(chargesSummary.totals.sebi + chargesSummary.totals.ipft).toFixed(2)}`}>
+                  Gross <b className={chargesSummary.gross >= 0 ? 'text-green-600' : 'text-red-600'}>{formatCurrency(chargesSummary.gross)}</b>
+                  {' · '}Charges <b className="text-amber-600">{formatCurrency(chargesSummary.totals.total)}</b>
+                  {' · '}Net <b className={chargesSummary.net >= 0 ? 'text-green-600' : 'text-red-600'}>{formatCurrency(chargesSummary.net)}</b>
+                  <span className="text-gray-400">{' · '}Turnover {formatCurrency(chargesSummary.totals.turnover)} ({chargesSummary.totals.orders} orders)</span>
+                </span>
+              ) : (
+                <span className="flex-1 text-gray-400">Charges hidden — P&amp;L shown gross</span>
+              )}
+              <button
+                onClick={() => setShowCharges(!showCharges)}
+                className="shrink-0 px-1.5 py-0.5 rounded text-[10px] font-semibold text-amber-700 hover:bg-amber-100"
+              >
+                {showCharges ? 'Hide' : 'Show charges'}
+              </button>
+              <button
+                onClick={() => setIsChargesPanelOpen(true)}
+                className="shrink-0 p-0.5 rounded text-amber-700 hover:bg-amber-100"
+                title="Edit charge rates"
+              >
+                <Settings2 size={12} />
+              </button>
+            </div>
+          )}
 
           {isBatchRunning && (
             <div>
@@ -669,7 +717,9 @@ export function AutoBacktestPanel({ onNavigate, hidden }: AutoBacktestPanelProps
         onChange={updateGlobal}
         isOpen={isSessionSettingsOpen}
         onClose={() => setIsSessionSettingsOpen(false)}
+        onOpenCharges={() => setIsChargesPanelOpen(true)}
       />
+      <ChargesSettingsPanel isOpen={isChargesPanelOpen} onClose={() => setIsChargesPanelOpen(false)} />
     </div>,
     document.body
   );

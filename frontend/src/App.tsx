@@ -10,7 +10,8 @@ import type { DrawingTool, Indicator } from './components/ChartToolbar';
 import { TradeHistoryDialog } from './components/TradeHistoryDialog';
 import { PositionOverlay } from './components/PositionOverlay';
 import { useSessionStore } from './stores/sessionStore';
-import { useCallback, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
+import { hydrateChargesSettings } from './stores/chargesStore';
 import { NotificationToast } from './components/NotificationToast';
 import { TradeExitDialog } from './components/TradeExitDialog';
 import { TradeJournalDialog } from './components/TradeJournalDialog';
@@ -26,6 +27,9 @@ const queryClient = new QueryClient();
 
 function App() {
   const candles = useSessionStore((s: any) => s.candles);
+
+  // Trading-charge rates are global (Firestore appSettings/charges) — pull them once.
+  useEffect(() => { void hydrateChargesSettings(); }, []);
 
   // Which full-page view is showing (chart / trade log / backtest / dashboard) and which of
   // them have been opened at least once. Pages stay mounted (hidden via CSS) after their first

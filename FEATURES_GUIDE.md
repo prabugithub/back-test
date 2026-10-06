@@ -26,6 +26,7 @@ A complete reference of every feature available in the application.
 18. [Smart Exit (Order Chaser)](#18-smart-exit-order-chaser)
 19. [Keyboard Shortcuts](#19-keyboard-shortcuts)
 20. [Auto-Backtest Saved Configurations](#20-auto-backtest-saved-configurations)
+21. [Trading Charges (F&O)](#21-trading-charges-fo)
 
 ---
 
@@ -755,6 +756,7 @@ Renders as a **full-page view** (`absolute inset-0 z-[105]`, same pattern as the
 - **Jump to candle** — click a trade to pan the chart to that candle; only recenters the viewport, does not rewind playback (`currentIndex` is untouched, so no already-revealed candles are hidden). The candle also flashes an amber highlight band + "JUMPED HERE" arrow for ~3.5s so it's visually obvious which one was navigated to. Click the highlighted candle itself to open the same execution-details popup described in section 2 (Chart Rendering → Interaction)
 - **Sort** by any column
 - **P&L recalculation** propagates correctly through all subsequent trades when one is edited
+- **Charges ON/OFF** (header, amber) — shows brokerage/STT/exchange/GST/stamp/SEBI charges and net P&L; the gear next to it edits the rates. See [Trading Charges](#21-trading-charges-fo)
 
 ---
 
@@ -1091,6 +1093,40 @@ When the Auto-Backtest page opens, it automatically loads a saved configuration 
 
 ---
 
+## 21. Trading Charges (F&O)
+
+**Files:** `utils/charges.ts` (calculator), `stores/chargesStore.ts` (rates + toggle), `services/chargesSettingsService.ts` (Firestore), `components/ChargesSettingsPanel.tsx` (drawer)
+
+See P&L after Indian F&O costs. **Off by default** — turn it on with the **Charges** toggle.
+
+### Charge model (futures basis)
+Backtest trades record the underlying price, not option premium, so every fill's turnover is `price × quantity` and futures rates apply:
+
+| Component | Default | Applied to |
+|---|---|---|
+| Brokerage | ₹20 per executed order | every fill |
+| STT | 0.05% | sell-side turnover |
+| Exchange txn | 0.00173% | buy + sell turnover |
+| SEBI fee | ₹10 / crore | buy + sell turnover |
+| IPFT | ₹0.10 / crore | buy + sell turnover |
+| Stamp duty | 0.002% | buy-side turnover |
+| GST | 18% | brokerage + exchange + SEBI + IPFT |
+
+A flip fill (one order that closes a position and opens the opposite one) is charged brokerage once.
+
+### Where it shows (when ON)
+- **Trade Log** — first card becomes *Net P&L (after charges)* with `Gross − Charges`; a breakdown card shows turnover, order count, and each charge component; the positions table gains **Charges** (hover for breakdown) and **Net P&L** columns; win rate, PF, avg win/loss, and longs/shorts are computed on net P&L. CSV/JSON exports include the charges columns and summary.
+- **Auto-Backtest** — the Run panel shows `Gross · Charges · Net · Turnover (orders)` for closed trades of the current run, and *Entry Position Metrics* counts wins and P&L net of each trip's entry + exit charges.
+
+### Editing rates
+Open the drawer from the gear in the Trade Log header, the gear on the Auto-Backtest charges row, or **Session Settings → Trading Charges → Edit rates**. Rates are **global**: they are not stored in the session or the strategy config, so restoring an old snapshot or loading a saved config doesn't change them. They are saved to localStorage plus Firestore `appSettings/charges`. **Reset to defaults** restores the table above.
+
+Charges are a **display-time overlay**: stored trade P&L stays gross, so editing a rate updates every existing trade's charges right away.
+
+Not yet applied in the Performance Report, Performance Dashboard, or Session Statistics, which still show gross P&L.
+
+---
+
 ## Quick Reference — UI Layout
 
 ```
@@ -1134,4 +1170,6 @@ Dialogs (open on demand, floating modal):
 
 ---
 
-**Last Updated:** 2026-07-28 (Added a Date Range control to the Auto-Backtest Panel header so the loaded date span can be changed without leaving that page; extracted the shared `sessionStore.reloadCandlesWithRange()` action so it and the Chart page's Data Settings panel stay in sync)
+**Last Updated:** 2026-10-06 (Added Trading Charges (F&O): optional gross/charges/net P&L in the Trade Log and Auto-Backtest, with editable global rates)
+
+**Previously:** 2026-07-28 (Added a Date Range control to the Auto-Backtest Panel header so the loaded date span can be changed without leaving that page; extracted the shared `sessionStore.reloadCandlesWithRange()` action so it and the Chart page's Data Settings panel stay in sync)

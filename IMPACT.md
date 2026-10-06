@@ -716,6 +716,17 @@ Follow-up to the `TradeHistoryDialog` full-page conversion above: the four full-
 
 ---
 
+## Trading charges overlay (`utils/charges.ts`, `stores/chargesStore.ts`, `services/chargesSettingsService.ts`, `components/ChargesSettingsPanel.tsx`)
+
+- **Display-time overlay only.** Nothing writes charges into `Trade.pnl`, `position.realizedPnL`, the batch result, or the Firestore session. `sessionStore`, `executeTrade`, `checkSLTPHits`, the batch simulator/worker, and live paths do not use it.
+- **`chargesStore`** is a standalone zustand store (`config: ChargesConfig`, `showCharges`). It is deliberately not part of `uiSettings` or `AutoBacktestConfig` because rates are global. It persists to localStorage `bt.charges` right away and to Firestore `appSettings/charges` after an 800ms debounce. `hydrateChargesSettings()` runs once from `App.tsx`; when a Firestore copy exists, it overrides localStorage.
+- **`computePositionsCharges(positions, cfg)`** walks positions oldest-first and dedupes brokerage by trade `id`. This depends on `groupTradesIntoPositions` splitting a flip fill into two executions that share an id: if that grouping changes (ids, flip split), recheck the dedupe. `toNetPositions` + the unchanged `calculatePerformanceStats` produce the net stats.
+- **Consumers:** `TradeHistoryDialog` (toggle, net stats, Charges/Net columns, CSV/JSON); `AutoBacktestPanel` (Run-panel summary row over CLOSED positions, passes `chargesConfig` to `EntryMetricsDashboard`); `EntryMetricsDashboard.pairTrades` (net per trip = gross − entry fill − exit fill charges, only when `chargesConfig` is passed — `EntryMetricsDashboardFromPositions` in `PerformanceDashboard` stays gross); `SessionSettingsPanel` (Trading Charges card, `onOpenCharges` prop).
+- **Not covered (gross only):** `SessionStats`, `TradeReportDialog`, `PerformanceDashboard`, `OptionBacktestModal`.
+- **Adding a charge component:** add a field to `ChargesConfig` and `DEFAULT_FUTURES_CHARGES`, compute it in `computeExecutionCharges`, add it to `ChargesBreakdown`/`emptyCharges`/`addInto`, add it to `FIELDS` in `ChargesSettingsPanel`, and add it to the breakdown displays. `normalizeChargesConfig` fills missing fields from defaults, so older persisted settings keep working.
+
+---
+
 ## Change Checklist
 
 Before merging any change to a HIGH-risk area:

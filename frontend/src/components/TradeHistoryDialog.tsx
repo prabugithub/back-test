@@ -1,9 +1,12 @@
 import { useMemo, useState } from 'react';
-import { ChevronRight, ChevronDown, ClipboardList, FileJson, Printer, FileSpreadsheet, Trash2, Link as LinkIcon, Eye } from 'lucide-react';
+import { ChevronRight, ChevronDown, ClipboardList, FileJson, Printer, FileSpreadsheet, Trash2, Link as LinkIcon, Eye, Receipt, Settings2 } from 'lucide-react';
 import { useSessionStore } from '../stores/sessionStore';
 import { formatCurrency, formatTimestamp, formatDDMMYYYY } from '../utils/formatters';
 import { groupTradesIntoPositions, calculatePerformanceStats, exitReasonBadge } from '../utils/tradeAnalysis';
 import { PageNavTabs, type ActivePage } from './PageNavTabs';
+import { useChargesStore } from '../stores/chargesStore';
+import { computePositionsCharges, toNetPositions } from '../utils/charges';
+import { ChargesSettingsPanel } from './ChargesSettingsPanel';
 
 interface TradeHistoryDialogProps {
     isOpen: boolean;
@@ -19,10 +22,25 @@ export function TradeHistoryDialog({ isOpen, onNavigate }: TradeHistoryDialogPro
     const scrollToTime = useSessionStore((s) => s.scrollToTime);
     const highlightCandle = useSessionStore((s) => s.highlightCandle);
     const [expandedPosId, setExpandedPosId] = useState<string | null>(null);
+    const showCharges = useChargesStore((s) => s.showCharges);
+    const setShowCharges = useChargesStore((s) => s.setShowCharges);
+    const chargesConfig = useChargesStore((s) => s.config);
+    const [isChargesPanelOpen, setIsChargesPanelOpen] = useState(false);
 
     // Group trades and calculate stats
     const positions = useMemo(() => groupTradesIntoPositions(trades), [trades]);
-    const stats = useMemo(() => calculatePerformanceStats(positions), [positions]);
+    // Charges are a display-time overlay — stored P&L stays gross. With charges on, the
+    // stats (win rate, PF, avg win/loss…) are computed on net P&L instead.
+    const charges = useMemo(
+        () => (showCharges ? computePositionsCharges(positions, chargesConfig) : null),
+        [showCharges, positions, chargesConfig]
+    );
+    const grossStats = useMemo(() => calculatePerformanceStats(positions), [positions]);
+    const stats = useMemo(
+        () => (charges ? calculatePerformanceStats(toNetPositions(positions, charges.byPositionId)) : grossStats),
+        [charges, positions, grossStats]
+    );
+    const colCount = showCharges ? 15 : 13;
 
     const handleExportCSV = () => {
         if (trades.length === 0) return;
@@ -32,7 +50,17 @@ export function TradeHistoryDialog({ isOpen, onNavigate }: TradeHistoryDialogPro
         csvContent += `Start Date,${trades.length > 0 ? formatTimestamp(trades[0].timestamp) : 'N/A'}\n\n`;
 
         csvContent += "PERFORMANCE SUMMARY\n";
-        csvContent += `Total P&L,${stats.totalPnL.toFixed(2)}\n`;
+        if (charges) {
+            const t = charges.totals;
+            csvContent += `Gross P&L,${grossStats.totalPnL.toFixed(2)}\n`;
+            csvContent += `Total Charges,${t.total.toFixed(2)}\n`;
+            csvContent += `Net P&L,${stats.totalPnL.toFixed(2)}\n`;
+            csvContent += `Turnover,${t.turnover.toFixed(2)}\n`;
+            csvContent += `Orders,${t.orders}\n`;
+            csvContent += `Brokerage,${t.brokerage.toFixed(2)}\nSTT,${t.stt.toFixed(2)}\nExchange Txn,${t.exchange.toFixed(2)}\nSEBI Fee,${t.sebi.toFixed(2)}\nIPFT,${t.ipft.toFixed(2)}\nStamp Duty,${t.stamp.toFixed(2)}\nGST,${t.gst.toFixed(2)}\n`;
+        } else {
+            csvContent += `Total P&L,${stats.totalPnL.toFixed(2)}\n`;
+        }
         csvContent += `Win Rate,${stats.winRate.toFixed(1)}%\n`;
         csvContent += `Winning Trades,${stats.winningTrades}\n`;
         csvContent += `Losing Trades,${stats.losingTrades}\n`;
@@ -41,7 +69,12 @@ export function TradeHistoryDialog({ isOpen, onNavigate }: TradeHistoryDialogPro
         csvContent += `Profit Factor,${stats.profitFactor.toFixed(2)}\n\n`;
 
         csvContent += "POSITION SUMMARY\n";
-        csvContent += "ID,Direction,Entry Date/Time,Exit Date/Time,Entry Price,Exit Price,Qty,PnL,Duration (min),SL,Target,SL Hit,TP Hit,Trend Reversed,PnL at Reversal,Exit Reason,Category,LT Market,HT Market,Entry Pos,LLHH Pivot,Entry Sign,Align E(S),Align E(V),Align M(S),Align M(V),Notes,Screenshot (E),Screenshot (M)\n";
+        csvContent += `ID,Direction,Entry Date/Time,Exit Date/Time,Entry Price,Exit Price,Qty,PnL,${charges ? 'Charges,Net PnL,' : ''}Duration (min),SL,Target,SL Hit,TP Hit,Trend Reversed,PnL at Reversal,Exit Reason,Category,LT Market,HT Market,Entry Pos,LLHH Pivot,Entry Sign,Align E(S),Align E(V),Align M(S),Align M(V),Notes,Screenshot (E),Screenshot (M)\n`;
+        const posChargesCsv = (pos: typeof positions[number]) => {
+            if (!charges) return '';
+            const c = charges.byPositionId.get(pos.id)?.total ?? 0;
+            return `${c.toFixed(2)},${(pos.realizedPnL - c).toFixed(2)},`;
+        };
         positions.forEach(pos => {
             const entryExec = pos.executions.find(e => e.journal?.ltMarket);
             const entryJournal = entryExec?.journal;
@@ -56,7 +89,7 @@ export function TradeHistoryDialog({ isOpen, onNavigate }: TradeHistoryDialogPro
                 .filter(note => note && note.length > 0)))
                 .join(" | ");
 
-            csvContent += `${pos.id},${pos.direction},${formatTimestamp(pos.entryTime)},${pos.exitTime ? formatTimestamp(pos.exitTime) : 'OPEN'},${pos.avgEntryPrice},${pos.avgExitPrice || ''},${pos.totalQuantity},${pos.realizedPnL.toFixed(2)},${pos.durationMinutes ? pos.durationMinutes.toFixed(1) : ''},${pos.stopLoss || ''},${pos.target || ''},${pos.slHit ? 'YES' : 'NO'},${pos.tpHit ? 'YES' : 'NO'},${pos.trendReversed ? 'YES' : 'NO'},${pos.trendReversedPnL?.toFixed(2) || ''},${pos.exitReason || ''},${entryJournal?.tradeCategory || ''},${entryJournal?.ltMarket || ''},${entryJournal?.htMarket || ''},${entryJournal?.entryPosition || ''},${entryJournal?.llhhPivot || ''},${entryJournal?.entrySign || ''},${entryJournal?.systemEntryAlign || ''},${entryJournal?.myViewEntryAlign || ''},${exitJournal?.systemMoveAlign || ''},${exitJournal?.myViewMoveAlign || ''},"${(combinedNotes || '').replace(/"/g, '""')}",${entryJournal?.screenshotUrl || ''},${exitJournal?.screenshotUrl || ''}\n`;
+            csvContent += `${pos.id},${pos.direction},${formatTimestamp(pos.entryTime)},${pos.exitTime ? formatTimestamp(pos.exitTime) : 'OPEN'},${pos.avgEntryPrice},${pos.avgExitPrice || ''},${pos.totalQuantity},${pos.realizedPnL.toFixed(2)},${posChargesCsv(pos)}${pos.durationMinutes ? pos.durationMinutes.toFixed(1) : ''},${pos.stopLoss || ''},${pos.target || ''},${pos.slHit ? 'YES' : 'NO'},${pos.tpHit ? 'YES' : 'NO'},${pos.trendReversed ? 'YES' : 'NO'},${pos.trendReversedPnL?.toFixed(2) || ''},${pos.exitReason || ''},${entryJournal?.tradeCategory || ''},${entryJournal?.ltMarket || ''},${entryJournal?.htMarket || ''},${entryJournal?.entryPosition || ''},${entryJournal?.llhhPivot || ''},${entryJournal?.entrySign || ''},${entryJournal?.systemEntryAlign || ''},${entryJournal?.myViewEntryAlign || ''},${exitJournal?.systemMoveAlign || ''},${exitJournal?.myViewMoveAlign || ''},"${(combinedNotes || '').replace(/"/g, '""')}",${entryJournal?.screenshotUrl || ''},${exitJournal?.screenshotUrl || ''}\n`;
         });
 
         csvContent += "\nRAW TRADE EXECUTIONS\n";
@@ -84,7 +117,15 @@ export function TradeHistoryDialog({ isOpen, onNavigate }: TradeHistoryDialogPro
                 isLiveSession: true
             },
             performance: stats,
-            positions: positions,
+            ...(charges ? {
+                charges: { config: chargesConfig, totals: charges.totals, grossPnL: grossStats.totalPnL },
+            } : {}),
+            positions: charges
+                ? positions.map(p => {
+                    const c = charges.byPositionId.get(p.id);
+                    return { ...p, charges: c, netPnL: p.realizedPnL - (c?.total ?? 0) };
+                })
+                : positions,
             trades: trades.map(t => ({ ...t, formattedDate: formatDDMMYYYY(t.timestamp) }))
         };
 
@@ -168,6 +209,23 @@ export function TradeHistoryDialog({ isOpen, onNavigate }: TradeHistoryDialogPro
                     </div>
                 </div>
                 <div className="flex gap-2">
+                    <div className="flex items-stretch rounded-lg border border-amber-200 overflow-hidden">
+                        <button
+                            onClick={() => setShowCharges(!showCharges)}
+                            className={`flex items-center gap-1.5 px-2.5 py-1.5 text-xs font-semibold transition-colors ${showCharges ? 'bg-amber-500 text-white' : 'bg-amber-50 text-amber-700 hover:bg-amber-100'}`}
+                            title="Show brokerage, STT, exchange, GST, stamp & SEBI charges and net P&L"
+                        >
+                            <Receipt size={14} />
+                            Charges {showCharges ? 'ON' : 'OFF'}
+                        </button>
+                        <button
+                            onClick={() => setIsChargesPanelOpen(true)}
+                            className="px-2 bg-amber-50 text-amber-700 hover:bg-amber-100 border-l border-amber-200"
+                            title="Edit charge rates"
+                        >
+                            <Settings2 size={14} />
+                        </button>
+                    </div>
                     <button
                         onClick={handleExportCSV}
                         className="flex items-center gap-1.5 px-2.5 py-1.5 bg-green-50 text-green-700 border border-green-200 text-xs font-semibold rounded-lg hover:bg-green-100 transition-colors"
@@ -201,10 +259,15 @@ export function TradeHistoryDialog({ isOpen, onNavigate }: TradeHistoryDialogPro
                     {/* Stats Summary Cards */}
                     <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-6">
                         <div className="bg-white p-4 rounded-lg shadow-sm border border-gray-100">
-                            <div className="text-sm text-gray-500 mb-1">Total Net P&L</div>
+                            <div className="text-sm text-gray-500 mb-1">{charges ? 'Net P&L (after charges)' : 'Total Net P&L'}</div>
                             <div className={`text-2xl font-bold ${stats.totalPnL >= 0 ? 'text-green-600' : 'text-red-600'}`}>
                                 {formatCurrency(stats.totalPnL)}
                             </div>
+                            {charges && (
+                                <div className="text-xs text-gray-500 mt-1">
+                                    Gross {formatCurrency(grossStats.totalPnL)} − Charges <span className="text-amber-600 font-semibold">{formatCurrency(charges.totals.total)}</span>
+                                </div>
+                            )}
                             <div className="text-xs text-gray-400 mt-1">
                                 {stats.totalTrades} Trades ({stats.winningTrades}W - {stats.losingTrades}L)
                             </div>
@@ -248,9 +311,41 @@ export function TradeHistoryDialog({ isOpen, onNavigate }: TradeHistoryDialogPro
                         </div>
                     </div>
 
+                    {charges && (
+                        <div className="bg-white p-4 rounded-lg shadow-sm border border-amber-100 mb-6">
+                            <div className="flex flex-wrap items-baseline gap-x-6 gap-y-2 text-sm">
+                                <div>
+                                    <div className="text-xs text-gray-500">Turnover</div>
+                                    <div className="font-bold text-slate-800">{formatCurrency(charges.totals.turnover)}</div>
+                                </div>
+                                <div>
+                                    <div className="text-xs text-gray-500">Orders</div>
+                                    <div className="font-bold text-slate-800">{charges.totals.orders}</div>
+                                </div>
+                                <div>
+                                    <div className="text-xs text-gray-500">Total Charges</div>
+                                    <div className="font-bold text-amber-600">{formatCurrency(charges.totals.total)}</div>
+                                </div>
+                                {([
+                                    ['Brokerage', charges.totals.brokerage],
+                                    ['STT', charges.totals.stt],
+                                    ['Exchange', charges.totals.exchange],
+                                    ['GST', charges.totals.gst],
+                                    ['Stamp', charges.totals.stamp],
+                                    ['SEBI + IPFT', charges.totals.sebi + charges.totals.ipft],
+                                ] as [string, number][]).map(([label, v]) => (
+                                    <div key={label}>
+                                        <div className="text-xs text-gray-400">{label}</div>
+                                        <div className="font-mono text-gray-700">{formatCurrency(v)}</div>
+                                    </div>
+                                ))}
+                            </div>
+                        </div>
+                    )}
+
                     {/* Positions Table */}
                     <div className="bg-white rounded-lg shadow-sm border flex-1 overflow-auto">
-                        <table className="w-full text-sm text-left border-collapse" style={{ minWidth: '1100px' }}>
+                        <table className="w-full text-sm text-left border-collapse" style={{ minWidth: showCharges ? '1300px' : '1100px' }}>
                             <thead className="bg-gray-50 text-gray-600 font-semibold border-b sticky top-0 z-10">
                                 <tr>
                                     <th className="px-4 py-3 w-10"></th>
@@ -265,6 +360,8 @@ export function TradeHistoryDialog({ isOpen, onNavigate }: TradeHistoryDialogPro
                                     <th className="px-4 py-3 text-center">Trend Rev</th>
                                     <th className="px-4 py-3 text-right">PnL @ Rev</th>
                                     <th className="px-4 py-3 text-right">P&L</th>
+                                    {showCharges && <th className="px-4 py-3 text-right">Charges</th>}
+                                    {showCharges && <th className="px-4 py-3 text-right">Net P&L</th>}
                                     <th className="px-4 py-3 text-right">Duration</th>
                                     <th className="px-4 py-3 text-center w-8">View</th>
                                     <th className="px-4 py-3 text-center w-10"></th>
@@ -273,13 +370,15 @@ export function TradeHistoryDialog({ isOpen, onNavigate }: TradeHistoryDialogPro
                             <tbody className="divide-y divide-gray-100">
                                 {positions.length === 0 ? (
                                     <tr>
-                                        <td colSpan={13} className="px-4 py-8 text-center text-gray-500">
+                                        <td colSpan={colCount} className="px-4 py-8 text-center text-gray-500">
                                             No positions recorded yet.
                                         </td>
                                     </tr>
                                 ) : (
                                     positions.map((pos) => {
                                         const isExpanded = expandedPosId === pos.id;
+                                        const posCharges = charges?.byPositionId.get(pos.id);
+                                        const netPnL = pos.realizedPnL - (posCharges?.total ?? 0);
                                         return (
                                             <>
                                                 <tr
@@ -338,6 +437,19 @@ export function TradeHistoryDialog({ isOpen, onNavigate }: TradeHistoryDialogPro
                                                         }`}>
                                                         {formatCurrency(pos.realizedPnL)}
                                                     </td>
+                                                    {showCharges && (
+                                                        <td
+                                                            className="px-4 py-3 text-right font-mono text-amber-600"
+                                                            title={posCharges ? `Brokerage ${posCharges.brokerage.toFixed(2)} | STT ${posCharges.stt.toFixed(2)} | Exch ${posCharges.exchange.toFixed(2)} | GST ${posCharges.gst.toFixed(2)} | Stamp ${posCharges.stamp.toFixed(2)} | SEBI+IPFT ${(posCharges.sebi + posCharges.ipft).toFixed(2)} | Turnover ${posCharges.turnover.toFixed(2)}` : undefined}
+                                                        >
+                                                            {posCharges ? formatCurrency(posCharges.total) : '-'}
+                                                        </td>
+                                                    )}
+                                                    {showCharges && (
+                                                        <td className={`px-4 py-3 text-right font-bold font-mono ${pos.status === 'OPEN' ? 'text-gray-400' : netPnL > 0 ? 'text-green-600' : netPnL < 0 ? 'text-red-600' : 'text-gray-400'}`}>
+                                                            {pos.status === 'OPEN' ? '-' : formatCurrency(netPnL)}
+                                                        </td>
+                                                    )}
                                                     <td className="px-4 py-3 text-right text-gray-500">
                                                         {pos.status === 'CLOSED' ? `${pos.durationMinutes?.toFixed(1)}m` : '-'}
                                                     </td>
@@ -363,7 +475,7 @@ export function TradeHistoryDialog({ isOpen, onNavigate }: TradeHistoryDialogPro
                                                 {/* Expanded Executions Row */}
                                                 {isExpanded && (
                                                     <tr className="bg-gray-50 border-b">
-                                                        <td colSpan={13} className="px-4 py-3 pl-12">
+                                                        <td colSpan={colCount} className="px-4 py-3 pl-12">
                                                             <div className="border rounded bg-white overflow-hidden text-xs">
                                                                 <table className="w-full">
                                                                     <thead className="bg-gray-100 text-gray-500">
@@ -508,6 +620,7 @@ export function TradeHistoryDialog({ isOpen, onNavigate }: TradeHistoryDialogPro
                     </div>
 
                 </div>
+                <ChargesSettingsPanel isOpen={isChargesPanelOpen} onClose={() => setIsChargesPanelOpen(false)} />
             </div>
     );
 }

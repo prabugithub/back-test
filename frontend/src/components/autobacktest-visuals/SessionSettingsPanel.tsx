@@ -1,4 +1,5 @@
 import { X, Settings2 } from 'lucide-react';
+import { useChargesStore } from '../../stores/chargesStore';
 import { MULTI_TRADE_DEFAULT_CAP, type AutoBacktestConfig } from '../../utils/autoBacktestEngine';
 import { DEFAULT_TREND_DAY_WINDOWS } from '../../strategies/strongTrendH1';
 import {
@@ -31,13 +32,17 @@ interface SessionSettingsPanelProps {
   onChange: (patch: Partial<AutoBacktestConfig>) => void;
   isOpen: boolean;
   onClose: () => void;
+  /** Opens the global trading-charges drawer (rates live outside AutoBacktestConfig). */
+  onOpenCharges?: () => void;
 }
 
 // Session-wide settings that apply across all regimes (Trading Window, Quantity,
 // Square-off, SL/TP Fill Mode, Instrumentation Lookbacks) — moved out of the always-visible
 // sidebar into a collapsible drawer, since they aren't part of the per-regime
 // Market/Entry/Confirmation/Exit/Risk workflow. Same fields, same onChange calls as before.
-export function SessionSettingsPanel({ config, onChange, isOpen, onClose }: SessionSettingsPanelProps) {
+export function SessionSettingsPanel({ config, onChange, isOpen, onClose, onOpenCharges }: SessionSettingsPanelProps) {
+  const showCharges = useChargesStore(s => s.showCharges);
+  const setShowCharges = useChargesStore(s => s.setShowCharges);
   return (
     <>
       <div
@@ -185,6 +190,31 @@ export function SessionSettingsPanel({ config, onChange, isOpen, onClose }: Sess
               <option value="exact">Exact touch (no slippage)</option>
               <option value="close">Close cross (legacy)</option>
             </select>
+          </CardShell>
+
+          <CardShell title="Trading Charges">
+            <label className="flex items-center gap-1.5 cursor-pointer select-none mb-1.5">
+              <input
+                type="checkbox"
+                checked={showCharges}
+                onChange={e => setShowCharges(e.target.checked)}
+                className="w-3.5 h-3.5"
+              />
+              <span className="text-xs text-gray-600 font-medium">Show charges &amp; net P&amp;L in results</span>
+            </label>
+            <div className="flex items-center justify-between gap-2">
+              <span className="text-[10px] text-gray-400">
+                F&amp;O futures rates (brokerage, STT, exchange, GST, stamp, SEBI). Global — not saved with this strategy.
+              </span>
+              {onOpenCharges && (
+                <button
+                  onClick={onOpenCharges}
+                  className="shrink-0 px-2 py-1 text-[10px] font-semibold text-amber-700 border border-amber-200 rounded hover:bg-amber-50"
+                >
+                  Edit rates
+                </button>
+              )}
+            </div>
           </CardShell>
 
           <CardShell title="Instrumentation Lookbacks">
