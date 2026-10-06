@@ -325,6 +325,7 @@ export interface AutoBacktestConfig {
   useAutoQty: boolean;     // false = use manual tradeQuantity from store
   riskPerTrade: number;    // ₹ risked per trade when useAutoQty is true
   minQuantity: number;     // block trade if auto-qty < this
+  maxQuantity?: number;    // block trade if auto-qty > this; 0/undefined = no cap
 
   // Intraday auto square-off
   autoSquareOff: boolean;  // close any open position at squareOffTime
@@ -572,6 +573,7 @@ export const defaultAutoBacktestConfig: AutoBacktestConfig = {
   useAutoQty: true,
   riskPerTrade: 10000,
   minQuantity: 1,
+  maxQuantity: 0,
   autoSquareOff: true,
   squareOffTime: '15:10',
   slTpFillMode: 'exact',
@@ -1515,7 +1517,7 @@ export function previewEntryHook(
 /**
  * The single place trade quantity is decided, for every caller of evaluateAutoSignals.
  *
- * A hook-set quantity wins outright — it bypasses useAutoQty/riskPerTrade/minQuantity,
+ * A hook-set quantity wins outright — it bypasses useAutoQty/riskPerTrade/min/maxQuantity,
  * because a hook that sized the trade has already accounted for its own risk. Otherwise the
  * engine's own sizing applies. Previously this arithmetic was duplicated in the batch
  * simulator and the store action; they must not drift.
@@ -1534,6 +1536,13 @@ export function resolveTradeQuantity(
     return {
       qty,
       skipReason: `Skipped: qty ${qty} < min ${config.minQuantity} (SL ${riskPoints.toFixed(1)} pts too wide)`,
+    };
+  }
+  const maxQty = config.maxQuantity ?? 0;
+  if (maxQty > 0 && qty > maxQty) {
+    return {
+      qty,
+      skipReason: `Skipped: qty ${qty} > max ${maxQty} (SL ${riskPoints.toFixed(1)} pts too tight)`,
     };
   }
   return { qty };

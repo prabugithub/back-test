@@ -280,6 +280,7 @@ export function AutoBacktestPanel({ onNavigate, hidden }: AutoBacktestPanelProps
       useAutoQty: config.useAutoQty,
       riskPerTrade: config.riskPerTrade,
       minQuantity: config.minQuantity,
+      maxQuantity: config.maxQuantity,
     };
     // Carry the custom entry AND exit hooks across. No preset defines either, so spreading
     // defaultAutoBacktestConfig would silently switch a configured hook off — the run would

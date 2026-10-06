@@ -150,6 +150,15 @@ export function SessionSettingsPanel({ config, onChange, isOpen, onClose, onOpen
                     title="Minimum quantity — skip trade if auto-qty is below this"
                   />
                 </div>
+                <div className="flex items-center gap-1">
+                  <span className="text-[10px] text-gray-500">Max</span>
+                  <input
+                    type="number" min={0} value={config.maxQuantity || ''} placeholder="∞"
+                    onChange={e => onChange({ maxQuantity: Math.max(0, Number(e.target.value) || 0) })}
+                    className="w-14 px-1.5 py-1 text-xs border rounded text-center"
+                    title="Maximum quantity — skip trade if auto-qty is above this (empty = no cap)"
+                  />
+                </div>
               </div>
             ) : (
               <span className="text-[10px] text-gray-400">Using manual qty from trade panel</span>
