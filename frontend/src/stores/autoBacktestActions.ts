@@ -390,14 +390,15 @@ export function createAutoBacktestActions(set: StoreSet, get: StoreGet) {
         const isLong = current.quantity > 0;
         const sl = current.stopLoss ?? 0;
         const tp = current.target ?? 0;
-        const { high, low, close } = candle;
+        const { open, high, low, close } = candle;
         let hit: { reason: ExitReason; price: number } | null = null;
         if (fillMode === 'exact') {
+          // A bar that opens beyond the SL (overnight gap) fills at that open, not the SL price.
           if (isLong) {
-            if (sl > 0 && low <= sl) hit = { reason: 'SL', price: sl };
+            if (sl > 0 && low <= sl) hit = { reason: 'SL', price: Math.min(sl, open) };
             else if (tp > 0 && high >= tp) hit = { reason: 'TP', price: tp };
           } else {
-            if (sl > 0 && high >= sl) hit = { reason: 'SL', price: sl };
+            if (sl > 0 && high >= sl) hit = { reason: 'SL', price: Math.max(sl, open) };
             else if (tp > 0 && low <= tp) hit = { reason: 'TP', price: tp };
           }
         } else {

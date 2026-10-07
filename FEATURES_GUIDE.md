@@ -216,7 +216,7 @@ At 1× speed, one candle advances per second. At 10×, ten candles per second.
 ### SL/TP Auto-Exit
 
 When `autoExitTarget` is enabled in settings, the chart checks on every candle advance whether the candle's low/high breaches the set Stop Loss or Target, and exits automatically. The **fill price** is controlled by `autoBacktestConfig.slTpFillMode` (default `'exact'`), and applies uniformly to every backtest trade — manual and auto-backtest alike:
-- **`exact`** (default): fills at the exact SL/TP price the instant intrabar high/low touches it — no slippage beyond the planned risk.
+- **`exact`** (default): fills at the exact SL/TP price the instant intrabar high/low touches it — no slippage beyond the planned risk. **Gap exception:** if a bar *opens* already beyond the SL (e.g. an overnight gap on a carry-over trade), the SL fills at that bar's open, so the loss can exceed the planned risk. TP still fills at the exact target price. Live ticks have no bar open, so they keep the SL price.
 - **`close`** (legacy/opt-in): only fires once the candle's *close* crosses the level, filled at that close price — can overshoot the planned risk substantially when a bar gaps through the level intrabar (measured ~51% average overshoot on a real sample before this mode existed).
 
 ### Settings Panels

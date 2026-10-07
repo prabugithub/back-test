@@ -307,13 +307,14 @@ export function runBatchSimulation(
     const tp = pos.target ?? 0;
     const fillMode = config.slTpFillMode ?? 'exact';
 
+    //          A bar that OPENS beyond the SL (overnight gap) fills the SL at that open, not the SL price.
     if (fillMode === 'exact') {
-      const { high, low } = candle;
+      const { open, high, low } = candle;
       if (isLong) {
-        if (sl > 0 && low <= sl) return { reason: 'SL', fillPrice: sl };
+        if (sl > 0 && low <= sl) return { reason: 'SL', fillPrice: Math.min(sl, open) };
         if (tp > 0 && high >= tp) return { reason: 'TP', fillPrice: tp };
       } else {
-        if (sl > 0 && high >= sl) return { reason: 'SL', fillPrice: sl };
+        if (sl > 0 && high >= sl) return { reason: 'SL', fillPrice: Math.max(sl, open) };
         if (tp > 0 && low <= tp) return { reason: 'TP', fillPrice: tp };
       }
     } else {

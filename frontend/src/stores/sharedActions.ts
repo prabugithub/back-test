@@ -194,7 +194,13 @@ export function createSharedActions(set: StoreSet, get: StoreGet) {
         if (autoExitSLEnabled) autoExitSL = true;
         else dialogToTrigger = 'SL';
         nextSlDialogShown = true;
-        fillPriceForTrigger = fillMode === 'exact' ? sl : effectiveClose;
+        // Exact mode: a candle that opens beyond the SL (overnight gap) fills at that open.
+        // Live ticks (currentPrice) have no bar open, so they keep the SL price.
+        const gapOpen = !currentPrice && candle ? candle.open : undefined;
+        const exactSlFill = gapOpen === undefined
+          ? sl
+          : (isLong ? Math.min(sl, gapOpen) : Math.max(sl, gapOpen));
+        fillPriceForTrigger = fillMode === 'exact' ? exactSlFill : effectiveClose;
       } else if (tpFires && !nextTpDialogShown) {
         dialogToTrigger = 'TP';
         nextTpDialogShown = true;
@@ -222,7 +228,7 @@ export function createSharedActions(set: StoreSet, get: StoreGet) {
           set({ position: updatedPosition });
           useNotificationStore
             .getState()
-            .notify(`Stop Loss Hit at ${sl.toFixed(2)}. Auto Exiting.`, 'warning');
+            .notify(`Stop Loss Hit at ${fillPriceForTrigger.toFixed(2)}. Auto Exiting.`, 'warning');
           get().executeTrade(isLong ? 'SELL' : 'BUY', Math.abs(position.quantity), undefined, undefined, fillPriceForTrigger, 'SL');
         } else if (autoExitTP) {
           set({ position: updatedPosition });
