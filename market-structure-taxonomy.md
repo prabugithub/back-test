@@ -90,3 +90,5 @@ These are volatility/structure regimes rather than directional ones — no separ
 2. Measure each leg's size and overlap with the prior leg.
 3. Classify the leg sequence into one of the 9 regimes above based on: (a) net direction, (b) overlap/pullback depth, (c) leg-to-leg amplitude trend (expanding/shrinking/stable).
 4. Track regime transitions across the day, since regimes commonly evolve (e.g., shrinking trend → range → expanding triangle → breakout into new trend).
+
+**Statistics:** the Structure tab (`StructureStatsPage`, `utils/marketStructure/stats.ts`) reports counts, durations, moves, pullbacks and transitions per regime and sub-regime. The metric definitions are in FEATURES_GUIDE.md → "Market Structure Statistics page".

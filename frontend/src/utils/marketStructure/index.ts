@@ -14,6 +14,10 @@ import type { StructureSegment, StructureState } from './types';
 export * from './types';
 export { STRUCTURE_PARAM_DEFS, resolveStructureParams, type StructureConfig, type StructureParams } from './params';
 export { buildStructureTimeline } from './timeline';
+export {
+  computeStructureStats, summarize, transitionMatrix, subTransitions,
+  type EpisodeStat, type StructureStats, type DistSummary, type SubKey, type SubRun,
+} from './stats';
 
 // Same clamp as resolveMinPivotGapBars in the engine — duplicated (3 lines) rather than
 // imported, because the engine imports this module.

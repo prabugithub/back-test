@@ -22,6 +22,7 @@ import { Save, FilePlus, RotateCcw } from 'lucide-react';
 import { PerformanceDashboard } from './components/PerformanceDashboard';
 import { AutoBacktestPanel } from './components/AutoBacktestPanel';
 import { PageNavTabs, type ActivePage } from './components/PageNavTabs';
+import { StructureStatsPage } from './components/StructureStatsPage';
 
 const queryClient = new QueryClient();
 
@@ -167,6 +168,11 @@ function App() {
               {visitedPages.has('dashboard') && (
                 <div style={{ display: activePage === 'dashboard' ? undefined : 'none' }}>
                   <PerformanceDashboard onNavigate={navigateTo} liveInstrument={instrument} />
+                </div>
+              )}
+              {visitedPages.has('structureStats') && (
+                <div style={{ display: activePage === 'structureStats' ? undefined : 'none' }}>
+                  <StructureStatsPage onNavigate={navigateTo} />
                 </div>
               )}
               {visitedPages.has('backtest') && (

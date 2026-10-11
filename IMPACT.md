@@ -497,6 +497,11 @@ A pivot-only classifier: Up / Down / Range plus a 9-regime sub-type. It runs as 
   - `npx tsx scripts/structureVerify.ts`: segments, distribution, look-ahead check.
   - `npx tsx scripts/structureSmoke.ts`: gate, regime source, leg-pattern clause and hook context on cached candles (9 assertions).
   - With defaults, `backtest:eval` output is byte-identical to the pre-change build.
+- **Statistics (`stats.ts`, `StructureStatsPage.tsx`, the `'structureStats'` page):** a read-only consumer of `getStructureTimeline`. It groups the timeline into episodes by `segmentId`, not by `getStructureSegments` runs, which split on a sub or attempt change.
+  - It rebuilds each episode's **uncapped** swing points by mirroring `mergePoint` without the `maxPivots` cap, taking each new last point when the `segmentPivots` reference changes. **If `mergePoint` semantics or the "replace the array on change" contract change, update `merge()` in `stats.ts`.**
+  - The anchor is the first state's `segmentPivots[0]`. A trend's span ends at the next range's anchor (its extreme), because `newSeg('range', …, points.slice(anchor))` anchors there.
+  - Jumping to an episode past `currentIndex` calls `setCurrentIndex`, which runs `checkSLTPHits` and `runMultiPositionCycle`. That is why it is behind a confirm and disabled in live mode.
+  - Check: `npx tsx scripts/structureStats.ts` (bar-sum and episode-count invariants).
 
 ### Stop-loss primitives (`utils/stopLoss.ts`)
 

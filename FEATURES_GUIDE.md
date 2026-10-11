@@ -643,6 +643,52 @@ Before the segment has *Min swings for sub-regime* swings, the sub-regime is sho
 
 ---
 
+### Market Structure Statistics page (Structure tab)
+
+**Component:** `StructureStatsPage.tsx`, the **Structure** tab in [PageNavTabs](#cross-page-navigation-pagenavtabs). **Logic:** `utils/marketStructure/stats.ts` (`computeStructureStats`, `summarize`, `transitionMatrix`, `subTransitions`).
+
+This page gives descriptive statistics of the pivot structure classifier, covering what the market structure itself did. They are not trade results. It recomputes live when the candles or the Session Settings → Market Structure thresholds change.
+
+- **Episode** = one structure segment (`segmentId`): an Up trend, a Down trend or a Range. A breakout attempt belongs to its range episode and is counted in its failed breakouts or as its exit. It is not a separate episode.
+- **Header controls:**
+  - **Stop at replay bar:** only uses bars up to `currentIndex`, so there is no look-ahead. The last episode is then still *open*.
+  - **Episode sub:** *Dominant* (the sub with the most bars in the episode, the default) or *Final* (its sub on its last bar, which is a hindsight label).
+  - **Min span:** hides very short episodes.
+- **Filter bar:**
+  - Structure picker: All / Up trend / Down trend / Range.
+  - Sub-regime chips: **All** + the 9 sub-regimes + *Forming* (the sub was never named). These are the same chips as the Builder's Pivot Structure control and narrow to the chosen structure.
+  - The filter applies to every section except the per-sub table, which always lists every sub and highlights the selected ones.
+  - The filter is saved per browser in `localStorage`.
+- **Summary cards:** for each of Up / Down / Range: episodes, candles and % of all candles, median/mean span, median and total move. An opposite-moves card shows the pullback count, pullback points and pullbacks as a % of the total trend move. It also shows the median confirmation lag.
+- **Summary by structure:** median · mean · [p25–p75] · max for every metric below.
+- **Sub-regimes table:** one row per structure × sub (and Forming). Columns: bars and % (counted bar by bar, so they stay exact even when an episode changed sub), episodes, median span, move and worst pullback, pullback total, efficiency, and how a range exits (up or down %). Clicking a row toggles its chip.
+- **What follows what:** a broad transition matrix, *Trend → Range → ?* continuation vs reversal %, and the most common sub-regime changes inside episodes (e.g. Stairs → Wedge).
+- **Top 10 lists:**
+  - largest up moves and largest down moves
+  - worst pullback in up trends and in down trends
+  - longest ranges
+  - most failed breakouts
+  - largest giveback
+  - longest trends
+- **All episodes:** a sortable detail table. Expanding a row shows its sub path with bars per sub, key levels, classifier evidence and every swing (counter-trend swings are highlighted).
+- **Jump to chart:** ⌖ or a top-10 item scrolls to and highlights the episode's anchor candle. An episode after the replay bar asks before advancing replay. Advancing reveals candles and runs SL/TP checks, and it is disabled in live mode. If the Market Structure chart layer is off, a banner offers to turn it on.
+
+**Metric definitions** (pivot-derived; closes are used only for net, capturable and giveback):
+
+| Metric | Definition |
+|---|---|
+| Span | Hindsight duration: the anchor swing point → the next episode's anchor. A trend's span ends at its extreme, because the following range is anchored there. |
+| Labelled bars | Bars the live (causal) label showed this episode. These add up exactly to the candle count. |
+| Confirmation lag | The first labelled bar − the anchor bar. |
+| Move / height | Trend: the anchor price → the extreme pivot (highest high or lowest low), in points and % of the anchor price. Range: box height (all swing points in the episode), as % of the box low. |
+| Capturable | The close on the confirmation bar → the extreme, in the trend direction. This is what was left once the label confirmed. |
+| Giveback | The extreme → the last close before the break of structure (blank while the episode is open). |
+| Pullbacks (opposite moves) | Counter-trend swings ending on or before the extreme: count, Σ points, worst (points / %), and worst retrace = worst pullback ÷ the impulse before it. Swings after the extreme count as giveback, not pullbacks. |
+| Efficiency | \|anchor → last close\| ÷ the total swing path (0–1). |
+| Failed breakouts | Breakout attempts in the range that closed back inside the box. |
+
+Swing points are rebuilt from the whole episode. The classifier caps its window at *Max pivots / segment*, but the statistics are not capped. Headless check: `npx tsx scripts/structureStats.ts` checks that bars sum to the candle count and that the episode count equals the number of segment ids, then prints the same tables.
+
 ## 7. Position Tracking & P&L
 
 **Store:** `sessionStore`  
@@ -1155,7 +1201,7 @@ Full-page overlays (open on demand, `absolute inset-0`, stacked by z-index):
 
 ### Cross-page navigation (`PageNavTabs`)
 
-**Component:** `PageNavTabs.tsx` — a small pill-button switcher (Chart / Trade Log / Backtest / Dashboard) rendered in the header of every full-page view **and** in the chart page's bottom controls bar, so any of the four pages is reachable directly from any other — not just back to the chart.
+**Component:** `PageNavTabs.tsx` — a small pill-button switcher (Chart / Trade Log / Backtest / Dashboard / Structure) rendered in the header of every full-page view **and** in the chart page's bottom controls bar, so any of the five pages is reachable directly from any other — not just back to the chart.
 
 - **State:** `App.tsx` owns a single `activePage: ActivePage` plus a `visitedPages: Set<ActivePage>` (`'chart'` always included). `navigateTo(page)` sets both.
 - **Mount-once, hide-don't-unmount:** a page's component only mounts the first time it's visited (`visitedPages.has(page)`), then stays mounted — visibility toggles via a wrapping `style={{ display: activePage === page ? undefined : 'none' }}` instead of conditional `&&` rendering. This means **scroll position, expanded rows, search text, filter selections, and the active sub-tab are preserved** when navigating away and back, instead of resetting on every open (e.g. Trade History's expanded position row, the Performance Dashboard's Detailed Log search box and Dashboard/Entry Analytics/Detailed Log sub-tab, snapshot data already fetched from Firestore).

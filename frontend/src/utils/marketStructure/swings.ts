@@ -49,3 +49,13 @@ export function fitLine(points: readonly SwingPoint[]): { slope: number; at: (ba
   const intercept = (sy - slope * sx) / n;
   return { slope, at: bar => intercept + slope * bar };
 }
+
+/** Linear-interpolated quantile (q ∈ [0,1]) — 0 for an empty list. */
+export function quantile(values: readonly number[], q: number): number {
+  if (values.length === 0) return 0;
+  const s = [...values].sort((a, b) => a - b);
+  const pos = (s.length - 1) * Math.min(1, Math.max(0, q));
+  const lo = Math.floor(pos);
+  const hi = Math.ceil(pos);
+  return s[lo] + (s[hi] - s[lo]) * (pos - lo);
+}
