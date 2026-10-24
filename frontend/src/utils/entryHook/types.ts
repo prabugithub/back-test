@@ -15,10 +15,12 @@
  *    through postMessage — a function reference cannot cross that boundary. The worker
  *    imports the registry itself and resolves the id. See strategies/index.ts.
  *
- * 2. The hook fires on EVERY H/L signal bar regardless of count. The built-in chain can only
- *    ever enter on H1/H2/L1/L2 (evalLong/evalShort build their allowed set from
+ * 2. WHEN the hook fires follows the regime's Entry Mode (see HookTrigger). In the H/L modes
+ *    it fires on every signal bar regardless of count. The built-in chain can only ever
+ *    enter on H1/H2/L1/L2 (evalLong/evalShort build their allowed set from
  *    rules.allowH1/allowH2), but runAlBrooks labels H3, H4, L5... all the same. The hook
  *    reads those raw labels off `signalsByBar`, so the whole counter range is reachable.
+ *    In Pivot mode it fires on every confirmed pivot bar instead.
  */
 import type { Candle, LegSegment } from '../../types';
 import type { PivotPoint } from '../indicators';
@@ -36,16 +38,30 @@ import type {
  *  on RegimeRules.entryHookMode for why this is deliberately optional. */
 export type EntryHookMode = 'off' | 'gate' | 'replace';
 
-/** The Al Brooks pullback signal that caused this call. */
+/**
+ * The bar event that caused this call. WHICH events qualify follows the regime's Entry Mode
+ * (Trade Settings), exactly as it does for the built-in chain:
+ *
+ * - `PIVOT`      — every bar a pivot is confirmed on. `source: 'pivot'`, `label: 'Pivot'`.
+ * - `H_SIGNAL`   — every H/L signal bar, at any count. `source: 'signal'`.
+ * - `CONFLUENCE` — H/L signal bars with a same-side pivot within `confluenceLookback`.
+ */
 export interface HookTrigger {
-  /** Raw, unfiltered label: 'H1' | 'H2' | 'H3' | 'L1' | 'L4' ... */
+  /** What fired: an Al Brooks H/L signal, or a confirmed pivot (Entry Mode = Pivot). */
+  source: 'signal' | 'pivot';
+  /** Raw, unfiltered label: 'H1' | 'H2' | 'H3' | 'L1' | 'L4' ... — or 'Pivot'. */
   label: string;
-  /** H -> long, L -> short. The DEFAULT direction; a decision may override it. */
+  /** H / bullish pivot -> long, L / bearish pivot -> short. The DEFAULT direction; a
+   *  decision may override it. */
   side: 'long' | 'short';
-  /** The counter value: 3 for 'H3'. */
+  /** The counter value: 3 for 'H3'. Always 0 for a pivot trigger — a hook filtering on
+   *  count should check `source` first. */
   count: number;
   /** Absolute index into the full session candle array. */
   barIndex: number;
+  /** The pivot itself when `source === 'pivot'`; for CONFLUENCE, the recent pivot that
+   *  qualified the signal. Undefined for a plain H_SIGNAL trigger. */
+  pivot?: PivotPoint;
 }
 
 /**

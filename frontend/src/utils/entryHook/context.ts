@@ -48,10 +48,12 @@ export function parseTrigger(label: string | null | undefined, barIndex: number)
   if (!side) return null;
   const count = Number.parseInt(label.slice(1), 10);
   if (!Number.isFinite(count) || count < 1) return null;
-  return { label, side, count, barIndex };
+  return { source: 'signal', label, side, count, barIndex };
 }
 
-/** Reads the raw H/L label at `index` off the shared cache. Causal by construction. */
+/** Reads the raw H/L label at `index` off the shared cache. Causal by construction.
+ *  This is only the H/L half of the trigger — the engine's resolveHookTrigger applies the
+ *  regime's Entry Mode on top (pivot bars for PIVOT, pivot confluence for CONFLUENCE). */
 export function hookTriggerAt(candles: Candle[], index: number): HookTrigger | null {
   const { signalsByBar } = getAlBrooksRunUpTo(candles, index);
   return parseTrigger(signalsByBar[index] ?? null, index);

@@ -145,7 +145,7 @@ export function useFilterPreviewData(
         legPattern: passesLegPattern(rules, legPatternCtxFor(i), isLong),
       };
       // Custom entry hook. Unlike every key above, this one is CONDITIONAL: the hook is only
-      // consulted on bars that carry an H/L signal, so writing `false` on the other bars
+      // consulted on its Entry Mode's trigger bars (pivots, or H/L signals), so writing `false` on the other bars
       // would drag overallPass down for bars the engine never even asked about. undefined
       // means "not consulted here" and the key is left off entirely.
       const hookPass = previewEntryHook(candles, i, config, rules, regime, metrics);

@@ -4,6 +4,7 @@
 //   npm run backtest:entryhook   (tsx scripts/entryHookSmoke.ts)
 import {
   defaultAutoBacktestConfig,
+  resolveMinPivotGapBars,
   type AutoBacktestConfig,
   type RegimeRules,
 } from '../src/utils/autoBacktestEngine';
@@ -16,7 +17,7 @@ import {
   type EntryHookContext,
 } from '../src/utils/entryHook';
 import { probe, hookProbeStore } from '../src/strategies/debug';
-import { getAlBrooksRunUpTo } from '../src/utils/indicators';
+import { getAlBrooksRunUpTo, getPivotPointsUpTo } from '../src/utils/indicators';
 import type { Candle, Trade } from '../src/types';
 
 let passed = 0;
@@ -397,21 +398,54 @@ callCount = 0;
 run(cfg({ entryHookMode: 'replace', entryHookId: 'smoke-count', enabled: false }));
 assert(callCount === 0, 'a disabled regime never calls its hook');
 
-// entryMode: 'replace' ignores it entirely; 'gate' narrows to pivot ∩ H/L, never to zero.
-assert(countCalls({ entryMode: 'PIVOT' }) === allSignals,
-  'replace mode ignores entryMode — PIVOT sees exactly the same bars as H_SIGNAL');
+// entryMode is the trigger source in BOTH hook modes — the same Trade Settings switch the
+// built-in chain enters on. PIVOT fires on confirmed pivot bars (including ones with no H/L
+// signal at all), CONFLUENCE on H/L bars with a recent same-side pivot.
+const seen: EntryHookContext['trigger'][] = [];
+let pivotBarsWithoutSignal = 0;
+registerEntryHook('smoke-trigger', {
+  label: 'trigger recorder',
+  hook: ctx => {
+    seen.push(ctx.trigger);
+    if (ctx.signals[ctx.index] === null) pivotBarsWithoutSignal++;
+    return false;
+  },
+});
+const triggersFor = (mode: 'replace' | 'gate', entryMode: RegimeRules['entryMode']) => {
+  seen.length = 0;
+  pivotBarsWithoutSignal = 0;
+  run(cfg({ entryHookMode: mode, entryHookId: 'smoke-trigger', entryMode }));
+  return seen.slice();
+};
 
-callCount = 0;
-run(cfg({ entryHookMode: 'gate', entryHookId: 'smoke-count', entryMode: 'PIVOT' }));
-const gatePivot = callCount;
-callCount = 0;
-run(cfg({ entryHookMode: 'gate', entryHookId: 'smoke-count', entryMode: 'H_SIGNAL' }));
-// Not zero, and never more than the H_SIGNAL set. How MUCH it narrows is data-dependent
-// (774 of 1960 on real NSE 5m; this synthetic wave has a pivot on every signal bar, so it
-// narrows not at all) — the invariant that matters is that PIVOT does not kill the hook,
-// which an earlier revision of the UI and docs wrongly claimed it did.
-assert(gatePivot > 0 && gatePivot <= callCount,
-  `gate + PIVOT restricts to pivot bars carrying an H/L signal, it does NOT kill the hook (${gatePivot} of ${callCount})`);
+const replacePivot = triggersFor('replace', 'PIVOT');
+assert(replacePivot.length > 0, `replace + PIVOT calls the hook on pivot bars (${replacePivot.length})`);
+assert(replacePivot.every(t => t.source === 'pivot' && t.label === 'Pivot' && t.count === 0),
+  'replace + PIVOT triggers are all source:pivot / label Pivot / count 0');
+assert(replacePivot.every(t => t.pivot !== undefined && t.pivot.barIndex === t.barIndex
+    && (t.pivot.type === 'bullish') === (t.side === 'long')),
+  'a pivot trigger carries the pivot fired on that bar, side from its type');
+// The full set, not "pivot bars that also carry a signal" — the bug this pins was a pivot
+// regime's hook only ever seeing pivot ∩ H/L. (The synthetic wave has a signal on every pivot
+// bar, so `pivotBarsWithoutSignal` is 0 here; on real data it is most of them.)
+const pivotBars = getPivotPointsUpTo(CANDLES, CANDLES.length - 1, resolveMinPivotGapBars(cfg()))
+  .filter(p => p.barIndex >= 60).map(p => p.barIndex); // 60 = run()'s start index
+assert(replacePivot.map(t => t.barIndex).join() === pivotBars.join(),
+  `replace + PIVOT calls the hook on exactly the confirmed pivot bars (${replacePivot.length} of ${pivotBars.length}; ${pivotBarsWithoutSignal} without an H/L signal)`);
+
+const replaceConf = triggersFor('replace', 'CONFLUENCE');
+assert(replaceConf.length > 0 && replaceConf.length <= allSignals,
+  `replace + CONFLUENCE is a subset of the H/L signal bars (${replaceConf.length} of ${allSignals})`);
+assert(replaceConf.every(t => t.source === 'signal' && t.pivot !== undefined
+    && (t.pivot.type === 'bullish') === (t.side === 'long')),
+  'a confluence trigger is an H/L signal carrying its same-side qualifying pivot');
+
+const gatePivot = triggersFor('gate', 'PIVOT');
+assert(gatePivot.length > 0 && gatePivot.every(t => t.source === 'pivot'),
+  `gate + PIVOT gates the chain's own pivot entries (${gatePivot.length} calls, all pivot triggers)`);
+const gateH = triggersFor('gate', 'H_SIGNAL');
+assert(gateH.length > 0 && gateH.every(t => t.source === 'signal' && t.pivot === undefined),
+  `gate + H_SIGNAL is unchanged — H/L triggers only (${gateH.length})`);
 
 // ─── 9c. callCount — what turns "nothing happened" into a diagnosis ───────────
 

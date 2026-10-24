@@ -377,23 +377,14 @@ function CustomEntryHookCard({ rules, up }: Pick<RegimeStepProps, 'rules' | 'up'
             </p>
           )}
 
-          {/* Only 'gate' narrows on entry mode, and it narrows rather than kills: the hook
-              still runs on bars that are BOTH a pivot and an H/L signal. 'replace' does not
-              consult entryMode at all. */}
-          {mode === 'gate' && rules.entryMode === 'PIVOT' && (
-            <p className="mt-1.5 text-[10px] text-amber-600 leading-snug">
-              Entry Signal is set to <strong>Pivot</strong>. In Gate mode the hook only sees
-              bars that are a pivot <em>and</em> carry an H/L signal — a much smaller set.
-              Use H/L Signal or Confluence to see every signal.
-            </p>
-          )}
-
           <p className="mt-2 text-[10px] text-gray-500 leading-snug">
             {mode === 'gate'
               ? 'Runs after every filter above and after SL/TP are computed. It can veto the entry or override side, quantity, SL and target.'
               : 'Skips every filter above. Your code alone decides, behind the regime\'s enabled + market-structure gates.'}
-            {' '}Every H/L signal reaches it at <em>any</em> count — H3, H4, L5 included —
-            so the H1/H2 checkboxes above stop gating while a hook is on.
+            {' '}It fires on the bars the <strong>Entry Signal</strong> above selects
+            {rules.entryMode === 'PIVOT'
+              ? <> — every confirmed pivot (<code>ctx.trigger.source === 'pivot'</code>).</>
+              : <>{rules.entryMode === 'CONFLUENCE' ? ' — H/L signals with a recent pivot' : ' — every H/L signal'}, at <em>any</em> count (H3, H4, L5 included), so the H1/H2 checkboxes stop gating while a hook is on.</>}
           </p>
 
           {/* Same control as the panel footer. Repeated here because this is where the

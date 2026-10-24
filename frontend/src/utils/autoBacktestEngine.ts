@@ -872,19 +872,58 @@ export function computeEntryMetrics(
  *  tried at that bar. The context itself is built per (regime, direction) because it carries
  *  the regime's rules and its instrumentation snapshot. */
 export interface HookBarEnv {
-  /** The raw H/L signal at this bar, or null. Null means no hook runs here at all. */
-  trigger: HookTrigger | null;
+  /** The trigger this regime's Entry Mode sees at this bar, or null. Null means the hook
+   *  does not run for that regime here. Memoized per entry mode — at most 3 per bar. */
+  triggerFor: (rules: RegimeRules) => HookTrigger | null;
   /** Scratch + error bookkeeping that persists across bars for the whole run. */
   runState: HookRunState;
-  /** The completed breakout leg on the trigger's own side, or null. Bar-level, not
-   *  per-regime, so both hook modes hand the hook the same leg. */
-  legWindow: LegWindow | null;
+  /** The completed breakout leg on the trigger's own side, or null. Depends only on the
+   *  side, so both hook modes hand the hook the same leg. */
+  legWindowFor: (trigger: HookTrigger | null) => LegWindow | null;
   buildCtx: (args: {
     rules: RegimeRules;
     regime: RegimeKey;
+    trigger: HookTrigger;
     metrics: EntryMetricsSnapshot;
     logs: string[];
   }) => EntryHookContext;
+}
+
+/**
+ * The hook trigger for one regime at one bar, following that regime's Entry Mode — the same
+ * setting that decides what the built-in chain enters on, so a hook and the chain it gates
+ * or replaces always agree on WHICH bars are candidates:
+ *
+ * - `PIVOT`      — the bar a pivot is confirmed on (side from the pivot type).
+ * - `H_SIGNAL`   — the raw H/L label, any count.
+ * - `CONFLUENCE` — the raw H/L label, only with a same-side pivot within confluenceLookback
+ *                  (the same findRecent*Pivot window evalLong/evalShort apply).
+ */
+export function resolveHookTrigger(
+  rules: Pick<RegimeRules, 'entryMode' | 'confluenceLookback'>,
+  signal: HookTrigger | null,
+  currentPivot: PivotPoint | null,
+  pivots: PivotPoint[],
+  currentIndex: number,
+  candles: Candle[]
+): HookTrigger | null {
+  if (rules.entryMode === 'PIVOT') {
+    if (!currentPivot) return null;
+    return {
+      source: 'pivot',
+      label: 'Pivot',
+      side: currentPivot.type === 'bullish' ? 'long' : 'short',
+      count: 0,
+      barIndex: currentIndex,
+      pivot: currentPivot,
+    };
+  }
+  if (!signal) return null;
+  if (rules.entryMode === 'H_SIGNAL') return signal;
+  const recent = signal.side === 'long'
+    ? findRecentBullPivot(pivots, currentIndex, candles, rules.confluenceLookback)
+    : findRecentBearPivot(pivots, currentIndex, candles, rules.confluenceLookback);
+  return recent ? { ...signal, pivot: recent } : null;
 }
 
 /** What a regime's hook settings resolve to. */
@@ -1012,33 +1051,40 @@ export function evaluateAutoSignals(
   // `markers`: that array is dense, causal by construction and UNFILTERED, so H3/H4/L5 are
   // all present. `markers` is depth-filtered and would silently drop them.
   //
-  // Only the label read happens eagerly (one array index). The context — and with it the
-  // candle-window slice and any leg building — is constructed lazily, per regime, and only
-  // once a regime actually has a hook to run.
-  const hookTrigger = hookTriggerAt(candles, currentIndex);
+  // Only the label read happens eagerly (one array index). The per-regime trigger — which
+  // applies that regime's Entry Mode — and the context are resolved lazily, and only once a
+  // regime actually has a hook to run.
+  const hookSignal = hookTriggerAt(candles, currentIndex);
+  const hookTriggerCache = new Map<string, HookTrigger | null>();
 
   // The completed breakout leg the hook grades, on the TRIGGER's own side. Derived from
   // getAlBrooksLegsAt rather than currentAbMarker.legStartIndex, because a marker can have
   // been suppressed by the pullback-depth filter on exactly the H3+/L3+ bars this feature
   // exists to reach — leaving the hook with no leg on the bars it most wants one.
-  const hookLegWindow: LegWindow | null = (() => {
-    if (!hookTrigger) return null;
+  const hookLegWindowFor = (trigger: HookTrigger | null): LegWindow | null => {
+    if (!trigger) return null;
     const { bull, bear } = getAlBrooksLegsAt(candles, currentIndex);
-    const leg = hookTrigger.side === 'long' ? bull : bear;
+    const leg = trigger.side === 'long' ? bull : bear;
     return leg ? { startIndex: leg.startIndex, endIndex: leg.endIndex } : null;
-  })();
+  };
 
   const hookEnv: HookBarEnv = {
-    trigger: hookTrigger,
+    triggerFor: rules => {
+      const key = `${rules.entryMode}:${rules.confluenceLookback}`;
+      if (!hookTriggerCache.has(key)) {
+        hookTriggerCache.set(key, resolveHookTrigger(rules, hookSignal, currentPivot, pivots, currentIndex, candles));
+      }
+      return hookTriggerCache.get(key)!;
+    },
     runState: hookRunState ?? createHookRunState(),
-    legWindow: hookLegWindow,
-    buildCtx: ({ rules, regime, metrics, logs }) => buildEntryHookContext({
+    legWindowFor: hookLegWindowFor,
+    buildCtx: ({ rules, regime, trigger, metrics, logs }) => buildEntryHookContext({
       candles,
       currentIndex,
       config,
       rules,
       regime,
-      trigger: hookEnv.trigger!,
+      trigger,
       ltMarket,
       htMarket,
       pivotSeq,
@@ -1047,7 +1093,7 @@ export function evaluateAutoSignals(
       ema60,
       atr,
       metrics,
-      legWindow: hookLegWindow,
+      legWindow: hookLegWindowFor(trigger),
       state: hookEnv.runState.state,
       logs,
     }),
@@ -1068,7 +1114,7 @@ export function evaluateAutoSignals(
     if (resolvedHook?.mode === 'replace') {
       const signal = evalHook(
         regimeRules, resolvedHook, hookEnv, currentCandle,
-        getEntryMetrics(hookLegWindow), pivots, currentIndex, candles, atr,
+        getEntryMetrics(hookEnv.legWindowFor(hookEnv.triggerFor(regimeRules))), pivots, currentIndex, candles, atr,
         pivotSeq, ltMarket, htMarket, regime
       );
       if (signal) return signal;
@@ -1140,7 +1186,7 @@ function evalLong(
   // stop gating and the hook does its own trigger filtering off ctx.trigger.count. That is
   // the only way H3+ becomes reachable; see the note on RegimeRules.entryHookMode.
   const isHSig = gate
-    ? hookEnv.trigger?.side === 'long'
+    ? hookEnv.triggerFor(rules)?.side === 'long'
     : currentAb !== null && allowedHSignals(rules).has(currentAb.signal);
 
   let pivotForSl: PivotPoint | null = isBullPivot ? currentPivot : null;
@@ -1151,14 +1197,14 @@ function evalLong(
     triggerLabel = 'Pivot';
   } else if (rules.entryMode === 'H_SIGNAL') {
     if (!isHSig) return null;
-    triggerLabel = hSignalLabel(gate, currentAb, hookEnv);
+    triggerLabel = hSignalLabel(rules, gate, currentAb, hookEnv);
     pivotForSl = findRecentBullPivot(pivots, currentIndex, candles, rules.confluenceLookback * 2);
   } else {
     if (!isHSig) return null;
     const recent = findRecentBullPivot(pivots, currentIndex, candles, rules.confluenceLookback);
     if (!recent) return null;
     pivotForSl = recent;
-    triggerLabel = `CONF ${hSignalLabel(gate, currentAb, hookEnv)}`;
+    triggerLabel = `CONF ${hSignalLabel(rules, gate, currentAb, hookEnv)}`;
   }
 
   if (rules.ltPivotSequence !== 'any' && pivotSeq !== rules.ltPivotSequence) return null;
@@ -1222,7 +1268,7 @@ function evalShort(
   const isBearPivot = currentPivot?.type === 'bearish';
   // See evalLong: a gating hook widens the trigger set to every L count, H3+/L3+ included.
   const isLSig = gate
-    ? hookEnv.trigger?.side === 'short'
+    ? hookEnv.triggerFor(rules)?.side === 'short'
     : currentAb !== null && allowedLSignals(rules).has(currentAb.signal);
 
   let pivotForSl: PivotPoint | null = isBearPivot ? currentPivot : null;
@@ -1233,14 +1279,14 @@ function evalShort(
     triggerLabel = 'Pivot';
   } else if (rules.entryMode === 'H_SIGNAL') {
     if (!isLSig) return null;
-    triggerLabel = hSignalLabel(gate, currentAb, hookEnv);
+    triggerLabel = hSignalLabel(rules, gate, currentAb, hookEnv);
     pivotForSl = findRecentBearPivot(pivots, currentIndex, candles, rules.confluenceLookback * 2);
   } else {
     if (!isLSig) return null;
     const recent = findRecentBearPivot(pivots, currentIndex, candles, rules.confluenceLookback);
     if (!recent) return null;
     pivotForSl = recent;
-    triggerLabel = `CONF ${hSignalLabel(gate, currentAb, hookEnv)}`;
+    triggerLabel = `CONF ${hSignalLabel(rules, gate, currentAb, hookEnv)}`;
   }
 
   if (rules.ltPivotSequence !== 'any') {
@@ -1301,11 +1347,12 @@ function allowedLSignals(rules: RegimeRules): Set<string> {
 // markers on exactly the H3+/L3+ bars a hook is there to reach — so the label comes from the
 // unfiltered trigger instead.
 function hSignalLabel(
+  rules: RegimeRules,
   gate: ResolvedHook | null,
   currentAb: { time: number; signal: string } | null,
   hookEnv: HookBarEnv
 ): string {
-  if (gate) return hookEnv.trigger?.label ?? '';
+  if (gate) return hookEnv.triggerFor(rules)?.label ?? '';
   return currentAb?.signal ?? '';
 }
 
@@ -1374,10 +1421,11 @@ function applyHookGate(
   // A hook the user switched on must never be silently skipped — a missing registry entry
   // means the id was renamed or deleted, and passing the trade through would quietly run a
   // strategy the config no longer describes.
-  if (!gate.hook || !hookEnv.trigger) return null;
+  const trigger = hookEnv.triggerFor(rules);
+  if (!gate.hook || !trigger) return null;
 
   const logs: string[] = [];
-  const ctx = hookEnv.buildCtx({ rules, regime: base.regime, metrics: entryMetrics, logs });
+  const ctx = hookEnv.buildCtx({ rules, regime: base.regime, trigger, metrics: entryMetrics, logs });
   const decision = runEntryHook({
     hook: gate.hook,
     ctx,
@@ -1395,8 +1443,10 @@ function applyHookGate(
 }
 
 /**
- * 'replace' mode — no built-in filters ran at all. Every H/L signal bar in an enabled
- * regime that passed the structure gates reaches the hook, at any counter value.
+ * 'replace' mode — no built-in filters ran at all. Every trigger bar the regime's Entry
+ * Mode qualifies (pivot bars for PIVOT; H/L signal bars at any counter value for H_SIGNAL;
+ * those with a recent same-side pivot for CONFLUENCE) reaches the hook, in an enabled regime
+ * that passed the structure gates.
  *
  * Direction is NOT pre-filtered on the trigger's side: a hook is allowed to fade its trigger
  * (short an H3), and runEntryHook checks the FINAL side against rules.direction.
@@ -1416,16 +1466,17 @@ function evalHook(
   htMarket: string,
   regime: RegimeKey
 ): AutoSignal | null {
-  const trigger = hookEnv.trigger;
+  const trigger = hookEnv.triggerFor(rules);
   if (!trigger) return null;
   if (!resolved.hook) return null; // see applyHookGate — fail closed on an unknown id
 
   // Same pivot the built-in chain would have anchored a pivot-method stop to, so
   // slMethod: 'pivot' keeps working when a hook leaves the stop to the engine.
-  const pivotForSl = resolvePivotForSl(trigger.side, pivots, currentIndex, candles, rules);
+  // A pivot / confluence trigger carries its own pivot — the one evalLong/evalShort anchor to.
+  const pivotForSl = trigger.pivot ?? resolvePivotForSl(trigger.side, pivots, currentIndex, candles, rules);
 
   const logs: string[] = [];
-  const ctx = hookEnv.buildCtx({ rules, regime, metrics: entryMetrics, logs });
+  const ctx = hookEnv.buildCtx({ rules, regime, trigger, metrics: entryMetrics, logs });
   const decision = runEntryHook({
     hook: resolved.hook,
     ctx,
@@ -1448,7 +1499,7 @@ function evalHook(
  * Run just the hook for one bar, for the config UI's live filter-preview strip.
  *
  * Returns undefined when the hook is not consulted at this bar at all — no hook configured,
- * or no H/L signal fired — so the strip can omit the column instead of scoring a
+ * or no trigger for the regime's Entry Mode — so the strip can omit the column instead of scoring a
  * non-decision as a failure. Otherwise true/false is exactly what the real engine's gate
  * would have concluded, because it goes through the same buildEntryHookContext +
  * runEntryHook path.
@@ -1467,11 +1518,14 @@ export function previewEntryHook(
 ): boolean | undefined {
   const resolved = resolveEntryHook(rules);
   if (!resolved) return undefined;
-  const trigger = hookTriggerAt(candles, currentIndex);
+  const pivots = getPivotPointsUpTo(candles, currentIndex, resolveMinPivotGapBars(config));
+  const currentPivot = pivots.find(p => p.time === candles[currentIndex].timestamp) ?? null;
+  const trigger = resolveHookTrigger(
+    rules, hookTriggerAt(candles, currentIndex), currentPivot, pivots, currentIndex, candles
+  );
   if (!trigger) return undefined;
   if (!resolved.hook) return false; // unknown id — fails closed, same as the engine
 
-  const pivots = getPivotPointsUpTo(candles, currentIndex, resolveMinPivotGapBars(config));
   const { ltMarket, htMarket } = resolveLtMarketAt(candles, currentIndex, pivots, config);
   const { bull, bear } = getAlBrooksLegsAt(candles, currentIndex);
   const leg = trigger.side === 'long' ? bull : bear;
@@ -1499,7 +1553,8 @@ export function previewEntryHook(
     logs,
   });
 
-  const pivotForSl = resolvePivotForSl(trigger.side, pivots, currentIndex, candles, rules);
+  // A pivot / confluence trigger carries its own pivot — the one evalLong/evalShort anchor to.
+  const pivotForSl = trigger.pivot ?? resolvePivotForSl(trigger.side, pivots, currentIndex, candles, rules);
 
   return runEntryHook({
     hook: resolved.hook,

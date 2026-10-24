@@ -57,10 +57,10 @@ function doctor(): void {
       'Same — runs before the hook.');
     line(r.direction === 'BOTH', `  direction is ${r.direction}`,
       'A LONG_ONLY regime discards every short your hook returns (and vice versa).');
-    if (resolved.mode === 'gate') {
-      line(r.entryMode !== 'PIVOT', `  entryMode is ${r.entryMode}`,
-        'In Gate mode, Pivot restricts the hook to bars that are BOTH a pivot and an H/L signal.');
-    }
+    console.log(`  entryMode ${r.entryMode} → hook fires on ${
+      r.entryMode === 'PIVOT' ? 'every confirmed pivot bar'
+        : r.entryMode === 'CONFLUENCE' ? 'H/L signal bars with a recent same-side pivot'
+          : 'every H/L signal bar'}`);
   }
 
   // Mode set with no hook behind it — identity, and the commonest "my filter did nothing".

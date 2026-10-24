@@ -455,7 +455,17 @@ The trade's reason string carries the verdict (`res=20074.30 rr=9.0/2 sup=none`)
 
 Every threshold in these is a named constant at the top of its file with the reasoning written beside it, and every one records its intermediate values through `probe()` **before** it decides — so `__hook.stats('cleanBars')` or `__hook.stats('ema50SlopeAtr')` gives you the real distribution on your own instrument to re-tune against. Window sizes (slope lookbacks, leg-sequence length) come from Session Settings, never from the strategy file.
 
-**It fires on every H/L signal, at any count.** This is the headline difference from everything else in the panel. The built-in chain can only ever enter on **H1/H2/L1/L2** — the H1/H2 checkboxes are the whole vocabulary. The signal detector labels H3, H4, L5 and beyond all the same; a hook sees them all. **While a hook is on, those checkboxes stop gating** and your own code does the trigger filtering (`ctx.trigger.count`).
+**When it fires follows the regime's Entry Signal (Trade Settings → Entry mode)** — the same switch the built-in chain enters on, in both Gate and Replace mode:
+
+| Entry mode | The hook fires on | `ctx.trigger` |
+|---|---|---|
+| **Pivot** | every bar a pivot is confirmed on — whether or not it carries an H/L signal | `{ source: 'pivot', label: 'Pivot', count: 0, side, pivot }` (side from the pivot type) |
+| **H/L Signal** | every H/L signal bar, at any count | `{ source: 'signal', label: 'H3', count: 3, side }` |
+| **Confluence** | H/L signal bars with a same-side pivot within the Confluence lookback | as H/L Signal, plus the qualifying `pivot` |
+
+With slMethod **Pivot** and no stop from the hook, a pivot/confluence trigger's own pivot anchors the stop — exactly as the built-in chain does.
+
+**In the H/L modes it fires at any count.** This is the headline difference from everything else in the panel. The built-in chain can only ever enter on **H1/H2/L1/L2** — the H1/H2 checkboxes are the whole vocabulary. The signal detector labels H3, H4, L5 and beyond all the same; a hook sees them all. **While a hook is on, those checkboxes stop gating** and your own code does the trigger filtering (`ctx.trigger.count`).
 
 **Two modes**, chosen per regime:
 
@@ -463,12 +473,12 @@ Every threshold in these is a named constant at the top of its file with the rea
 |---|---|
 | **Off** | Not consulted. This is the default, and selecting a hook without leaving Off changes nothing. |
 | **Gate** | The whole built-in filter chain runs first, SL and TP are computed, and *then* your hook gets the final say — so it can see the engine's own stop and target before deciding whether to veto or override them. |
-| **Replace** | Every filter is skipped. Each H/L signal bar goes straight to your code, behind only the regime's **enabled** switch and its **market-structure** gates. The summary bar says *"Confirmation filters bypassed by hook"* so the chips can't mislead you. |
+| **Replace** | Every filter is skipped. Each trigger bar (per Entry mode, above) goes straight to your code, behind only the regime's **enabled** switch and its **market-structure** gates. The summary bar says *"Confirmation filters bypassed by hook"* so the chips can't mislead you. |
 
 **What your function receives.** Everything the engine already computed at that bar, so nothing has to be recalculated or maintained:
 
 - `ctx.candles` — **the last 1200 candles** ending at the trigger bar, oldest-first. The count is **Session Settings → Instrumentation Lookbacks → Hook Candles** (50–5000). This is why a hook never keeps its own history.
-- `ctx.trigger` — `{ label: 'H3', side: 'long', count: 3, barIndex }`.
+- `ctx.trigger` — `{ source: 'signal', label: 'H3', side: 'long', count: 3, barIndex }`, or for Pivot entry mode `{ source: 'pivot', label: 'Pivot', count: 0, pivot, ... }`. Check `source` before filtering on `count`.
 - `ctx.metrics` — the same instrumentation snapshot the built-in filters gate on and the trade record is stamped from: efficiency ratio, bar overlap, break counts, BRR averages, EMA slopes, pivot sequences.
 - `ctx.pivots`, `ctx.ema21`, `ctx.ema60`, `ctx.atr`, `ctx.ltMarket`, `ctx.htMarket`, `ctx.pivotSeq`, `ctx.regime`.
 - `ctx.legWindow` — bar bounds of the completed breakout leg on the trigger's side.
@@ -490,9 +500,9 @@ Nothing reachable from `ctx` describes a bar after the trigger, so a hook cannot
 
 **If the hook seems never to fire, check HT/LT Structure first.** Both structure gates live in the **Market** step and run *before* the hook — a signal outside that structure never reaches your code at all, and nothing in the trade log shows why. They matter because `bull_trend` / `bear_trend` are **shipped defaults** on the Uptrend/Downtrend regimes: measured over real 5-minute NSE data, the default HT Structure alone silences about **65% of signal bars** (691 of 1960 reach the hook). Set both to **Any** if the hook should judge every signal itself. The card warns when either is filtered.
 
-Two smaller things in the same vein: a regime that is **disabled** never runs its hook, and the regime's **direction** still wins — a `LONG_ONLY` regime discards a hook's short. Entry mode is *not* a factor in Replace mode (it is ignored entirely); in Gate mode, `Pivot` narrows the hook to bars that are both a pivot and an H/L signal.
+Two smaller things in the same vein: a regime that is **disabled** never runs its hook, and the regime's **direction** still wins — a `LONG_ONLY` regime discards a hook's short. Entry mode decides the trigger bars in both modes (see the table above).
 
-The **Live Preview Strip** shows a hook column, but only on bars that actually carry an H/L signal. Note that each previewed bar is evaluated with fresh `ctx.state`, so a hook built around a cooldown will preview differently from how it behaves inside a real run.
+The **Live Preview Strip** shows a hook column, but only on the regime's trigger bars (pivots in Pivot mode, H/L signals otherwise). Note that each previewed bar is evaluated with fresh `ctx.state`, so a hook built around a cooldown will preview differently from how it behaves inside a real run.
 
 **Debugging a hook — the "Run on main thread" switch.** **Run Full Backtest** normally runs the simulation in a **Web Worker**, so a breakpoint inside your hook executes on the worker thread and never pauses the main-thread devtools. That is the "my breakpoint never hits" symptom, and it is why there is a switch.
 
