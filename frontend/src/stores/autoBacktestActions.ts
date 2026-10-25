@@ -450,7 +450,8 @@ export function createAutoBacktestActions(set: StoreSet, get: StoreGet) {
         }
         if (exit) {
           const label = exit.reason === 'REVERSAL' ? 'Reversal Exit'
-            : exit.reason === 'OPP_SIGNAL' ? 'Opposite-Signal Exit' : 'Exit Hook';
+            : exit.reason === 'OPP_SIGNAL' ? 'Opposite-Signal Exit'
+            : exit.reason === 'TRENDLINE_BREAK' ? 'Trendline-Break Exit' : 'Exit Hook';
           useNotificationStore.getState().notify(`${label}: ${exit.detail}`, 'warning');
           get().closeIndependentPosition(id, exit.reason, exit.fillPrice ?? close);
           continue;
@@ -621,7 +622,8 @@ export function createAutoBacktestActions(set: StoreSet, get: StoreGet) {
 
       const isLong = position.quantity > 0;
       const label = exit.reason === 'REVERSAL' ? 'Reversal Exit'
-        : exit.reason === 'OPP_SIGNAL' ? 'Opposite-Signal Exit' : 'Exit Hook';
+        : exit.reason === 'OPP_SIGNAL' ? 'Opposite-Signal Exit'
+            : exit.reason === 'TRENDLINE_BREAK' ? 'Trendline-Break Exit' : 'Exit Hook';
       useNotificationStore.getState().notify(`${label}: ${exit.detail}`, 'warning');
       get().executeTrade(
         isLong ? 'SELL' : 'BUY',

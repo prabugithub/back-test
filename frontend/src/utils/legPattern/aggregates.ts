@@ -99,6 +99,14 @@ export function computeAggregates(
     goodLegPct: scores ? goodLegPct(window, scores, legStrength) : undefined,
     structureBroad: window.structure?.broad,
     structureSub: window.structure?.sub,
+    tlSupDist: window.trendlines?.supDist,
+    tlResDist: window.trendlines?.resDist,
+    tlSupTouches: window.trendlines?.supTouches,
+    tlResTouches: window.trendlines?.resTouches,
+    tlSupSlope: window.trendlines?.supSlope,
+    tlResSlope: window.trendlines?.resSlope,
+    tlStrength: window.trendlines?.strength,
+    tlChannel: window.trendlines?.channel,
   };
 }
 

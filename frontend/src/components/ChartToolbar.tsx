@@ -22,9 +22,9 @@ import { useSessionStore } from '../stores/sessionStore';
 import { calculatePivotPoints } from '../utils/indicators';
 import { analyzeMarketStructure } from '../utils/pivotAnalysis';
 import { resolveMinPivotGapBars } from '../utils/autoBacktestEngine';
-import { describeStructure, getStructureAt } from '../utils/marketStructure';
+import { describeStructure, getStructureAt, getTrendStrengthAt } from '../utils/marketStructure';
 import { LayoutGrid } from 'lucide-react';import { type DrawingTool } from '../types';
-export type Indicator = 'none' | 'sma21' | 'sma60' | 'ema21' | 'ema60' | 'pivotPoints' | 'alBrooks' | 'marketStructure';
+export type Indicator = 'none' | 'sma21' | 'sma60' | 'ema21' | 'ema60' | 'pivotPoints' | 'alBrooks' | 'marketStructure' | 'trendlines';
 
 interface ChartToolbarProps {
   activeTool: DrawingTool;
@@ -86,6 +86,10 @@ export function ChartToolbar({
   const pivotStructure = activeIndicators.includes('marketStructure')
     ? getStructureAt(candles, currentIndex, autoBacktestConfig)
     : null;
+  // Trendline trend-strength readout — only while the Trendlines layer is on.
+  const trend = activeIndicators.includes('trendlines')
+    ? getTrendStrengthAt(candles, currentIndex, autoBacktestConfig)
+    : null;
 
   // Calculate market structure for display
   const visibleCandles = candles.slice(0, currentIndex + 1);
@@ -120,6 +124,7 @@ export function ChartToolbar({
     { id: 'pivotPoints', label: 'Pivot Points', color: '#6A1B9A' },
     { id: 'alBrooks', label: 'Al Brooks H/L', color: '#00BCD4' },
     { id: 'marketStructure', label: 'Market Structure (exp.)', color: '#2563EB' },
+    { id: 'trendlines', label: 'Trendlines (pivot)', color: '#DC2626' },
   ];
 
   return (
@@ -279,6 +284,22 @@ export function ChartToolbar({
             title={`Pivot structure (experimental) — ${pivotStructure.segmentPivots.length} pivots in the current segment`}
           >
             <span>PS: {describeStructure(pivotStructure)}</span>
+          </div>
+        )}
+        {trend && (
+          <div
+            className={`px-2 py-0.5 rounded border text-[10px] font-bold flex items-center gap-1 ${
+              trend.dir === 'up' ? 'text-green-600 bg-green-50 border-green-200'
+                : trend.dir === 'down' ? 'text-red-600 bg-red-50 border-red-200'
+                : 'text-gray-600 bg-gray-50 border-gray-200'
+            }`}
+            title={`Trendline trend strength (0–1): steepness ${trend.slopeNorm.toFixed(2)} (net swings gained per swing cycle, capped at 1) × touches ${Math.min(trend.touches, 4)}/4${trend.channel === 'converging' ? ', cut 30% for a converging channel' : ''}. Extension from the line: ${trend.extension !== null ? `${trend.extension.toFixed(2)} median swings` : '—'}. Channel: ${trend.channel ?? '—'}.`}
+          >
+            <span>
+              TL: {trend.dir === 'up' ? '▲' : trend.dir === 'down' ? '▼' : '◆'} {trend.strength.toFixed(2)}
+              {trend.touches > 0 && ` · ${trend.touches}t`}
+              {trend.channel && ` · ${trend.channel === 'parallel' ? 'par' : trend.channel === 'converging' ? 'conv' : 'exp'}`}
+            </span>
           </div>
         )}
 

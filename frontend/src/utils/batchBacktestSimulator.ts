@@ -207,6 +207,11 @@ export function runBatchSimulation(
       trade.ema20GapBarRatioAtEntry = entryMetrics?.ema20GapBarRatio ?? emaInteractionFallback.gapBarRatio;
       trade.ema20CloseAboveRatioAtEntry = entryMetrics?.ema20CloseAboveRatio ?? emaInteractionFallback.closeAboveRatio;
       trade.ema20InteractionWindowAtEntry = entryMetrics?.ema20InteractionWindow ?? emaInteractionFallback.barsCompared;
+      trade.tlStrengthAtEntry = entryMetrics?.tlStrength;
+      trade.tlSupDistAtEntry = entryMetrics?.tlSupDist;
+      trade.tlResDistAtEntry = entryMetrics?.tlResDist;
+      trade.tlChannelAtEntry = entryMetrics?.tlChannel;
+      trade.tlSetupAtEntry = entryMetrics?.tlSetup;
       // Recent-price-action context: last N Al Brooks impulse legs + the pullbacks
       // between them, contiguous back from the entry bar (same H/L machinery, no pivots).
       const legSequence = buildLegSequence(

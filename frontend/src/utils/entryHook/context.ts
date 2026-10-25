@@ -11,7 +11,7 @@ import type { Candle, LegSegment } from '../../types';
 import type { PivotPoint } from '../indicators';
 import { getAlBrooksRunUpTo } from '../indicators';
 import { buildLegSequence } from '../legSequence';
-import { getStructureAt, structureLegs, type StructureState } from '../marketStructure';
+import { getStructureAt, getTrendlinesAt, structureLegs, type StructureState } from '../marketStructure';
 import { buildLegWindow, type LegWindow as LegPatternWindow } from '../legPattern';
 import type {
   AutoBacktestConfig,
@@ -166,6 +166,10 @@ export function buildEntryHookContext(args: BuildHookContextArgs): EntryHookCont
     structureLegs() {
       if (structureLegsCache === null) structureLegsCache = structureLegs(candles, currentIndex, structureCache === undefined ? (structureCache = getStructureAt(candles, currentIndex, config)) : structureCache);
       return structureLegsCache;
+    },
+
+    trendlines() {
+      return getTrendlinesAt(candles, currentIndex, config);
     },
 
     rules: args.rules,

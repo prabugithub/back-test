@@ -233,7 +233,14 @@ export type WindowField =
   | 'avgBrr' | 'avgDirClv' | 'maxGoodRun' | 'goodLegPct'
   // Categorical — pivot market structure at the current bar (utils/marketStructure),
   // carried as BROAD_CODE / SUB_CODE numbers and matched with `in` / `neq`.
-  | 'structureBroad' | 'structureSub';
+  | 'structureBroad' | 'structureSub'
+  // Pivot trendlines at the current bar (utils/marketStructure/trendlines). Distances and
+  // slopes in median swings; tlChannel is categorical (TL_CHANNEL_CODE). Append-only.
+  | 'tlSupDist' | 'tlResDist' | 'tlSupTouches' | 'tlResTouches'
+  | 'tlSupSlope' | 'tlResSlope' | 'tlStrength' | 'tlChannel';
+
+/** Persisted codes for the tlChannel clause — append-only. */
+export const TL_CHANNEL_CODE = { parallel: 1, converging: 2, expanding: 3 } as const;
 
 export type WindowOp =
   | 'between' | 'in' | 'eq' | 'neq' | 'gte' | 'gt' | 'lte' | 'lt' | 'is-null' | 'not-null';
@@ -296,6 +303,27 @@ export const WINDOW_FIELDS: readonly WindowFieldDef[] = [
   { key: 'structureSub', label: 'Structure sub-regime', step: 1, int: true, uiMin: 1, uiMax: 9,
     tooltip: 'The 9-regime taxonomy read of the current structure segment. Unmeasurable (fails) while the segment is still forming.',
     options: (Object.keys(SUB_CODE) as StructureSub[]).map(k => ({ value: SUB_CODE[k], label: STRUCTURE_SUB_LABELS[k] })) },
+  { key: 'tlSupDist', label: 'TL support distance', step: 0.1, int: false, uiMin: -2, uiMax: 5,
+    tooltip: 'Close above the best support trendline, in median swings (Session Settings → Trendlines). 0 = on the line, negative = below it. Unmeasurable (fails) without a support line.' },
+  { key: 'tlResDist', label: 'TL resistance distance', step: 0.1, int: false, uiMin: -2, uiMax: 5,
+    tooltip: 'Close below the best resistance trendline, in median swings — the room left to the line. Negative = above it.' },
+  { key: 'tlSupTouches', label: 'TL support touches', step: 1, int: true, uiMin: 2, uiMax: 8,
+    tooltip: 'Swing lows on the best support trendline. 3+ = a confirmed line.' },
+  { key: 'tlResTouches', label: 'TL resistance touches', step: 1, int: true, uiMin: 2, uiMax: 8,
+    tooltip: 'Swing highs on the best resistance trendline. 3+ = a confirmed line.' },
+  { key: 'tlSupSlope', label: 'TL support slope', step: 0.05, int: false, uiMin: -2, uiMax: 2,
+    tooltip: 'Support line steepness: net progress per swing cycle (one up + one down swing), in median swings. + rising, − falling. ~0.3–0.5 = a steady trend, 1+ = very steep (often climactic).' },
+  { key: 'tlResSlope', label: 'TL resistance slope', step: 0.05, int: false, uiMin: -2, uiMax: 2,
+    tooltip: 'Resistance line steepness, same units as the support slope.' },
+  { key: 'tlStrength', label: 'TL trend strength', step: 0.05, int: false, uiMin: -1, uiMax: 1,
+    tooltip: 'Signed trend strength from the with-trend line: min(steepness, 1) × min(touches, 4)/4, cut 30% when the channel converges. + up, − down, 0 flat.' },
+  { key: 'tlChannel', label: 'TL channel', step: 1, int: true, uiMin: 1, uiMax: 3,
+    tooltip: 'Support vs resistance trendline width since their common start: parallel, converging (wedge / triangle — trend weakening) or expanding.',
+    options: [
+      { value: TL_CHANNEL_CODE.parallel, label: 'Parallel' },
+      { value: TL_CHANNEL_CODE.converging, label: 'Converging' },
+      { value: TL_CHANNEL_CODE.expanding, label: 'Expanding' },
+    ] },
 ] as const;
 
 export const WINDOW_FIELD_BY_KEY: Readonly<Record<WindowField, WindowFieldDef>> =

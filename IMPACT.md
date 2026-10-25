@@ -497,6 +497,27 @@ A pivot-only classifier: Up / Down / Range plus a 9-regime sub-type. It runs as 
   - `npx tsx scripts/structureVerify.ts`: segments, distribution, look-ahead check.
   - `npx tsx scripts/structureSmoke.ts`: gate, regime source, leg-pattern clause and hook context on cached candles (9 assertions).
   - With defaults, `backtest:eval` output is byte-identical to the pre-change build.
+- **Trendlines (`trendlines.ts`):** `findTrendlinesAt(candles, index, gap, params)` / `getTrendlinesAt(candles, index, config)`. Builds swing points from `getPivotPointsUpTo` (in-place alternation equivalent to `mergePoint`). They are re-anchored to the true swing extreme and repaired into a zigzag: each point is searched from the previous point's re-anchored bar, and the previous point moves forward if price went further its way first. This differs from the structure timeline's points, which keep the raw pivot sequence. `raiseDegree` lifts them to `trendlineDegree`. Each side then pair-enumerates same-type points at the highest degree that yields a line, rejects broken lines, and scores and dedups the rest. It is independent of the structure timeline.
+  - **Degree look-ahead:** a degree-up point needs the NEXT same-type point. Only pivots ≤ `index` are read, so the newest point waits. The base tail is `windowPivots × 3^(degree−1)` points, which depends on `index` only.
+  - Cached per `(candles array, params key, index)` in a `WeakMap`. The cost is O(pairs × bars) per bar, so hooks call it lazily (`ctx.trendlines()`).
+  - Config: 6 `trendline*` fields on `AutoBacktestConfig`, with defaults and clamps in `TRENDLINE_PARAM_DEFS`. The same table drives Session Settings → Trendlines (pivot).
+  - Consumers: the `'trendlines'` `Indicator` (`AdvancedChart.memoizedTrendlines` → `components/chart/drawTrendlines.ts`, read-only canvas) and `ctx.trendlines()` on both hook contexts. **Adding a member to `EntryHookContext`/`ExitHookContext` breaks any hand-built context mock.**
+  - `mergePoint` moved from `timeline.ts` to `swings.ts` (used by timeline). `trendlines.ts` and `stats.ts` mirror its semantics. Keep all three in step.
+  - **`trendStrength` / `findTrendlineSetup`** (pure, in `trendlines.ts`; config wrappers `getTrendStrengthAt` / `getTrendlineSetupAt` in `index.ts`). Setups read the cached states of the last `bars` bars, so a run computes each bar's state once. Every line carries its own `tolerance` / `medianSwing`, because each side may fall back to a different degree. Use the line's own values, never the state's.
+  - **Engine wiring (`autoBacktestEngine.ts`):**
+    - New optional `RegimeRules` fields: `trendlineSetup` / `trendlineSetupBars` / `trendlineSetupZone`, `slMethod: 'trendline'`, `targetMode`, `exitOnTrendlineBreak`, `exitTrailTrendline` / `exitTrailTrendlineBufferPoints`. All undefined = off. With them off, `backtest:eval` output is byte-identical.
+    - The setup gate sits beside the pivot-structure gate in `evaluateAutoSignals`, lazy and cached per (kind, bars, zone). It also gates 'replace'-mode hooks, whose final side must match.
+    - `riskExtras` supplies the trendline stop and target to `evalLong` / `evalShort` and `hookDefaultsFor`. It returns null to fall back to `slMethod` / `targetRR`.
+    - `slLong` / `slShort` (`stopLoss.ts`) take an optional `tlStop`.
+    - `stampTrendline` adds `tl*` fields to `entryMetrics` on produced signals only.
+  - **Exit:**
+    - `AutoExitReason` / `ExitReason` / `PendingExit.reason` gain `'TRENDLINE_BREAK'`. Labels live in `tradeAnalysis.exitReasonBadge`, `EntryMetricsDashboard` and both `autoBacktestActions` toasts. A new reason must be added to all of them.
+    - `evaluateTrailStop` now also takes `entryBarIndex` (the Pick changed). Both trails produce candidates, and the tighter one wins under the same ratchet.
+    - `withTradeLine` uses the state at the entry bar, or at the prior bar if tighter. No new position field.
+  - **Trade fields:** `tl*AtEntry` on `Trade` (`types/index.ts`), stamped in `batchBacktestSimulator` and `entryInstrumentation`. These are persisted to Firestore with the trade.
+  - **Leg pattern:** `WindowField` gains `tl*`, and `TL_CHANNEL_CODE` is **append-only (persisted)**. `buildLegWindow` fills `window.trendlines` whenever `structureConfig` is given, which costs one cached trendline state per window. `WindowClauseEditor` lists them.
+  - **UI:** `RegimeWorkflowSteps` (Entry: `TrendlineSetupControl`; Risk: Trendline SL; Exit: Target mode and Trendline Exits card), `StrategySummaryBar` (SL label, filter count), `ChartToolbar` TL badge. Preset `'Trendline (structure-aware)'` (base `trendlinePaRules`).
+  - Tests: `npm run backtest:trendline` (`scripts/trendlineSmoke.ts`).
 - **Statistics (`stats.ts`, `StructureStatsPage.tsx`, the `'structureStats'` page):** a read-only consumer of `getStructureTimeline`. It groups the timeline into episodes by `segmentId`, not by `getStructureSegments` runs, which split on a sub or attempt change.
   - It rebuilds each episode's **uncapped** swing points by mirroring `mergePoint` without the `maxPivots` cap, taking each new last point when the `segmentPivots` reference changes. **If `mergePoint` semantics or the "replace the array on change" contract change, update `merge()` in `stats.ts`.**
   - The anchor is the first state's `segmentPivots[0]`. A trend's span ends at the next range's anchor (its extreme), because `newSeg('range', …, points.slice(anchor))` anchors there.

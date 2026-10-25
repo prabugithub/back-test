@@ -34,6 +34,7 @@ export function exitReasonBadge(reason: ExitReason): { cls: string; label: strin
     case 'TIME_OVER': return { cls: 'bg-orange-100 text-orange-700', label: 'TIME OVER' };
     case 'REVERSAL': return { cls: 'bg-amber-100 text-amber-700', label: 'REVERSAL' };
     case 'OPP_SIGNAL': return { cls: 'bg-purple-100 text-purple-700', label: 'OPP SIGNAL' };
+    case 'TRENDLINE_BREAK': return { cls: 'bg-rose-100 text-rose-700', label: 'TL BREAK' };
     case 'EXIT_HOOK': return { cls: 'bg-sky-100 text-sky-700', label: 'EXIT HOOK' };
     // Retired mechanism — kept so trades booked before the custom exit hook replaced it
     // still render with their own badge instead of falling through to the grey default.

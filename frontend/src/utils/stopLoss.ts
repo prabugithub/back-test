@@ -45,14 +45,18 @@ export function findRecentBearPivot(pivots: PivotPoint[], idx: number, candles: 
   return null;
 }
 
-export function slLong(rules: RegimeRules, entry: number, pivot: PivotPoint | null, atr: number): number {
-  if (rules.slMethod === 'pivot' && pivot) return entry - pivot.slDistance;
+/** `tlStop` is the trendline setup's stop price (slMethod 'trendline'); without one a
+ *  trendline stop falls back to the pivot stop. */
+export function slLong(rules: RegimeRules, entry: number, pivot: PivotPoint | null, atr: number, tlStop?: number | null): number {
+  if (rules.slMethod === 'trendline' && tlStop != null) return tlStop;
+  if ((rules.slMethod === 'pivot' || rules.slMethod === 'trendline') && pivot) return entry - pivot.slDistance;
   if (rules.slMethod === 'atr' && atr > 0) return entry - atr * rules.slAtrMultiplier;
   return entry - rules.slFixedPoints;
 }
 
-export function slShort(rules: RegimeRules, entry: number, pivot: PivotPoint | null, atr: number): number {
-  if (rules.slMethod === 'pivot' && pivot) return entry + pivot.slDistance;
+export function slShort(rules: RegimeRules, entry: number, pivot: PivotPoint | null, atr: number, tlStop?: number | null): number {
+  if (rules.slMethod === 'trendline' && tlStop != null) return tlStop;
+  if ((rules.slMethod === 'pivot' || rules.slMethod === 'trendline') && pivot) return entry + pivot.slDistance;
   if (rules.slMethod === 'atr' && atr > 0) return entry + atr * rules.slAtrMultiplier;
   return entry + rules.slFixedPoints;
 }

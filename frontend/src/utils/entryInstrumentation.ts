@@ -80,6 +80,12 @@ export function buildEntryInstrumentation(
       pivotHighSeqAtEntry: pivotHighSeq.length ? pivotHighSeq.join('-') : undefined,
       pivotLowSeqAtEntry: pivotLowSeq.length ? pivotLowSeq.join('-') : undefined,
       pivotGapAvgBarsAtEntry: entryMetricsOverride?.pivotGapAvgBars ?? fallback?.pivotGapAvgBars,
+      // Trendline read — only an auto signal carries it (stamped at signal time).
+      tlStrengthAtEntry: entryMetricsOverride?.tlStrength,
+      tlSupDistAtEntry: entryMetricsOverride?.tlSupDist,
+      tlResDistAtEntry: entryMetricsOverride?.tlResDist,
+      tlChannelAtEntry: entryMetricsOverride?.tlChannel,
+      tlSetupAtEntry: entryMetricsOverride?.tlSetup,
       // Session-open context (open bar + gap up/down + bars into the session).
       // Deterministic from (candles, index) alone, so there is nothing for the
       // auto engine to override.

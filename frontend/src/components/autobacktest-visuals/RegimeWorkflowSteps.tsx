@@ -211,6 +211,50 @@ function PivotStructureControl({ rules, up }: Pick<RegimeStepProps, 'rules' | 'u
   );
 }
 
+// Trendline setup (utils/marketStructure/trendlines): a location condition on top of the
+// Entry Signal trigger — the trigger must fire on the side the setup allows.
+function TrendlineSetupControl({ rules, up }: Pick<RegimeStepProps, 'rules' | 'up'>) {
+  const setup = rules.trendlineSetup ?? 'none';
+  return (
+    <div className="space-y-2">
+      <ModePickerControl
+        label="Trendline Setup"
+        tooltip="Where the Entry Signal must fire relative to the pivot trendlines (Indicators → Trendlines; bounds in Session Settings → Trendlines). Bounce = a with-trend line (rising support for longs, falling resistance for shorts; flat allowed) was touched in the last N bars and still holds — trend pullbacks. Break & retest = a line was closed through, price came back to it and held — trend turning. Failed breakout = a close through a line, then back inside — fade it; for ranges. Pick per regime."
+        mode={setup}
+        offValue="none"
+        gridCols={4}
+        modeOptions={[
+          { value: 'none', label: 'Off' },
+          { value: 'bounce', label: 'Bounce' },
+          { value: 'break_retest', label: 'Break & retest' },
+          { value: 'failed_break', label: 'Failed breakout' },
+        ]}
+        onModeChange={v => up({ trendlineSetup: v as RegimeRules['trendlineSetup'] })}
+      />
+      {setup !== 'none' && (
+        <div className="flex items-center gap-3 px-1">
+          <label className="flex items-center gap-1" title="How many bars back the touch / break / retest may have happened.">
+            <span className="text-[10px] text-gray-500">Within bars:</span>
+            <input
+              type="number" min={1} max={50} value={rules.trendlineSetupBars ?? 6}
+              onChange={e => up({ trendlineSetupBars: Number(e.target.value) })}
+              className="w-12 px-1 py-0.5 text-[10px] border rounded text-center"
+            />
+          </label>
+          <label className="flex items-center gap-1" title="Touch band around the line, as a multiple of the line's own tolerance (Session Settings → Trendlines → Touch tolerance).">
+            <span className="text-[10px] text-gray-500">Zone ×:</span>
+            <input
+              type="number" min={0.25} max={5} step={0.25} value={rules.trendlineSetupZone ?? 1}
+              onChange={e => up({ trendlineSetupZone: Number(e.target.value) })}
+              className="w-12 px-1 py-0.5 text-[10px] border rounded text-center"
+            />
+          </label>
+        </div>
+      )}
+    </div>
+  );
+}
+
 // ─── Entry ──────────────────────────────────────────────────────────────────
 // How and where a signal fires: entry mode, H/L signal toggles, MA position, single most-recent pivot sequence.
 export function EntryStep({ rules, up, isShort, isBoth }: RegimeStepProps) {
@@ -259,6 +303,8 @@ export function EntryStep({ rules, up, isShort, isBoth }: RegimeStepProps) {
           )}
         </div>
       </CardShell>
+
+      <TrendlineSetupControl rules={rules} up={up} />
 
       <div className="grid grid-cols-1 @3xl:grid-cols-2 gap-2">
         <ModePickerControl
@@ -741,15 +787,31 @@ export function ExitStep({ rules, up, meta, isShort, config, onOpenSessionSettin
   const opp2 = isShort ? 'H2' : 'L2';
   return (
     <div className="space-y-3">
-      <CardShell title="Target Risk:Reward">
-        <div className="flex items-center gap-2">
+      <CardShell title="Target">
+        <div className="flex items-center gap-2 flex-wrap">
+          <SegmentedControl
+            fullWidth={false}
+            value={rules.targetMode ?? 'rr'}
+            onChange={m => up({ targetMode: m })}
+            options={[
+              { value: 'rr' as const, label: 'Risk:Reward' },
+              { value: 'trendline' as const, label: 'Opposite trendline' },
+            ]}
+          />
           <input
             type="number" step={0.5} min={0.5} max={10} value={rules.targetRR}
             onChange={e => up({ targetRR: Number(e.target.value) })}
             className="w-20 px-2 py-1.5 text-sm border rounded-lg text-center font-semibold text-indigo-700"
           />
-          <span className="text-sm text-gray-400">× risk</span>
+          <span className="text-sm text-gray-400" title="With Opposite trendline, this RR is the fallback when there is no opposite line beyond entry.">
+            × risk{rules.targetMode === 'trendline' ? ' (fallback)' : ''}
+          </span>
         </div>
+        {rules.targetMode === 'trendline' && (
+          <p className="text-[10px] text-gray-400 mt-1">
+            Target = the opposite trendline (resistance for longs, support for shorts) one tolerance short of it, at entry.
+          </p>
+        )}
       </CardShell>
 
       <p
@@ -832,6 +894,35 @@ export function ExitStep({ rules, up, meta, isShort, config, onOpenSessionSettin
               onChange={e => up({ exitTrailPivotBufferPoints: Number(e.target.value) })}
               className="w-12 px-1 py-0.5 text-[10px] border rounded text-center"
             />
+          </div>
+        </div>
+      </CardShell>
+
+      <CardShell title="Trendline Exits">
+        <div className="space-y-2">
+          <label className="flex items-center gap-2 cursor-pointer select-none"
+            title="Exit at bar close when the close goes beyond the with-trade trendline (support for longs, resistance for shorts — the line at entry, or the current one if tighter) by more than its tolerance. Exit reason TRENDLINE_BREAK.">
+            <ToggleSwitch checked={rules.exitOnTrendlineBreak ?? false} onChange={v => up({ exitOnTrendlineBreak: v })} activeColor={meta.activeBg} />
+            <span className={`text-xs font-semibold ${rules.exitOnTrendlineBreak ? meta.color : 'text-gray-400'}`}>
+              Exit on line break {rules.exitOnTrendlineBreak ? 'On' : 'Off'}
+            </span>
+          </label>
+          <div className="flex items-center justify-between gap-2 flex-wrap">
+            <label className="flex items-center gap-2 cursor-pointer select-none"
+              title="Ratchet the SL along the with-trade trendline (as known at the prior bar), one line-tolerance plus the buffer beyond it. Never loosens; with the pivot trail also on, the tighter stop wins.">
+              <ToggleSwitch checked={rules.exitTrailTrendline ?? false} onChange={v => up({ exitTrailTrendline: v })} activeColor={meta.activeBg} />
+              <span className={`text-xs font-semibold ${rules.exitTrailTrendline ? meta.color : 'text-gray-400'}`}>
+                Trail along line {rules.exitTrailTrendline ? 'On' : 'Off'}
+              </span>
+            </label>
+            <div className="flex items-center gap-1">
+              <span className="text-[10px] text-gray-500">Buffer pts:</span>
+              <input
+                type="number" min={0} step={0.5} value={rules.exitTrailTrendlineBufferPoints ?? 2}
+                onChange={e => up({ exitTrailTrendlineBufferPoints: Number(e.target.value) })}
+                className="w-12 px-1 py-0.5 text-[10px] border rounded text-center"
+              />
+            </div>
           </div>
         </div>
       </CardShell>
@@ -965,8 +1056,14 @@ export function RiskStep({ rules, up, config, onOpenSessionSettings }: RegimeSte
               { value: 'pivot' as const, label: 'Pivot SL', activeClassName: 'bg-orange-600 text-white border-orange-600' },
               { value: 'atr' as const, label: 'ATR SL', activeClassName: 'bg-orange-600 text-white border-orange-600' },
               { value: 'fixed' as const, label: 'Fixed SL', activeClassName: 'bg-orange-600 text-white border-orange-600' },
+              { value: 'trendline' as const, label: 'Trendline SL', activeClassName: 'bg-orange-600 text-white border-orange-600' },
             ]}
           />
+          {rules.slMethod === 'trendline' && (
+            <span className="text-[10px] text-gray-500" title="Bounce / retest: one line-tolerance beyond the line. Failed breakout: one tolerance beyond the failed excursion's extreme. Without a Trendline Setup on this regime, falls back to the Pivot SL.">
+              beyond the setup's line{rules.trendlineSetup && rules.trendlineSetup !== 'none' ? '' : ' (no setup → Pivot SL)'}
+            </span>
+          )}
           {rules.slMethod === 'atr' && (
             <div className="flex items-center gap-1">
               <span className="text-[10px] text-gray-500">×</span>

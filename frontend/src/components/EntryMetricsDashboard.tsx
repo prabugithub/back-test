@@ -61,12 +61,13 @@ function atrBucket(d: number): string {
 
 // LEG_DECAY is retired (see ExitReason in types/index.ts) but stays in both maps — trades
 // booked before the custom exit hook replaced it are still in the log.
-const EXIT_ORDER = ['TP', 'SL', 'REVERSAL', 'OPP_SIGNAL', 'EXIT_HOOK', 'LEG_DECAY', 'TIME_OVER', 'MANUAL'];
+const EXIT_ORDER = ['TP', 'SL', 'REVERSAL', 'OPP_SIGNAL', 'TRENDLINE_BREAK', 'EXIT_HOOK', 'LEG_DECAY', 'TIME_OVER', 'MANUAL'];
 const EXIT_LABEL: Record<string, string> = {
   TP: 'TP Hit',
   SL: 'SL Hit',
   REVERSAL: 'Reversal',
   OPP_SIGNAL: 'Opp Signal',
+  TRENDLINE_BREAK: 'TL Break',
   EXIT_HOOK: 'Exit Hook',
   LEG_DECAY: 'Leg Decay',
   TIME_OVER: 'Time Out',

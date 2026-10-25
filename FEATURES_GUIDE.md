@@ -122,6 +122,71 @@ Each pivot marker shows:
 
 The layer is read-only: it draws on the canvas and never touches the store, markers or trades. The classifier is described under **Pivot Market Structure** in section 6.
 
+### Trendlines (pivot) — major sloped support / resistance
+
+Toggle it under Indicators → **Trendlines (pivot)**. It draws the major trendlines as of the current replay bar: **red = resistance** (through swing highs) and **green = support** (through swing lows).
+- The best line per side is solid. Other kept lines are dashed.
+- Dots mark the swing points touching the line. The label at the right end reads `R·3t` / `S·4t` (side · touches).
+- Lines update bar by bar. A line disappears as soon as a close breaks through it.
+
+**How a line is chosen** (code: `utils/marketStructure/trendlines.ts`, pivots only, no ATR/EMA):
+1. Swing points come from confirmed pivots. Each one is re-anchored to the swing's true high/low, and the sequence is repaired into a proper zigzag.
+   - The pivot detector can skip a turn. For example, a gap-down low followed by a rally fires the next high pivot with no low in between.
+   - The repair puts that missed extreme back as a swing point. It is often the major low or high.
+2. They are filtered to the chosen *Swing degree*, so lines are drawn through major swings, not every wiggle. A degree-2 high is a swing high above the swing highs on either side of it, and a degree-2 low is a swing low below the lows on either side of it. Degree 3 repeats that filter on the degree-2 points, and so on. The newest point of each type only counts once the next one has printed (look-ahead safe). The last *Window* points at that degree are used.
+   - The default is degree 2. Lower timeframes need a higher degree for the same multi-day lines: 2 on 15m, 3 on 5m. On the Nifty 29 Jan 2024 15m chart, degree 2 finds the support through the 8, 10 and 18 Jan lows (the 24 Jan wick dips just below it). Degree 3 finds the same line on 5m. Degree 1 gives short-term lines through every swing.
+   - If a side has no valid line at the chosen degree, it falls back one degree at a time. A clean trend has no degree-2 lows, so its support comes from the pullback lows instead of disappearing.
+3. Every pair of swing highs (lows) at that degree is a candidate resistance (support) line. A candidate is rejected if the current close is beyond it, or if more than *Max closes through* closes crossed it since its first touch. Beyond means past the touch tolerance, which is *Touch tolerance* × the median swing size at that degree.
+4. Survivors need *Min touches* swing points (at that degree) within tolerance. They are scored on touches (squared, so a confirming third touch outranks a longer two-point line), span, the size of the reaction off each touch, recency of the last touch, and wick pierces (penalty).
+5. Lines whose price at the current bar lies within tolerance of a better line are merged. The top *Lines per side* are kept.
+
+**Settings:** Session Settings → **Trendlines (pivot)**: Swing degree, Window (pivots), Touch tolerance, Max closes through, Min touches, Lines per side.
+
+**Custom entry/exit hooks:** `ctx.trendlines()` returns `{ medianSwing, tolerance, resistance[], support[] }`. Each line has these fields, and the result is look-ahead safe:
+- `degree`: the degree the line was built at;
+- slope, intercept and `priceNow`;
+- touches and touch points, violations, pierces, reaction, span and score;
+- `medianSwing`, `tolerance` and `slopeNorm`;
+- `distance` = (close − priceNow) ÷ median swing.
+
+**Trend strength** (toolbar badge `TL: ▲ 0.45 · 3t · par` while the Trendlines layer is on):
+- **Direction:** read from the with-trend line, meaning rising support (up), falling resistance (down) or neither (flat). A line is flat when it moves less than its own tolerance across its span.
+- **Steepness** (`slopeNorm`): net progress per swing cycle (one up and one down swing), in median swings. About 0.3–0.5 is a steady trend; 1+ is very steep, often climactic.
+- **Strength 0–1:** min(steepness, 1) × min(touches, 4)/4, cut by 30% when the channel converges.
+- **Channel:** best support vs best resistance width since their common start.
+  - *parallel*: the trend is healthy.
+  - *converging*: a wedge or triangle, so the trend is running out of room.
+  - *expanding*: the trend is accelerating or getting volatile.
+- **Extension:** how far the close has run from the with-trend line, in median swings. A large value means price is overextended and a pullback to the line is likely.
+
+**Trading with trendlines (auto-backtest, per regime, price action only):**
+- **Entry → Trendline Setup:** a location condition. The regime's Entry Signal (Pivot, H/L or Confluence) is still the trigger, but it must fire on the side the setup allows. *Within bars* (default 6) and *Zone ×* (default 1, × the line's touch tolerance) bound it.
+  - **Bounce** is for trend pullbacks. A with-trend line was touched (low within the zone) in the window and still holds: rising or flat support for longs, falling or flat resistance for shorts. A long cannot bounce off falling support.
+  - **Break & retest** is for a trend turning. A line from a recent state was closed through by more than its tolerance. Then a later bar came back to it, and every close since held on the new side.
+  - **Failed breakout** is for ranges. A close went through a line, then price closed back inside and is still inside, and the trade fades it. A false break below support gives a long; above resistance gives a short.
+  - Pick the setup by market structure (each regime has its own): bounce in Uptrend/Downtrend, failed breakout in Range, break & retest for the turn.
+- **Risk → Trendline SL:** one line-tolerance beyond the setup's line (bounce, retest), or beyond the failed excursion's extreme (failed breakout). Without a setup it falls back to the Pivot SL.
+- **Exit → Target → Opposite trendline:** the opposite line (resistance for longs, support for shorts), one tolerance short of it, at entry. If no opposite line lies beyond entry, the RR value is used.
+- **Exit → Trendline Exits:**
+  - **Exit on line break:** exits at bar close when the close goes beyond the with-trade line by more than its tolerance. The line is the one at entry, or the current one if tighter. Exit reason `TRENDLINE_BREAK` (badge *TL BREAK*). Gate-mode exit hooks can veto it.
+  - **Trail along line:** ratchets the SL to the line (as known at the prior bar) minus its tolerance and *Buffer pts*. It never loosens. If the Pivot trail is also on, the tighter stop wins.
+- **Leg Pattern → window clauses:**
+  - `TL trend strength`, `TL support/resistance distance` (median swings, + on the line's own side), `TL support/resistance touches`, `TL support/resistance slope`.
+  - The `TL channel` chips: parallel / converging / expanding.
+  - Use these as entry filters with any entry mode. Examples: `TL trend strength ≥ 0.3`, `TL resistance distance ≥ 1` (room to target), `TL channel` ≠ converging.
+- **Preset "Trendline (structure-aware)":** regime source = pivot structure, with every EMA filter off. Each regime is also gated on its pivot structure.
+
+  | Regime | Direction | Setup | SL | Target / exits |
+  |---|---|---|---|---|
+  | Uptrend | long | Bounce | Trendline | Trail + exit on break |
+  | Downtrend | short | Bounce | Trendline | Trail + exit on break |
+  | Range | both | Failed breakout | Trendline | Opposite-line target |
+  | Reversal | both | Break & retest | Trendline | Exit on break |
+
+  On Nifty 15m Jul 2023 – Jun 2024 it takes only a handful of trades. Major-line setups that coincide with an H/L signal are rare. Session auto square-off also ends intraday trades before a trendline exit can act, so turn it off for multi-day trendline trades.
+- **Trade records:** every auto entry is stamped with `tlStrengthAtEntry`, `tlSupDistAtEntry`, `tlResDistAtEntry`, `tlChannelAtEntry` and `tlSetupAtEntry`. These appear in the trade popup's raw record, and the entry reason is tagged `TL-bounce` / `TL-retest` / `TL-failed-BO`.
+- **Tests:** `npm run backtest:trendline`.
+
 ### Al Brooks H/L System
 
 Pullback counting for trend-following setups.
@@ -283,7 +348,7 @@ Trades are fully simulated — no real money involved.
 
 **Component:** `AutoBacktestPanel` (full-screen panel, portals to `document.body`). Reachable from the Playback toolbar's Zap button, or directly from any other full-page view via its header's [PageNavTabs](#quick-reference--ui-layout) — see the cross-page navigation note in the Quick Reference section below. Because it's a `createPortal`, App.tsx controls its visibility with a `hidden` prop on the component itself (not a wrapping CSS class) — a wrapping `display:none` div has no effect on portaled content.
 
-Per-regime rules are configured through a 5-section **Market → Entry → Confirmation → Exit → Risk** workflow, rendered as a **single-open accordion**: each section is a collapsible `AccordionSection` header (icon + label + optional badge + chevron) stacked beneath the regime tabs (Uptrend/Downtrend/Range/Reversal), and expanding one section auto-collapses whichever other section was open — only one section's content is ever mounted at a time. Switching regime tabs collapses back to Market-only for orientation; a `WorkflowStep` value (`activeStep`) is local UI state only — it is never persisted to `RegimeRules`/`AutoBacktestConfig`, so it doesn't affect saved configs or presets.
+Per-regime rules are configured through a 5-section **Market → Entry → Confirmation → Exit → Risk** workflow, rendered as a **single-open accordion**: each section is a collapsible `AccordionSection` header (icon + label + optional badge + chevron) stacked beneath the regime tabs (Uptrend/Downtrend/Range/Reversal), and expanding one section auto-collapses whichever other section was open — only one section's content is ever mounted at a time. Clicking the open section's header again collapses it (all sections closed). Switching regime tabs keeps the same section open (or all collapsed), so you can compare e.g. Market across Bull/Bear/Range/Reversal; a `WorkflowStep` value (`activeStep`) is local UI state only — it is never persisted to `RegimeRules`/`AutoBacktestConfig`, so it doesn't affect saved configs or presets.
 
 - **Market section** — regime Enable toggle, Direction (Long/Short/Both), and two structure gates: **HT Structure** and **LT Structure**. Both offer 5 options (Any / Bull Trend / Bear Trend / Range / Reversal) and gate signal generation in `evaluateAutoSignals` — a regime's rules are skipped for the bar unless both gates pass. `bull_trend`/`bear_trend` match only the clean trend state (the choppy "Trending-range" variant is bucketed under `range`); `reversal` matches either direction. LT Structure reads the same `ltMarket` value used elsewhere to pick which regime's rules try first for a bar — this filter turns that into a hard requirement instead of just an ordering preference, so a regime's rules can be locked to only fire when the bar's own structure genuinely matches (previously a regime's rules could fire on a bar structurally classified into a *different* regime, gated only by whatever other filters were configured). HT Structure now has a real Reversal state too (`pivotAnalysis.ts`'s `analyzeMarketStructure`, mirroring the LT branch's slope+pivot-label logic) — previously HT could only ever read Bull-Trend/Bear-Trend/Range. `ltStructureFilter` is optional and defaults to `'any'`, so saved configs from before this field existed behave unchanged.
 - **Entry section** — Entry Signal mode (Pivot/H-L Signal/Confluence) with H1/H2/L1/L2 toggles and confluence lookback, MA Filter, and the single most-recent Pivot Seq filter.

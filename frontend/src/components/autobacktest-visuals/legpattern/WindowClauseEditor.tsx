@@ -5,10 +5,11 @@ import { WINDOW_FIELD_BY_KEY, type WindowClause, type WindowField } from '../../
  *  gate is a floor, a ceiling, or a band — so the UI speaks min/max and emits gte/lte. */
 const SHOWN: WindowField[] = [
   'dominance', 'legBalance', 'legEfficiency', 'impulseCount', 'pullbackDepth', 'avgBrr',
+  'tlStrength', 'tlSupDist', 'tlResDist', 'tlSupTouches', 'tlResTouches', 'tlSupSlope', 'tlResSlope',
 ];
 
 /** Categorical aggregates (pivot market structure) — chips emitting one `in` clause. */
-const CATEGORICAL: WindowField[] = ['structureBroad', 'structureSub'];
+const CATEGORICAL: WindowField[] = ['structureBroad', 'structureSub', 'tlChannel'];
 
 interface WindowClauseEditorProps {
   clauses: WindowClause[];

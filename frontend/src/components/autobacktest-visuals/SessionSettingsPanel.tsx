@@ -12,7 +12,7 @@ import {
   EXIT_HOOK_LOOKBACK_MIN,
   EXIT_HOOK_LOOKBACK_MAX,
 } from '../../utils/exitHook';
-import { STRUCTURE_PARAM_DEFS } from '../../utils/marketStructure';
+import { STRUCTURE_PARAM_DEFS, TRENDLINE_PARAM_DEFS } from '../../utils/marketStructure';
 import { CardShell } from './CardShell';
 
 const TREND_DAY_INPUTS: {
@@ -415,6 +415,24 @@ export function SessionSettingsPanel({ config, onChange, isOpen, onClose, onOpen
             </div>
             <div className="grid grid-cols-2 gap-x-3 gap-y-2">
               {STRUCTURE_PARAM_DEFS.map(({ key, label, title, min, max, step, def }) => (
+                <div key={key} className="flex items-center justify-between gap-1">
+                  <span className="text-[10px] text-gray-500" title={title}>{label}</span>
+                  <input
+                    type="number" min={min} max={max} step={step}
+                    value={config[key] ?? def}
+                    onChange={e => onChange({ [key]: Number(e.target.value) })}
+                    className="w-14 px-1.5 py-1 text-xs border rounded text-center"
+                  />
+                </div>
+              ))}
+            </div>
+          </CardShell>
+
+          {/* Pivot trendlines (utils/marketStructure/trendlines). Read by the Trendlines chart
+              layer and hook ctx.trendlines(). */}
+          <CardShell title="Trendlines (pivot)">
+            <div className="grid grid-cols-2 gap-x-3 gap-y-2">
+              {TRENDLINE_PARAM_DEFS.map(({ key, label, title, min, max, step, def }) => (
                 <div key={key} className="flex items-center justify-between gap-1">
                   <span className="text-[10px] text-gray-500" title={title}>{label}</span>
                   <input

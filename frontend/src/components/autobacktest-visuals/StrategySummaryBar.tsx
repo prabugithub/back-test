@@ -56,12 +56,14 @@ export function countActiveConfirmationFilters(rules: RegimeRules): number {
   if (isActive(rules.highSeqFilter, 'none')) count++;
   if (isActive(rules.lowSeqFilter, 'none')) count++;
   if (isActive(rules.pivotGapFilter)) count++;
+  if (isActive(rules.trendlineSetup, 'none')) count++;
   return count;
 }
 
 function formatSlLabel(rules: RegimeRules): string {
   if (rules.slMethod === 'atr') return `SL: ATR × ${rules.slAtrMultiplier}`;
   if (rules.slMethod === 'fixed') return `SL: Fixed ${rules.slFixedPoints}pts`;
+  if (rules.slMethod === 'trendline') return 'SL: Trendline';
   return 'SL: Pivot';
 }
 

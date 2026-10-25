@@ -27,7 +27,7 @@ import type { Candle } from '../../types';
 import { getPivotPointsUpTo } from '../indicators';
 import type { StructureParams } from './params';
 import { paramsKey } from './params';
-import { buildSwings, fitLine, mean, median } from './swings';
+import { buildSwings, fitLine, mean, median, mergePoint } from './swings';
 import type {
   PrevSegmentInfo, StructureBroad, StructureEvidence, StructureState, StructureSub,
   Swing, SwingPoint, TransitionReason,
@@ -55,21 +55,6 @@ interface Seg {
   failedBreakouts: number;
   prev: PrevSegmentInfo | null;
   attempt: Attempt | null;       // range only: a breakout not yet confirmed
-}
-
-/** Append a swing point, collapsing consecutive same-type points to the more extreme one. */
-function mergePoint(points: SwingPoint[], sp: SwingPoint, cap: number): SwingPoint[] {
-  const last = points[points.length - 1];
-  let next: SwingPoint[];
-  if (last && last.type === sp.type) {
-    const more = sp.type === 'high' ? sp.price > last.price : sp.price < last.price;
-    if (!more) return points;
-    next = points.slice(0, -1);
-    next.push(sp);
-  } else {
-    next = points.concat(sp);
-  }
-  return next.length > cap ? next.slice(next.length - cap) : next;
 }
 
 function boxOf(points: readonly SwingPoint[]): { hi: number | null; lo: number | null } {

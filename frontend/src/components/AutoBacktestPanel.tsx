@@ -106,8 +106,9 @@ interface RegimeEditorProps {
   latestBar: RegimeStepProps['latestBar'];
   onHoverFilterKey: (key: PreviewFilterKey | null) => void;
   steps: StepDef[];
-  activeStep: WorkflowStep;
-  onStepChange: (step: WorkflowStep) => void;
+  /** null = every section collapsed. */
+  activeStep: WorkflowStep | null;
+  onStepChange: (step: WorkflowStep | null) => void;
   accentBg: string;
   accentColor: string;
   config: AutoBacktestConfig;
@@ -137,7 +138,7 @@ function RegimeEditor({
             key={step.key}
             step={step}
             isExpanded={isExpanded}
-            onToggle={() => onStepChange(step.key)}
+            onToggle={() => onStepChange(isExpanded ? null : step.key)}
             accentBg={accentBg}
             accentColor={accentColor}
           >
@@ -176,7 +177,7 @@ export function AutoBacktestPanel({ onNavigate, hidden }: AutoBacktestPanelProps
   const deleteSavedAutoBacktestConfig = useSessionStore(s => s.deleteSavedAutoBacktestConfig);
 
   const [activeRegime, setActiveRegime] = useState<RegimeKey>('uptrend');
-  const [activeStep, setActiveStep] = useState<WorkflowStep>('market');
+  const [activeStep, setActiveStep] = useState<WorkflowStep | null>('market');
   const [showMetrics, setShowMetrics] = useState(false);
   const [showPreview, setShowPreview] = useState(false);
   const [selectedConfigId, setSelectedConfigId] = useState('');
@@ -281,8 +282,8 @@ export function AutoBacktestPanel({ onNavigate, hidden }: AutoBacktestPanelProps
       riskPerTrade: config.riskPerTrade,
       minQuantity: config.minQuantity,
       maxQuantity: config.maxQuantity,
-    };
       lotSize: config.lotSize,
+    };
     // Carry the custom entry AND exit hooks across. No preset defines either, so spreading
     // defaultAutoBacktestConfig would silently switch a configured hook off — the run would
     // then quietly go back to the built-in chain with no indication the strategy had been
@@ -568,7 +569,8 @@ export function AutoBacktestPanel({ onNavigate, hidden }: AutoBacktestPanelProps
               return (
                 <button
                   key={r}
-                  onClick={() => { setActiveRegime(r); setActiveStep('market'); }}
+                  // Keep the open section (or all-collapsed) when switching regimes
+                  onClick={() => setActiveRegime(r)}
                   className={`flex-1 flex flex-col items-center gap-0.5 py-1.5 rounded-lg border text-[10px] font-medium transition-all duration-150 active:scale-[0.98] relative ${
                     isActive
                       ? `${meta.activeBg} text-white border-transparent shadow-sm`

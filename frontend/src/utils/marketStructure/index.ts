@@ -9,11 +9,20 @@ import { DEFAULT_MIN_PIVOT_GAP_BARS, MIN_PIVOT_GAP_BARS_MAX, MIN_PIVOT_GAP_BARS_
 import { buildLegSequence } from '../legSequence';
 import { resolveStructureParams, type StructureConfig } from './params';
 import { buildStructureTimeline } from './timeline';
+import {
+  findTrendlineSetup, findTrendlinesAt, resolveTrendlineParams, trendStrength,
+  type TrendlineConfig, type TrendlineSetup, type TrendlineSetupKind, type TrendlineState, type TrendStrength,
+} from './trendlines';
 import type { StructureSegment, StructureState } from './types';
 
 export * from './types';
 export { STRUCTURE_PARAM_DEFS, resolveStructureParams, type StructureConfig, type StructureParams } from './params';
 export { buildStructureTimeline } from './timeline';
+export {
+  TRENDLINE_PARAM_DEFS, resolveTrendlineParams, trendlinePriceAt, findTrendlinesAt, trendStrength, findTrendlineSetup,
+  type Trendline, type TrendlineState, type TrendlineConfig, type TrendlineParams,
+  type TrendStrength, type ChannelShape, type TrendlineSetup, type TrendlineSetupKind,
+} from './trendlines';
 export {
   computeStructureStats, summarize, transitionMatrix, subTransitions,
   type EpisodeStat, type StructureStats, type DistSummary, type SubKey, type SubRun,
@@ -35,6 +44,27 @@ export function getStructureTimeline(candles: Candle[], config: Partial<Structur
 export function getStructureAt(candles: Candle[], index: number, config: Partial<StructureConfig>): StructureState | null {
   if (index < 0 || index >= candles.length) return null;
   return getStructureTimeline(candles, config)[index] ?? null;
+}
+
+/** Major pivot trendlines as of bar `index` (look-ahead safe). Null outside the series. */
+export function getTrendlinesAt(candles: Candle[], index: number, config: Partial<StructureConfig & TrendlineConfig>): TrendlineState | null {
+  if (index < 0 || index >= candles.length) return null;
+  return findTrendlinesAt(candles, index, gapOf(config), resolveTrendlineParams(config));
+}
+
+/** Trend direction / strength read off the trendlines at bar `index`. Null outside the series. */
+export function getTrendStrengthAt(candles: Candle[], index: number, config: Partial<StructureConfig & TrendlineConfig>): TrendStrength | null {
+  const st = getTrendlinesAt(candles, index, config);
+  return st ? trendStrength(st, candles[index].close) : null;
+}
+
+/** A trendline setup of `kind` at bar `index`, per side. Null outside the series. */
+export function getTrendlineSetupAt(
+  candles: Candle[], index: number, config: Partial<StructureConfig & TrendlineConfig>,
+  kind: TrendlineSetupKind, bars: number, zone: number,
+): { long: TrendlineSetup | null; short: TrendlineSetup | null } | null {
+  if (index < 0 || index >= candles.length) return null;
+  return findTrendlineSetup(candles, index, gapOf(config), resolveTrendlineParams(config), kind, bars, zone);
 }
 
 /** Collapse the timeline into contiguous runs of the same (segment, broad, sub, attempt). */

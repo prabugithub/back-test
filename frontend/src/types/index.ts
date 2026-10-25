@@ -32,7 +32,7 @@ export interface TradeJournal {
 // src/strategies/exits/). Nothing produces it any more, but trades booked before the
 // change are persisted in Firestore carrying it, so the value stays in the union and in
 // every label/badge map — dropping it would render those historical trades unlabelled.
-export type ExitReason = 'SL' | 'TP' | 'MANUAL' | 'TIME_OVER' | 'REVERSAL' | 'OPP_SIGNAL' | 'EXIT_HOOK' | 'LEG_DECAY';
+export type ExitReason = 'SL' | 'TP' | 'MANUAL' | 'TIME_OVER' | 'REVERSAL' | 'OPP_SIGNAL' | 'EXIT_HOOK' | 'LEG_DECAY' | 'TRENDLINE_BREAK';
 
 // One segment of the recent-price-action leg sequence captured at entry — either a
 // completed Al Brooks impulse leg or the pullback (retrace) between two legs. Segments
@@ -132,6 +132,14 @@ export interface Trade {
   pivotHighSeqAtEntry?: string;    // last up-to-4 bearish trend labels (HH/LH), oldest→newest, joined with '-'
   pivotLowSeqAtEntry?: string;     // last up-to-4 bullish trend labels (HL/LL), oldest→newest, joined with '-'
   pivotGapAvgBarsAtEntry?: number; // mean bar-count gap between consecutive same-type pivots across both sequences
+  // Pivot trendline read at entry (utils/marketStructure/trendlines) — signed trend strength
+  // (+ up / − down, 0–1), distance above support / below resistance in median swings, the
+  // support-vs-resistance channel shape, and the trendline setup that let the trade in.
+  tlStrengthAtEntry?: number;
+  tlSupDistAtEntry?: number;
+  tlResDistAtEntry?: number;
+  tlChannelAtEntry?: string;
+  tlSetupAtEntry?: string;
   // Session-open context: which bar opened the entry's trading day, how far it
   // gapped from the previous day's close, and how deep into the session the
   // entry was. Gap fields are absent (not 0) when no previous day is loaded.

@@ -21,6 +21,21 @@ export function buildSwings(points: readonly SwingPoint[]): Swing[] {
   return out;
 }
 
+/** Append a swing point, collapsing consecutive same-type points to the more extreme one. */
+export function mergePoint(points: SwingPoint[], sp: SwingPoint, cap: number): SwingPoint[] {
+  const last = points[points.length - 1];
+  let next: SwingPoint[];
+  if (last && last.type === sp.type) {
+    const more = sp.type === 'high' ? sp.price > last.price : sp.price < last.price;
+    if (!more) return points;
+    next = points.slice(0, -1);
+    next.push(sp);
+  } else {
+    next = points.concat(sp);
+  }
+  return next.length > cap ? next.slice(next.length - cap) : next;
+}
+
 export function median(values: readonly number[]): number {
   if (values.length === 0) return 0;
   const s = [...values].sort((a, b) => a - b);

@@ -13,8 +13,9 @@ import type { DrawingTool } from './ChartToolbar';
 import type { Indicator } from './ChartToolbar';
 import { calculateSMA, calculateEMA, calculatePivotPoints, calculateAlBrooks } from '../utils/indicators';
 import { resolveMinPivotGapBars } from '../utils/autoBacktestEngine';
-import { getStructureSegments } from '../utils/marketStructure';
+import { getStructureSegments, getTrendlinesAt } from '../utils/marketStructure';
 import { drawMarketStructure } from './chart/drawMarketStructure';
+import { drawTrendlines } from './chart/drawTrendlines';
 import { resampleCandles } from '../utils/resampler';
 import { useChartDrawings } from '../hooks/useChartDrawings';
 import type { Point } from '../hooks/useChartDrawings';
@@ -160,6 +161,13 @@ export function AdvancedChart({
     return getStructureSegments(structureSource, autoBacktestConfig)
       .filter(s => s.startIndex <= end)
       .map(s => (s.endIndex > end ? { ...s, endIndex: end } : s));
+  }, [activeIndicators, structureSource, candles, currentIndex, autoBacktestConfig]);
+
+  // Pivot trendlines as of the last shown bar — same full-array source as the structure layer.
+  const memoizedTrendlines = useMemo(() => {
+    if (!activeIndicators.includes('trendlines') || structureSource.length === 0) return null;
+    const end = structureSource === candles ? currentIndex : structureSource.length - 1;
+    return getTrendlinesAt(structureSource, end, autoBacktestConfig);
   }, [activeIndicators, structureSource, candles, currentIndex, autoBacktestConfig]);
 
   const memoizedAlBrooks = useMemo(() => {
@@ -364,7 +372,12 @@ export function AdvancedChart({
     if (memoizedStructure.length > 0) {
       drawMarketStructure(ctx, chart, series, structureSource, memoizedStructure);
     }
-  }, [chart, series, visibleCandles, activeIndicators, showMarkers, showPivotRR, memoizedPivots, isSecondary, secondaryTimeframe, chartId, highlightTimestamp, selectedSegment, memoizedStructure, structureSource]);
+
+    // 6. Pivot trendlines (Indicators → Trendlines).
+    if (memoizedTrendlines) {
+      drawTrendlines(ctx, chart, series, structureSource, memoizedTrendlines);
+    }
+  }, [chart, series, visibleCandles, activeIndicators, showMarkers, showPivotRR, memoizedPivots, isSecondary, secondaryTimeframe, chartId, highlightTimestamp, selectedSegment, memoizedStructure, memoizedTrendlines, structureSource]);
 
   const {
     clearDrawings,

@@ -25,7 +25,7 @@
 import type { Candle, LegSegment } from '../../types';
 import type { PivotPoint } from '../indicators';
 import type { LegWindow as LegPatternWindow } from '../legPattern';
-import type { StructureState } from '../marketStructure';
+import type { StructureState, TrendlineState } from '../marketStructure';
 import type {
   AutoBacktestConfig,
   EntryMetricsSnapshot,
@@ -159,6 +159,13 @@ export interface EntryHookContext {
   structure(): StructureState | null;
   /** Brooks leg/pullback segments spanning the current structure segment, NEWEST-FIRST. */
   structureLegs(): LegSegment[];
+  /**
+   * Major pivot trendlines at this bar (utils/marketStructure/trendlines; bounds in Session
+   * Settings → Trendlines). `resistance` / `support` are best-first, each with slope, price at
+   * this bar (`priceNow`), touches, closes/wicks through, reaction size, score and `distance`
+   * = (close − priceNow) ÷ median swing. Look-ahead safe; null only outside the series.
+   */
+  trendlines(): TrendlineState | null;
 
   /** The regime's configured rules. Read-only — mutating this corrupts every later bar. */
   rules: Readonly<RegimeRules>;

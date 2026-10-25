@@ -11,7 +11,11 @@
 import type { Candle } from '../../types';
 import { buildLegSequence } from '../legSequence';
 import { getAlBrooksRunUpTo } from '../indicators';
-import { BROAD_CODE, SUB_CODE, getStructureAt, type StructureConfig } from '../marketStructure';
+import {
+  BROAD_CODE, SUB_CODE, getStructureAt, getTrendlinesAt, trendStrength,
+  type StructureConfig, type TrendlineConfig,
+} from '../marketStructure';
+import { TL_CHANNEL_CODE } from './schema';
 import { buildLegWindow as buildWindowFromSegments, type LegWindow } from './adapter';
 
 export { buildLegWindow as buildLegWindowFromSegments, deriveDirArray, goodRuns, maxRunIn, IMPULSE, PULLBACK } from './adapter';
@@ -35,9 +39,9 @@ export interface LegWindowOptions {
   baselineLookback?: number;
   /** Candle-overlap window for the score's constant term. Session Settings' `barOverlapLookback`. */
   overlapLookback?: number;
-  /** Session config for the pivot market-structure read behind the structureBroad /
-   *  structureSub window clauses. Omitted → those clauses are unmeasurable (fail). */
-  structureConfig?: Partial<StructureConfig>;
+  /** Session config for the pivot market-structure and trendline reads behind the
+   *  structure* / tl* window clauses. Omitted → those clauses are unmeasurable (fail). */
+  structureConfig?: Partial<StructureConfig & TrendlineConfig>;
 }
 
 /**
@@ -78,6 +82,20 @@ export function buildLegWindow(
   if (opts.structureConfig) {
     const st = getStructureAt(candles, currentIndex, opts.structureConfig);
     if (st) window.structure = { broad: BROAD_CODE[st.broad], sub: st.sub ? SUB_CODE[st.sub] : undefined };
+    const tl = getTrendlinesAt(candles, currentIndex, opts.structureConfig);
+    if (tl) {
+      const close = candles[currentIndex].close;
+      const sup = tl.support[0], res = tl.resistance[0];
+      const ts = trendStrength(tl, close);
+      window.trendlines = {
+        supDist: sup && (close - sup.priceNow) / sup.medianSwing,
+        resDist: res && (res.priceNow - close) / res.medianSwing,
+        supTouches: sup?.touches, resTouches: res?.touches,
+        supSlope: sup?.slopeNorm, resSlope: res?.slopeNorm,
+        strength: ts.dirStrength,
+        channel: ts.channel ? TL_CHANNEL_CODE[ts.channel] : undefined,
+      };
+    }
   }
   return window;
 }
