@@ -1,6 +1,6 @@
 import type { ReactNode } from 'react';
 import { TrendingUp, TrendingDown, Minus, RefreshCw, Settings2 } from 'lucide-react';
-import { type RegimeRules, type AutoBacktestConfig, generateBinaryPatterns } from '../../utils/autoBacktestEngine';
+import { type RegimeRules, type AutoBacktestConfig, generateBinaryPatterns, DEFAULT_LOT_SIZE } from '../../utils/autoBacktestEngine';
 import { ENTRY_HOOK_OPTIONS } from '../../strategies';
 import { EXIT_HOOK_OPTIONS } from '../../strategies/exits';
 import { HookDebugToggle } from './HookDebugToggle';
@@ -991,7 +991,9 @@ export function RiskStep({ rules, up, config, onOpenSessionSettings }: RegimeSte
           <p className="text-[11px] text-gray-500">
             Position sizing:{' '}
             <span className="font-medium text-gray-600">
-              {config.useAutoQty ? `Auto · ₹${config.riskPerTrade} risk` : 'Manual qty'}
+              {config.useAutoQty
+                ? `Auto · ₹${config.riskPerTrade} risk${(config.lotSize ?? DEFAULT_LOT_SIZE) > 1 ? ` · lot ${config.lotSize ?? DEFAULT_LOT_SIZE}` : ''}`
+                : 'Manual qty'}
             </span>
           </p>
           <button

@@ -1,6 +1,6 @@
 import { X, Settings2 } from 'lucide-react';
 import { useChargesStore } from '../../stores/chargesStore';
-import { MULTI_TRADE_DEFAULT_CAP, type AutoBacktestConfig } from '../../utils/autoBacktestEngine';
+import { MULTI_TRADE_DEFAULT_CAP, DEFAULT_LOT_SIZE, type AutoBacktestConfig } from '../../utils/autoBacktestEngine';
 import { DEFAULT_TREND_DAY_WINDOWS } from '../../strategies/strongTrendH1';
 import {
   DEFAULT_ENTRY_HOOK_LOOKBACK,
@@ -157,6 +157,15 @@ export function SessionSettingsPanel({ config, onChange, isOpen, onClose, onOpen
                     onChange={e => onChange({ maxQuantity: Math.max(0, Number(e.target.value) || 0) })}
                     className="w-14 px-1.5 py-1 text-xs border rounded text-center"
                     title="Maximum quantity — skip trade if auto-qty is above this (empty = no cap)"
+                  />
+                </div>
+                <div className="flex items-center gap-1">
+                  <span className="text-[10px] text-gray-500">Lot</span>
+                  <input
+                    type="number" min={1} value={config.lotSize ?? DEFAULT_LOT_SIZE}
+                    onChange={e => onChange({ lotSize: Math.max(1, Math.floor(Number(e.target.value)) || 1) })}
+                    className="w-14 px-1.5 py-1 text-xs border rounded text-center"
+                    title="Lot size — auto-qty is rounded down to a multiple of this (1 = no rounding)"
                   />
                 </div>
               </div>

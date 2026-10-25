@@ -356,6 +356,9 @@ export interface AutoBacktestConfig {
   ema21SlopeLookback: number; // bars looked back for EMA21 slope (default 10)
   ema50SlopeLookback: number; // bars looked back for EMA50 slope (default 20)
 
+  // Round auto-qty down to a multiple of this; 1 = no rounding. undefined on configs saved
+  // before this field existed, so always read it as `?? DEFAULT_LOT_SIZE`.
+  lotSize?: number;
   // EMA20 interaction (Brooks gap-bar / always-in) instrumentation — recorded on trade entries
   emaInteractionLookback: number; // bars looked back for EMA20 gap-bar/always-in interaction stats (default 20)
 
@@ -607,6 +610,7 @@ export const AUTO_BT_PRESETS: Record<string, Partial<AutoBacktestConfig>> = {
       entryMode: 'CONFLUENCE',
       allowH1: true, allowH2: true, allowL1: false, allowL2: false,
       confluenceLookback: 5,
+export const DEFAULT_LOT_SIZE = 65;
       ltPivotSequence: 'HH-HL',
       maFilter: 'above_ema21',
       htStructureFilter: 'bull_trend',
@@ -625,6 +629,7 @@ export const AUTO_BT_PRESETS: Record<string, Partial<AutoBacktestConfig>> = {
       targetRR: 2,
     },
     downtrend: {
+  lotSize: DEFAULT_LOT_SIZE,
       enabled: true,
       direction: 'SHORT_ONLY',
       entryMode: 'CONFLUENCE',
@@ -1586,11 +1591,14 @@ export function resolveTradeQuantity(
   if (!config.useAutoQty) return { qty: fallbackQty };
 
   const riskPoints = Math.abs(signal.entryPrice - signal.sl);
-  const qty = riskPoints > 0 ? Math.floor(config.riskPerTrade / riskPoints) : 0;
-  if (qty < config.minQuantity) {
+  // Round DOWN to whole lots so the realised risk never exceeds riskPerTrade.
+  const lot = Math.max(1, Math.floor(config.lotSize ?? DEFAULT_LOT_SIZE));
+  const qty = riskPoints > 0 ? Math.floor(config.riskPerTrade / riskPoints / lot) * lot : 0;
+  if (qty < config.minQuantity || qty === 0) {
+    const reason = qty === 0 && lot > 1 ? `qty 0 (< 1 lot of ${lot})` : `qty ${qty} < min ${config.minQuantity}`;
     return {
       qty,
-      skipReason: `Skipped: qty ${qty} < min ${config.minQuantity} (SL ${riskPoints.toFixed(1)} pts too wide)`,
+      skipReason: `Skipped: ${reason} (SL ${riskPoints.toFixed(1)} pts too wide)`,
     };
   }
   const maxQty = config.maxQuantity ?? 0;
