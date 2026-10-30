@@ -40,6 +40,7 @@
 import type { EntryHook, EntryHookEntry } from '../utils/entryHook';
 import { deepPullbackContinuation, takeEverySignal } from './example';
 import { higherHighShallowPullback } from './higherHighShallowPullback';
+import { srGuard } from './srGuard';
 import { strongTrendH1 } from './strongTrendH1';
 
 export const ENTRY_HOOKS: Record<string, EntryHookEntry> = {
@@ -52,6 +53,11 @@ export const ENTRY_HOOKS: Record<string, EntryHookEntry> = {
     label: 'Higher-High Shallow Pullback',
     description: 'Long only. H2+, higher high, bear pullback holding above the previous leg\'s high and retracing at most 50%.',
     hook: higherHighShallowPullback,
+  },
+  'sr-guard': {
+    label: 'S/R Guard (trendline + swing resistance)',
+    description: 'Gate mode filter, both sides. Blocks entries under an intact counter trendline (≥80-bar span) or near a real swing top/bottom (last 150 bars). Never the first break — waits for the retest, a held pullback, or a re-break.',
+    hook: srGuard,
   },
   'deep-pullback': {
     label: 'Deep Pullback Continuation',

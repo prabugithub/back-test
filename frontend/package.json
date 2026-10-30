@@ -17,7 +17,8 @@
     "backtest:exithook": "tsx scripts/exitHookSmoke.ts",
     "backtest:legpattern": "tsx scripts/legPatternSmoke.ts",
     "backtest:legseq-verify": "tsx scripts/legSequenceVerify.ts",
-    "backtest:trendline": "tsx scripts/trendlineSmoke.ts"
+    "backtest:trendline": "tsx scripts/trendlineSmoke.ts",
+    "backtest:srguard": "tsx scripts/srGuardSmoke.ts"
   },
   "dependencies": {
     "@tanstack/react-query": "^5.90.12",
