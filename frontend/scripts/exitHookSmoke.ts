@@ -306,7 +306,7 @@ console.log('\n[7] a trailing hook reaches the booked trades');
 
 console.log('\n[8] shipped hooks');
 {
-  for (const id of ['leg-decay', 'breakeven-trail', 'time-stop', 'hold-winners']) {
+  for (const id of ['leg-decay', 'breakeven-trail', 'time-stop', 'hold-winners', 'climax-profit', 'leg-decay-climax']) {
     assert(getExitHook(id) !== undefined, `'${id}' is registered`);
   }
   assert(Object.keys(EXIT_HOOKS).length >= 4, 'the registry ships at least the four documented hooks');
@@ -354,7 +354,7 @@ console.log('\n[8] shipped hooks');
 
   // Every shipped hook must at least be reachable and run clean over a full backtest —
   // whether the fixture happens to satisfy its thresholds is a separate question.
-  for (const id of ['leg-decay', 'breakeven-trail', 'time-stop', 'hold-winners']) {
+  for (const id of ['leg-decay', 'breakeven-trail', 'time-stop', 'hold-winners', 'climax-profit', 'leg-decay-climax']) {
     const r = run(cfg({ exitHookMode: 'replace', exitHookId: id }));
     const d = r.exitHookDiagnostics;
     assert(d !== undefined && d.callCount > 0 && d.errorCount === 0 && d.rejectedCount === 0,
@@ -372,6 +372,54 @@ console.log('\n[8] shipped hooks');
 
   const timeRun = run(cfg({ exitHookMode: 'replace', exitHookId: 'time-stop' }));
   assert(exitsOf(timeRun.trades).some(t => t.exitReason === 'EXIT_HOOK'), "'time-stop' produced exits");
+}
+
+// ─── 9. Climax Profit (4x candle) ──────────────────────────────────────────────
+
+console.log('\n[9] climax profit exit');
+{
+  // Flat wave: every bar's range is ~1-2 pts. Bar SPIKE is replaced by an oversized bar.
+  const ENTRY = 100;
+  const SPIKE = 110;
+  const withSpike = (dir: 1 | -1, size: number): Candle[] => {
+    const c = wave(160, 20000, 0, 1, 12);
+    const prev = c[SPIKE - 1].close;
+    const close = prev + dir * size;
+    c[SPIKE] = { ...c[SPIKE], open: prev, close, high: Math.max(prev, close) + 0.2, low: Math.min(prev, close) - 0.2 };
+    return c;
+  };
+  const avgRangeBefore = (c: Candle[]) => {
+    let s = 0;
+    for (let k = SPIKE - 20; k < SPIKE; k++) s += c[k].high - c[k].low;
+    return s / 20;
+  };
+  const pos = (qty: number, entryPrice: number) => ({
+    quantity: qty, averagePrice: entryPrice, entryBarIndex: ENTRY, entryRegime: 'uptrend' as const,
+  });
+  const climaxCfg = cfg({ exitHookMode: 'replace', exitHookId: 'climax-profit' });
+  const at = (c: Candle[], qty: number, entry: number, conf = climaxCfg) =>
+    evaluateAutoExitSignal(c, SPIKE, pos(qty, entry), conf).exit;
+
+  const bull = withSpike(1, 30);
+  const bear = withSpike(-1, 30);
+  assert((bull[SPIKE].high - bull[SPIKE].low) / avgRangeBefore(bull) >= 4, 'fixture: spike bar is >= 4x the 20-bar average range');
+
+  const longHit = at(bull, 1, bull[ENTRY].close - 5);
+  assert(longHit !== null && longHit.detail.startsWith('climax:'), `long in profit exits on a 4x bull bar (${longHit?.detail})`);
+  const shortHit = at(bear, -1, bear[ENTRY].close + 5);
+  assert(shortHit !== null && shortHit.detail.startsWith('climax:'), 'short in profit exits on a 4x bear bar');
+  assert(at(bull, -1, bull[ENTRY].close) === null, 'a short LOSING on a 4x bull bar is left to its stop');
+  assert(at(bear, 1, bear[ENTRY].close - 40) !== null, 'a long still in profit after a 4x bear bar books it');
+
+  const noSpike = wave(160, 20000, 0, 1, 12);
+  assert(evaluateAutoExitSignal(noSpike, SPIKE, pos(1, noSpike[ENTRY].close - 5), climaxCfg).exit === null,
+    'no exit on an ordinary bar');
+  const highMult = cfg({ exitHookMode: 'replace', exitHookId: 'climax-profit' }, { climaxExitMultiple: 50 });
+  assert(at(bull, 1, bull[ENTRY].close - 5, highMult) === null, 'Session Settings Climax Multiple is honoured');
+
+  const comboCfg = cfg({ exitHookMode: 'replace', exitHookId: 'leg-decay-climax' });
+  const combo = at(bull, 1, bull[ENTRY].close - 5, comboCfg);
+  assert(combo !== null && combo.detail.startsWith('climax:'), "'leg-decay-climax' takes the climax exit first");
 }
 
 console.log(`\n${passed} passed, ${failed} failed`);

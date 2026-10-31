@@ -2,6 +2,7 @@ import { X, Settings2 } from 'lucide-react';
 import { useChargesStore } from '../../stores/chargesStore';
 import { MULTI_TRADE_DEFAULT_CAP, DEFAULT_LOT_SIZE, type AutoBacktestConfig } from '../../utils/autoBacktestEngine';
 import { DEFAULT_TREND_DAY_WINDOWS } from '../../strategies/strongTrendH1';
+import { DEFAULT_CLIMAX_EXIT } from '../../strategies/exits/climax';
 import {
   DEFAULT_ENTRY_HOOK_LOOKBACK,
   ENTRY_HOOK_LOOKBACK_MIN,
@@ -365,6 +366,26 @@ export function SessionSettingsPanel({ config, onChange, isOpen, onClose, onOpen
                   value={config.exitHookLookback ?? DEFAULT_EXIT_HOOK_LOOKBACK}
                   onChange={e => onChange({ exitHookLookback: Number(e.target.value) })}
                   className="w-16 px-1.5 py-1 text-xs border rounded text-center"
+                />
+              </div>
+              {/* Climax Profit window — read only by the climax-profit / leg-decay-climax exit hooks.
+                  The baseline is taken from ctx.candles, so it must stay below Exit Hook Candles. */}
+              <div className="flex items-center justify-between gap-1">
+                <span className="text-[10px] text-gray-500" title="Climax Profit exit hook: prior bars averaged into the baseline candle range (high − low) the current bar is compared against">Climax Lookback</span>
+                <input
+                  type="number" min={2} max={200}
+                  value={config.climaxExitLookback ?? DEFAULT_CLIMAX_EXIT.climaxExitLookback}
+                  onChange={e => onChange({ climaxExitLookback: Number(e.target.value) })}
+                  className="w-12 px-1.5 py-1 text-xs border rounded text-center"
+                />
+              </div>
+              <div className="flex items-center justify-between gap-1">
+                <span className="text-[10px] text-gray-500" title="Climax Profit exit hook: a bar whose range is at least this many times the baseline closes any in-profit long or short at that bar's close">Climax Multiple</span>
+                <input
+                  type="number" min={1.5} max={20} step={0.5}
+                  value={config.climaxExitMultiple ?? DEFAULT_CLIMAX_EXIT.climaxExitMultiple}
+                  onChange={e => onChange({ climaxExitMultiple: Number(e.target.value) })}
+                  className="w-12 px-1.5 py-1 text-xs border rounded text-center"
                 />
               </div>
               {/* Strong-trend-day windows — read only by the Strong-Trend H1 entry hook. */}

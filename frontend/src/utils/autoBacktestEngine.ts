@@ -425,6 +425,11 @@ export interface AutoBacktestConfig {
   // Clamped to [50, 5000] on read; see resolveExitHookLookback (default 400).
   exitHookLookback?: number;
 
+  // Climax Profit exit hook (strategies/exits/climax.ts). Optional — undefined falls back to
+  // DEFAULT_CLIMAX_EXIT (in that file), so saved configs need no migration.
+  climaxExitLookback?: number; // prior bars averaged into the baseline candle range (default 20)
+  climaxExitMultiple?: number; // bar range ÷ baseline at or above which an in-profit trade is closed (default 4)
+
   // Strong-trend-day windows read by the Strong-Trend H1 entry hook (strategies/strongTrendH1.ts).
   // Optional — undefined falls back to DEFAULT_TREND_DAY_WINDOWS (in that file), so saved configs need no migration.
   trendDayAdrDays?: number;          // prior sessions averaged for the average daily range (default 10)

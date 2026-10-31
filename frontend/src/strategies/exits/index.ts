@@ -52,12 +52,23 @@
 import type { ExitHook, ExitHookEntry } from '../../utils/exitHook';
 import { breakevenThenTrail, holdWinners, timeStop } from './example';
 import { legDecayExit } from './legDecay';
+import { climaxProfitExit, legDecayWithClimax } from './climax';
 
 export const EXIT_HOOKS: Record<string, ExitHookEntry> = {
   'leg-decay': {
     label: 'Leg Decay',
     description: 'Re-grades the newest completed with-trend leg formed after entry (ER, breaks, EMA21 slope, gap-bar) and closes once enough checks fail. The former built-in Leg Decay Exit, now editable.',
     hook: legDecayExit,
+  },
+  'climax-profit': {
+    label: 'Climax Profit (4x candle)',
+    description: 'Books profit on long and short trades when a bar\'s range reaches Climax Multiple × the average of the prior Climax Lookback bars (Session Settings, default 4x / 20). Only exits a trade in profit. Use Gate mode to keep the built-in exits.',
+    hook: climaxProfitExit,
+  },
+  'leg-decay-climax': {
+    label: 'Leg Decay + Climax Profit',
+    description: 'Leg Decay, plus the Climax Profit rule checked first: a 4x-range bar books an in-profit long or short at its close.',
+    hook: legDecayWithClimax,
   },
   'breakeven-trail': {
     label: 'Breakeven, then ATR Trail',
