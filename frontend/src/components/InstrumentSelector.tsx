@@ -15,7 +15,7 @@ export function InstrumentSelector() {
   const [securityId, setSecurityId] = useState('2885'); // RELIANCE on Angel One
   const [exchangeSegment, setExchangeSegment] = useState('NSE_EQ');
   const [instrument, setInstrument] = useState('EQUITY');
-  const [interval, setInterval] = useState('5');
+  const [interval, setInterval] = useState('15');
   const [fromDate, setFromDate] = useState('2021-01-01');
   const [toDate, setToDate] = useState('2026-01-20');
   const [jumpToDate, setJumpToDate] = useState('2021-01-01');

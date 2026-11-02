@@ -248,7 +248,7 @@ export function PlaybackControls({ onOpenHistory, onOpenDashboard, onOpenBacktes
   const [settingsJumpDate, setSettingsJumpDate] = useState('');
 
   // Data loading settings (initially sync with session)
-  const [timeframe, setTimeframe] = useState('5');
+  const [timeframe, setTimeframe] = useState('15');
   const [fromDate, setFromDate] = useState('');
   const [toDate, setToDate] = useState('');
   const [isReloading, setIsReloading] = useState(false);
