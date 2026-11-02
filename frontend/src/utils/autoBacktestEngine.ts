@@ -7,8 +7,47 @@ import {
   getAlBrooksLegsAt,
   getEmaValueAt,
   getAtrValueAt,
+  DEFAULT_MIN_PIVOT_GAP_BARS,
+  MIN_PIVOT_GAP_BARS_MIN,
+  MIN_PIVOT_GAP_BARS_MAX,
   type PivotPoint,
 } from './indicators';
+import {
+  buildEntryHookContext,
+  createHookRunState,
+  hookTriggerAt,
+  runEntryHook,
+  type EntryHook,
+  type EntryHookContext,
+  type EntryHookMode,
+  type HookRunState,
+  type HookTrigger,
+  type NormalizedDecision,
+} from './entryHook';
+import {
+  buildExitHookContext,
+  createExitHookRunState,
+  runExitHook,
+  type ExitHook,
+  type ExitHookEnv,
+  type ExitHookMode,
+  type ExitHookPositionInput,
+  type ExitHookRunState,
+  type NormalizedExit,
+  type PendingExit,
+} from './exitHook';
+import { getEntryHook } from '../strategies';
+import { getExitHook } from '../strategies/exits';
+// Stop-loss primitives live in a LEAF module so `src/strategies/*` can compute the same
+// prospective stop this engine will book without importing the engine (which would close a
+// runtime cycle — the engine value-imports `getEntryHook` above). See utils/stopLoss.ts.
+import {
+  findRecentBullPivot,
+  findRecentBearPivot,
+  resolvePivotForSl,
+  slLong,
+  slShort,
+} from './stopLoss';
 import {
   analyzeMarketStructureAt,
   calculateEfficiencyRatio,
@@ -17,6 +56,7 @@ import {
   calculateBarRanges,
   averageBarRanges,
   calculateBarQuality,
+  averageBarQuality,
   averageBarQualityIQR,
   calculateBarBreaks,
   calculateConsecutiveBreaks,
@@ -25,6 +65,33 @@ import {
   getPivotSequenceStats,
   averagePivotGapBars,
 } from './pivotAnalysis';
+import {
+  getStructureAt,
+  getTrendlineSetupAt,
+  getTrendlinesAt,
+  structureToLtMarket,
+  trendlinePriceAt,
+  trendStrength,
+  type StructureBroad,
+  type StructureState,
+  type StructureSub,
+  type Trendline,
+  type TrendlineSetup,
+  type TrendlineSetupKind,
+  type TrendlineState,
+} from './marketStructure';
+import {
+  buildLegWindow,
+  getMatcher,
+  legPatternActive,
+  // NOTE the alias: this module already exports its OWN `LegWindow` (a completed
+  // breakout leg's {startIndex, endIndex} bounds, used to window the flat quality
+  // metrics). The leg-pattern engine's LegWindow is a whole derived feature window over
+  // many segments. Two different things, one name — keep them visibly distinct here.
+  type LegWindow as LegPatternWindow,
+  type LegPatternConfig,
+  type Matcher,
+} from './legPattern';
 
 // Enumerates every length-`length` combination of the two labels, dash-joined
 // (e.g. generateBinaryPatterns('HH','LH') -> 16 strings like 'HH-HH-HH-HH').
@@ -141,11 +208,30 @@ export interface RegimeRules {
   // Optional — old saved configs predate this field; treated as 'any' when unset.
   ltStructureFilter?: 'any' | 'bull_trend' | 'bear_trend' | 'range' | 'reversal';
 
-  // Risk
-  slMethod: 'pivot' | 'atr' | 'fixed';
+  // Pivot market-structure gate (utils/marketStructure) — the pivot-only Up/Down/Range
+  // classifier plus its 9-regime sub-type. Independent of regimeSource: this gates on the
+  // pivot read even when the EMA read picks the regime. Optional; undefined = 'any' / [].
+  pivotStructureFilter?: 'any' | StructureBroad;
+  pivotSubFilter?: StructureSub[];
+
+  // Trendline setup (utils/marketStructure/trendlines) — a LOCATION condition on top of the
+  // Entry Mode trigger: the trigger must fire on the side the setup allows. bounce = touch of
+  // a with-trend line that still holds; break_retest = a line closed through, retested and
+  // held; failed_break = a close through a line, then back inside (fade). Optional;
+  // undefined = 'none'. Bars / zone default 6 / 1 (zone = × the line's touch tolerance).
+  trendlineSetup?: 'none' | TrendlineSetupKind;
+  trendlineSetupBars?: number;
+  trendlineSetupZone?: number;
+
+  // Risk. slMethod 'trendline' = the setup's anchor (line, or failed excursion's extreme)
+  // padded by the line's tolerance; falls back to the pivot stop without a setup.
+  slMethod: 'pivot' | 'atr' | 'fixed' | 'trendline';
   slAtrMultiplier: number;
   slFixedPoints: number;
   targetRR: number;
+  // 'trendline' = the opposite line's price (resistance for a long) when it lies beyond
+  // entry, else targetRR. Optional; undefined = 'rr'.
+  targetMode?: 'rr' | 'trendline';
 
   // ── Exit engine (auto-BT positions only; the ENTRY regime's rules manage the
   //    trade for its whole life). All optional — undefined means the mechanism is
@@ -177,24 +263,74 @@ export interface RegimeRules {
   exitTrailPivot?: boolean;
   exitTrailPivotBufferPoints?: number;    // default 2 — pad beyond the swing extreme (matches pivot slDistance's +2)
 
-  // 4. Leg-decay exit — re-grade the newest COMPLETED with-trend leg each bar
-  //    (only legs whose extreme formed after entry; windows respect
-  //    legMinBarCount/legMaxBarCount). 'min' = aligned metric must stay >=
-  //    threshold, 'max' = stay <= threshold; each violated check is one fail.
-  //    Exit when fails >= exitLegDecayMinFails. Fills at bar close, exitReason LEG_DECAY.
-  exitLegDecay?: boolean;
-  exitLegDecayMinBarsInTrade?: number;    // default 3 — no decay exit before this many bars in trade
-  exitLegDecayMinFails?: number;          // default 1
-  exitDecayEfficiencyFilter?: 'none' | 'min' | 'max';
-  exitDecayEfficiencyThreshold?: number;  // default 0.25
-  exitDecayConsecBreakFilter?: 'none' | 'min' | 'max';
-  exitDecayConsecBreakThreshold?: number; // default 3
-  exitDecayBarBreakFilter?: 'none' | 'min' | 'max';
-  exitDecayBarBreakThreshold?: number;    // default 4
-  exitDecayEma21SlopeFilter?: 'none' | 'min' | 'max';
-  exitDecayEma21SlopeThreshold?: number;  // default 0
-  exitDecayGapBarFilter?: 'none' | 'min' | 'max';
-  exitDecayGapBarThreshold?: number;      // default 0.3
+  // 3b. Trendline exits — the with-trade line: the best support (long) / resistance (short)
+  //    of the state at the entry bar, or the current one when it is tighter.
+  //    exitOnTrendlineBreak: a close beyond it by more than its tolerance exits at bar close
+  //    (exitReason TRENDLINE_BREAK). exitTrailTrendline: ratchet the SL to the line at the
+  //    PRIOR bar minus the buffer; with the pivot trail also on, the tighter stop wins.
+  exitOnTrendlineBreak?: boolean;
+  exitTrailTrendline?: boolean;
+  exitTrailTrendlineBufferPoints?: number; // default 2
+
+  // 4. Custom exit hook — a user-authored TypeScript function that manages the open
+  //    trade bar by bar: hold it, move its stop/target, or close it. Where the three
+  //    mechanisms above are declarative switches, this runs arbitrary code, and it is
+  //    what replaced the old built-in Leg Decay Exit (that logic now ships as the
+  //    'leg-decay' hook in src/strategies/exits/legDecay.ts — same checks, editable).
+  //
+  //    Addressed by string id rather than held as a function, because the batch simulator
+  //    runs in a Web Worker and only the serialized config crosses postMessage — the worker
+  //    resolves the id against its own import of src/strategies/exits.
+  //
+  //    Both fields optional and absent from defaults/presets: undefined IS the identity
+  //    state and there is no config-migration layer. Read them only through resolveExitHook.
+  exitHookId?: string;
+  // 'off'     — not consulted (default).
+  // 'gate'    — the built-in signal exits above run first; their verdict reaches the hook as
+  //             ctx.pendingExit and the hook has the final say, including vetoing it.
+  // 'replace' — the built-in signal exits are skipped; the hook alone decides.
+  //
+  // Either way the SL/TP touch check and the Pivot Trailing Stop keep running — those are
+  // price levels, not opinions. Fills at bar close (or a hook-named price inside the bar),
+  // exitReason EXIT_HOOK.
+  exitHookMode?: ExitHookMode;
+
+  // ── Leg-pattern rule engine (utils/legPattern) ──────────────────────────────
+  // An ORDERED, POSITIONAL shape over the recent leg sequence — "three bull legs of
+  // 3-10 candles each, each followed by a shallow retrace" — which none of the flat
+  // filters above can express, because a per-window average is precisely the thing that
+  // averages a sequence away. Each leg slot carries the conditions on the pullback that
+  // FOLLOWED it, nested inside the slot rather than configured separately.
+  //
+  // Optional and undefined by default — deliberately absent from defaultLongRules /
+  // defaultShortRules / defaultRangeRules / AUTO_BT_PRESETS, because undefined IS the
+  // identity state and there is no config-migration layer to backfill it. Read it only
+  // through passesLegPattern, which treats undefined and enabled:false as a strict no-op.
+  legPattern?: LegPatternConfig;
+
+  // ── Custom entry hook (utils/entryHook + src/strategies) ────────────────────
+  // A user-authored TypeScript function that decides entries programmatically. Where
+  // legPattern above describes a shape declaratively, this runs arbitrary code: it can read
+  // the last `entryHookLookback` candles plus every metric the engine computed at the bar,
+  // and return false, true, or a decision overriding side / quantity / SL / target.
+  //
+  // Addressed by string id rather than held as a function, because the batch simulator runs
+  // in a Web Worker and only the serialized config crosses postMessage — the worker resolves
+  // the id against its own import of src/strategies.
+  //
+  // Both fields optional and absent from defaults/presets: undefined IS the identity state
+  // and there is no config-migration layer. Read them only through resolveEntryHook.
+  entryHookId?: string;
+  // 'off'     — not consulted (default).
+  // 'gate'    — the built-in filter chain runs first; the hook is the final say and may
+  //             still override side/qty/SL/target, having seen the engine's own SL/TP.
+  // 'replace' — the whole passesXxx chain and the leg-strength block are skipped; every H/L
+  //             signal bar goes straight to the hook.
+  //
+  // NOTE: whenever this is not 'off', allowH1/allowH2 (and allowL1/allowL2) stop gating —
+  // EVERY H/L count reaches the hook, including the H3+/L3+ the built-in chain can never
+  // enter on. That is the point of the feature; the hook does its own trigger filtering.
+  entryHookMode?: EntryHookMode;
 }
 
 // ─── Global config ────────────────────────────────────────────────────────────
@@ -219,6 +355,10 @@ export interface AutoBacktestConfig {
   useAutoQty: boolean;     // false = use manual tradeQuantity from store
   riskPerTrade: number;    // ₹ risked per trade when useAutoQty is true
   minQuantity: number;     // block trade if auto-qty < this
+  maxQuantity?: number;    // block trade if auto-qty > this; 0/undefined = no cap
+  // Round auto-qty down to a multiple of this; 1 = no rounding. undefined on configs saved
+  // before this field existed, so always read it as `?? DEFAULT_LOT_SIZE`.
+  lotSize?: number;
 
   // Intraday auto square-off
   autoSquareOff: boolean;  // close any open position at squareOffTime
@@ -242,8 +382,8 @@ export interface AutoBacktestConfig {
   // High/low break count instrumentation — momentum/persistence metric recorded on trade entries
   barBreakLookback: number; // bars looked back for high/low break counts (default 20)
 
-  // Bar-quality (BRR) IQR instrumentation — robust body-to-range-ratio average recorded on trade entries
-  barQualityLookback?: number; // bars looked back for the IQR-trimmed BRR average, brrAvgIQRAtEntry (default 20)
+  // Bar-quality (BRR) instrumentation — plain + IQR-trimmed body-to-range-ratio averages recorded on trade entries
+  barQualityLookback?: number; // bars looked back for both BRR averages, brrAvgAtEntry / brrAvgIQRAtEntry (default 20)
 
   // EMA slope instrumentation — trend momentum metric recorded on trade entries
   ema21SlopeLookback: number; // bars looked back for EMA21 slope (default 10)
@@ -251,6 +391,12 @@ export interface AutoBacktestConfig {
 
   // EMA20 interaction (Brooks gap-bar / always-in) instrumentation — recorded on trade entries
   emaInteractionLookback: number; // bars looked back for EMA20 gap-bar/always-in interaction stats (default 20)
+
+  // Minimum bars between two consecutive pivots of the SAME type. A qualifying signal
+  // closer than this to the last EMITTED same-type pivot is dropped (keep-first), which
+  // stops one uninterrupted impulse from printing an LL and then an HL on adjacent bars.
+  // Clamped to [1, 10] on read; see resolveMinPivotGapBars. 1 = legacy, no suppression.
+  minPivotGapBars?: number;
 
   // Consecutive directional-break instrumentation — longest unbroken run of prior-high
   // (or prior-low) breaks within the window (Brooks impulse micro-channel)
@@ -267,11 +413,105 @@ export interface AutoBacktestConfig {
   legSequenceCount?: number;            // number of impulse legs to keep back from entry (default 10)
   legSequenceDetail?: 'full' | 'avg';   // 'full' keeps per-candle brr/clv/uwr/lwr arrays (in-memory/export); 'avg' keeps only averages (default 'full')
 
+  // Custom entry hook rolling window — how many candles (ending at and including the trigger
+  // bar) are handed to a user hook as ctx.candles, so a hook never maintains its own history.
+  // Clamped to [50, 5000] on read; see resolveHookLookback (default 1200).
+  entryHookLookback?: number;
+
+  // Custom exit hook rolling window — how many candles (ending at and including the current
+  // bar) are handed to a user exit hook as ctx.candles. Smaller default than the entry
+  // hook's: this context is rebuilt on every bar of every OPEN TRADE rather than on signal
+  // bars only, and trade management reads recent action far more than deep history.
+  // Clamped to [50, 5000] on read; see resolveExitHookLookback (default 400).
+  exitHookLookback?: number;
+
+  // Climax Profit exit hook (strategies/exits/climax.ts). Optional — undefined falls back to
+  // DEFAULT_CLIMAX_EXIT (in that file), so saved configs need no migration.
+  climaxExitLookback?: number; // prior bars averaged into the baseline candle range (default 20)
+  climaxExitMultiple?: number; // bar range ÷ baseline at or above which an in-profit trade is closed (default 4)
+
+  // Strong-trend-day windows read by the Strong-Trend H1 entry hook (strategies/strongTrendH1.ts).
+  // Optional — undefined falls back to DEFAULT_TREND_DAY_WINDOWS (in that file), so saved configs need no migration.
+  trendDayAdrDays?: number;          // prior sessions averaged for the average daily range (default 10)
+  trendDayMultiDayLookback?: number; // sessions before yesterday forming the multi-day range (default 5)
+  trendDayLateBars?: number;         // yesterday's last N bars read for the late breakout / climax (default 18)
+  trendDayPdhBreakBars?: number;     // today's first N bars in which price must trade above PDH (default 6)
+  trendDayFirstHourBars?: number;    // bars counted as today's opening range / first hour (default 12)
+  trendDayGapBarsMin?: number;       // bars without an EMA21 touch before an H1 far from the EMA is allowed (default 20)
+  trendDayMaxEntries?: number;       // max entries the hook approves per session (default 3)
+
+  // Pivot market-structure classifier (utils/marketStructure) — pivot-only thresholds, all
+  // ratios of the segment's own swings. Optional; defaults live in STRUCTURE_PARAM_DEFS.
+  structureMaxPivots?: number;
+  structureMinSwings?: number;
+  structureBreakFrac?: number;
+  structureStairsMaxDepth?: number;
+  structureStairsMaxTime?: number;
+  structureAmpRatio?: number;
+  structureTightFrac?: number;
+  structureWedgeConvergence?: number;
+  structureEscapeFrac?: number;
+  // Pivot trendlines (utils/marketStructure/trendlines) — window, touch tolerance and
+  // selection bounds. Optional; defaults live in TRENDLINE_PARAM_DEFS.
+  trendlineDegree?: number;
+  trendlineWindowPivots?: number;
+  trendlineTolFrac?: number;
+  trendlineMaxViolations?: number;
+  trendlineMinTouches?: number;
+  trendlineTopN?: number;
+  // Which classifier picks the regime rule-set (and feeds ltMarket everywhere in the engine).
+  // 'ema' (default, undefined) = analyzeMarketStructureAt; 'pivot' = the pivot structure
+  // mapped via structureToLtMarket. htMarket stays EMA-based either way.
+  regimeSource?: 'ema' | 'pivot';
+
   // Per-regime rule sets
   uptrend: RegimeRules;   // Bull-Trend, Bull-Trending-range
   downtrend: RegimeRules; // Bear-Trend, Bear-Trending-range
   range: RegimeRules;     // Range
   reversal: RegimeRules;  // Bull-Reversal, Bear-Reversal
+}
+
+/** Minimum same-type pivot separation, clamped. Every caller of calculatePivotPoints /
+ *  getPivotPointsUpTo that has a config in hand should resolve through this rather than
+ *  reading config.minPivotGapBars directly — configs saved before the field existed have
+ *  it undefined. */
+export function resolveMinPivotGapBars(
+  config: Pick<AutoBacktestConfig, 'minPivotGapBars'>,
+): number {
+  const raw = config.minPivotGapBars ?? DEFAULT_MIN_PIVOT_GAP_BARS;
+  if (!Number.isFinite(raw)) return DEFAULT_MIN_PIVOT_GAP_BARS;
+  return Math.min(MIN_PIVOT_GAP_BARS_MAX, Math.max(MIN_PIVOT_GAP_BARS_MIN, Math.floor(raw)));
+}
+
+// ─── Regime source ────────────────────────────────────────────────────────────
+
+/** The single chokepoint every engine call site reads market structure through. With
+ *  regimeSource 'ema' (the default) it IS analyzeMarketStructureAt; with 'pivot' the
+ *  ltMarket label comes from the pivot classifier instead (htMarket unchanged). */
+export function resolveLtMarketAt(
+  candles: Candle[],
+  currentIndex: number,
+  pivots: PivotPoint[],
+  config: AutoBacktestConfig,
+): { ltMarket: string; htMarket: string } {
+  const read = analyzeMarketStructureAt(candles, currentIndex, pivots);
+  if (config.regimeSource !== 'pivot') return read;
+  return { ltMarket: structureToLtMarket(getStructureAt(candles, currentIndex, config)), htMarket: read.htMarket };
+}
+
+/** Pivot structure gate. A no-op (true) when neither filter is set. */
+export function passesPivotStructure(rules: RegimeRules, state: StructureState | null): boolean {
+  const broad = rules.pivotStructureFilter ?? 'any';
+  const subs = rules.pivotSubFilter ?? [];
+  if (broad === 'any' && subs.length === 0) return true;
+  if (!state) return false;
+  if (broad !== 'any' && state.broad !== broad) return false;
+  if (subs.length > 0 && (state.sub === null || !subs.includes(state.sub))) return false;
+  return true;
+}
+
+export function pivotStructureActive(rules: RegimeRules): boolean {
+  return (rules.pivotStructureFilter ?? 'any') !== 'any' || (rules.pivotSubFilter?.length ?? 0) > 0;
 }
 
 // ─── Regime key mapping ───────────────────────────────────────────────────────
@@ -354,6 +594,19 @@ const defaultRangeRules: RegimeRules = {
   ema50SlopeFilter: 'none',
 };
 
+// Price-action-only base for the trendline preset: no EMA / EMA-derived structure gates,
+// H/L signal trigger, trendline stop. Each regime adds its pivot-structure gate and setup.
+const trendlinePaRules: RegimeRules = {
+  ...defaultRangeRules,
+  enabled: true,
+  entryMode: 'H_SIGNAL',
+  maFilter: 'none',
+  htStructureFilter: 'any',
+  ltStructureFilter: 'any',
+  slMethod: 'trendline',
+  targetRR: 2,
+};
+
 // ─── Multi-trade mode ────────────────────────────────────────────────────────
 // "Skip if open" unchecked turns the engine from one-net-position into N
 // independent concurrent trades. Everything that behaves differently in that
@@ -362,6 +615,7 @@ const defaultRangeRules: RegimeRules = {
 // are untouched.
 
 export const MULTI_TRADE_DEFAULT_CAP = 5;
+export const DEFAULT_LOT_SIZE = 65;
 
 export function isMultiTradeMode(s: {
   isLiveMode: boolean;
@@ -379,6 +633,8 @@ export const defaultAutoBacktestConfig: AutoBacktestConfig = {
   useAutoQty: true,
   riskPerTrade: 10000,
   minQuantity: 1,
+  maxQuantity: 0,
+  lotSize: DEFAULT_LOT_SIZE,
   autoSquareOff: true,
   squareOffTime: '15:10',
   slTpFillMode: 'exact',
@@ -511,6 +767,27 @@ export const AUTO_BT_PRESETS: Record<string, Partial<AutoBacktestConfig>> = {
     range: { ...defaultRangeRules, enabled: true, targetRR: 1.5 },
     reversal: { ...defaultRangeRules, enabled: true, entryMode: 'CONFLUENCE', direction: 'BOTH', targetRR: 2 },
   },
+  // Price action only — the setup follows the pivot market structure: trends buy/sell the
+  // pullback to the with-trend line, ranges fade a failed breakout of a line toward the
+  // opposite line, and a break-and-retest catches the turn. Every regime is also gated on
+  // the pivot structure itself, because the engine tries every enabled regime each bar.
+  'Trendline (structure-aware)': {
+    skipIfPositionOpen: true,
+    regimeSource: 'pivot',
+    uptrend: {
+      ...trendlinePaRules, direction: 'LONG_ONLY', allowL1: false, allowL2: false,
+      pivotStructureFilter: 'up', trendlineSetup: 'bounce', exitTrailTrendline: true, exitOnTrendlineBreak: true,
+    },
+    downtrend: {
+      ...trendlinePaRules, direction: 'SHORT_ONLY', allowH1: false, allowH2: false,
+      pivotStructureFilter: 'down', trendlineSetup: 'bounce', exitTrailTrendline: true, exitOnTrendlineBreak: true,
+    },
+    range: {
+      ...trendlinePaRules, pivotStructureFilter: 'range', trendlineSetup: 'failed_break',
+      targetMode: 'trendline', targetRR: 1.5,
+    },
+    reversal: { ...trendlinePaRules, trendlineSetup: 'break_retest', exitOnTrendlineBreak: true },
+  },
 };
 
 // ─── Signal result ────────────────────────────────────────────────────────────
@@ -526,7 +803,12 @@ export interface EntryMetricsSnapshot {
   efficiencyRatio?: number;
   highBreakCount?: number;
   lowBreakCount?: number;
+  brrAvg?: number;
   brrAvgIQR?: number;
+  rangeAvg?: number;
+  rangeAvgIQR?: number;
+  bodyAvg?: number;
+  bodyAvgIQR?: number;
   ema21Slope?: number;
   ema50Slope?: number;
   ema20GapBarRatio?: number;
@@ -541,6 +823,14 @@ export interface EntryMetricsSnapshot {
   legTooShort?: boolean; // leg shorter than legMinBarCount — auto entries with leg-strength filters active are blocked
   maxConsecutiveHighBreaks?: number;
   maxConsecutiveLowBreaks?: number;
+  // Trendline read at the entry bar (utils/marketStructure/trendlines) — stamped onto the
+  // signal only, never computed for bars that do not trade. Distances in median swings,
+  // + on the line's own side (above support / below resistance).
+  tlStrength?: number;      // signed trend strength: + up, − down (0–1 magnitude)
+  tlSupDist?: number;
+  tlResDist?: number;
+  tlChannel?: 'parallel' | 'converging' | 'expanding';
+  tlSetup?: TrendlineSetupKind;
 }
 
 export interface AutoSignal {
@@ -554,6 +844,12 @@ export interface AutoSignal {
   htMarket: string;
   llhhPivot: string;
   entryMetrics?: EntryMetricsSnapshot;
+  // Set only when a custom entry hook returned an explicit quantity. Undefined leaves
+  // sizing to the engine's useAutoQty / riskPerTrade / minQuantity path — see
+  // resolveTradeQuantity, which every caller must go through.
+  quantity?: number;
+  // Which hook produced or approved this signal, for trade attribution.
+  hookId?: string;
 }
 
 // ─── Main export ──────────────────────────────────────────────────────────────
@@ -590,7 +886,7 @@ export function computeEntryMetrics(
   config: AutoBacktestConfig,
   legWindow?: LegWindow | null
 ): EntryMetricsSnapshot {
-  const pivots = getPivotPointsUpTo(candles, currentIndex);
+  const pivots = getPivotPointsUpTo(candles, currentIndex, resolveMinPivotGapBars(config));
   const pivotSeqStats = getPivotSequenceStats(pivots, 4);
 
   const leg = legWindow && legWindow.endIndex >= 0 ? legWindow : null;
@@ -610,7 +906,11 @@ export function computeEntryMetrics(
       windowBars !== undefined ? windowBars - 1 : (config.barBreakLookback ?? 20));
   const barQualitySamples = calculateBarQuality(candles, end,
     windowBars ?? (config.barQualityLookback ?? 20));
-  const { brrAvgIQR } = averageBarQualityIQR(barQualitySamples);
+  // Both BRR averages over the SAME window: the plain mean (every bar counted) and
+  // the IQR-trimmed mean (Tukey-fence outliers dropped). Kept side by side so a
+  // window skewed by one freak bar is visible as a gap between the two.
+  const { brrAvg, rangeAvg, bodyAvg } = averageBarQuality(barQualitySamples);
+  const { brrAvgIQR, rangeAvgIQR, bodyAvgIQR } = averageBarQualityIQR(barQualitySamples);
   const legInteraction = calculateEMAInteraction(candles, end, 20,
     windowBars ?? (config.emaInteractionLookback ?? 20));
   // Close-above bias is "always-in" context at the entry bar, not a leg-strength
@@ -634,7 +934,12 @@ export function computeEntryMetrics(
       windowBars !== undefined ? windowBars - 1 : (config.efficiencyRatioLookback ?? 10)),
     highBreakCount,
     lowBreakCount,
+    brrAvg,
     brrAvgIQR,
+    rangeAvg,
+    rangeAvgIQR,
+    bodyAvg,
+    bodyAvgIQR,
     ema21Slope: calculateEMASlope(candles, end, 21, config.ema21SlopeLookback ?? 10),
     ema50Slope: calculateEMASlope(candles, end, 50, config.ema50SlopeLookback ?? 20),
     ema20GapBarRatio: gapBarRatio,
@@ -651,10 +956,105 @@ export function computeEntryMetrics(
   };
 }
 
+// ─── Custom entry hook plumbing ───────────────────────────────────────────────
+
+/** Per-bar hook environment, built once in evaluateAutoSignals and shared by every regime
+ *  tried at that bar. The context itself is built per (regime, direction) because it carries
+ *  the regime's rules and its instrumentation snapshot. */
+export interface HookBarEnv {
+  /** The trigger this regime's Entry Mode sees at this bar, or null. Null means the hook
+   *  does not run for that regime here. Memoized per entry mode — at most 3 per bar. */
+  triggerFor: (rules: RegimeRules) => HookTrigger | null;
+  /** Scratch + error bookkeeping that persists across bars for the whole run. */
+  runState: HookRunState;
+  /** The completed breakout leg on the trigger's own side, or null. Depends only on the
+   *  side, so both hook modes hand the hook the same leg. */
+  legWindowFor: (trigger: HookTrigger | null) => LegWindow | null;
+  buildCtx: (args: {
+    rules: RegimeRules;
+    regime: RegimeKey;
+    trigger: HookTrigger;
+    metrics: EntryMetricsSnapshot;
+    logs: string[];
+  }) => EntryHookContext;
+}
+
+/**
+ * The hook trigger for one regime at one bar, following that regime's Entry Mode — the same
+ * setting that decides what the built-in chain enters on, so a hook and the chain it gates
+ * or replaces always agree on WHICH bars are candidates:
+ *
+ * - `PIVOT`      — the bar a pivot is confirmed on (side from the pivot type).
+ * - `H_SIGNAL`   — the raw H/L label, any count.
+ * - `CONFLUENCE` — the raw H/L label, only with a same-side pivot within confluenceLookback
+ *                  (the same findRecent*Pivot window evalLong/evalShort apply).
+ */
+export function resolveHookTrigger(
+  rules: Pick<RegimeRules, 'entryMode' | 'confluenceLookback'>,
+  signal: HookTrigger | null,
+  currentPivot: PivotPoint | null,
+  pivots: PivotPoint[],
+  currentIndex: number,
+  candles: Candle[]
+): HookTrigger | null {
+  if (rules.entryMode === 'PIVOT') {
+    if (!currentPivot) return null;
+    return {
+      source: 'pivot',
+      label: 'Pivot',
+      side: currentPivot.type === 'bullish' ? 'long' : 'short',
+      count: 0,
+      barIndex: currentIndex,
+      pivot: currentPivot,
+    };
+  }
+  if (!signal) return null;
+  if (rules.entryMode === 'H_SIGNAL') return signal;
+  const recent = signal.side === 'long'
+    ? findRecentBullPivot(pivots, currentIndex, candles, rules.confluenceLookback)
+    : findRecentBearPivot(pivots, currentIndex, candles, rules.confluenceLookback);
+  return recent ? { ...signal, pivot: recent } : null;
+}
+
+/** What a regime's hook settings resolve to. */
+export interface ResolvedHook {
+  mode: 'gate' | 'replace';
+  id: string;
+  /** null when the configured id is not in the registry — the regime then takes no trades,
+   *  rather than silently falling back to the built-in chain. A hook the user switched on
+   *  must never be skipped without saying so (same reasoning as passesLegPattern). */
+  hook: EntryHook | null;
+}
+
+export function resolveEntryHook(rules: RegimeRules): ResolvedHook | null {
+  const mode = rules.entryHookMode ?? 'off';
+  if (mode !== 'gate' && mode !== 'replace') return null;
+  const id = rules.entryHookId ?? '';
+  if (!id) return null; // a mode with no hook chosen is still the identity state
+  return { mode, id, hook: getEntryHook(id) ?? null };
+}
+
+/** True when this regime consults a hook at all — used to widen the allowed H/L set. */
+export function entryHookActive(rules: RegimeRules): boolean {
+  return resolveEntryHook(rules) !== null;
+}
+
+/** Fold a hook's logs and reason into the engine's own reason string. */
+function hookReason(base: string, decision: NormalizedDecision, hookId: string): string {
+  const head = decision.reason ?? base;
+  const tail = decision.logs.length > 0 ? ` | ${decision.logs.join(' ; ')}` : '';
+  return `${head} [hook:${hookId}]${tail}`;
+}
+
 export function evaluateAutoSignals(
   candles: Candle[],
   currentIndex: number,
-  config: AutoBacktestConfig
+  config: AutoBacktestConfig,
+  // Per-RUN hook state — the scratch object hooks keep across bars, plus trapped-error
+  // bookkeeping. Owned by the caller (batch simulator / store action) because this function
+  // is per-bar and stateless. Omitted, each bar gets a fresh one: hooks still work, but
+  // ctx.state no longer carries between bars.
+  hookRunState?: HookRunState
 ): AutoSignal | null {
   if (currentIndex < 50 || candles.length < 51) return null;
 
@@ -664,15 +1064,39 @@ export function evaluateAutoSignals(
   // Pre-compute indicators (shared across every regime's evaluation below) —
   // cached lookups against the full candles array so a bar-by-bar auto-backtest
   // run doesn't re-derive pivots/AlBrooks/EMA/ATR from scratch every single bar.
-  const pivots = getPivotPointsUpTo(candles, currentIndex);
+  const pivots = getPivotPointsUpTo(candles, currentIndex, resolveMinPivotGapBars(config));
   const alBrooks = getAlBrooksMarkersUpTo(candles, currentIndex);
   const ema21 = getEmaAt(candles, currentIndex, 21);
   const ema60 = getEmaAt(candles, currentIndex, 60);
   const atr = getAtrAt(candles, currentIndex);
 
   // Detect regime from LT market structure
-  const { ltMarket, htMarket } = analyzeMarketStructureAt(candles, currentIndex, pivots);
+  const { ltMarket, htMarket } = resolveLtMarketAt(candles, currentIndex, pivots, config);
   const matchedRegime = getRegimeKey(ltMarket);
+  // Pivot structure — read lazily: only a regime with a pivot-structure gate pays for it
+  // (the timeline itself is built once per candles array and cached).
+  let pivotStructureMemo: StructureState | null | undefined;
+  const pivotStructure = () =>
+    pivotStructureMemo === undefined ? (pivotStructureMemo = getStructureAt(candles, currentIndex, config)) : pivotStructureMemo;
+  // Trendlines — same lazy pattern: only a regime with a trendline setup / stop / target
+  // pays for them. Setups are cached per (kind, bars, zone) across the regimes tried.
+  let tlStateMemo: TrendlineState | null | undefined;
+  const tlState = () =>
+    tlStateMemo === undefined ? (tlStateMemo = getTrendlinesAt(candles, currentIndex, config)) : tlStateMemo;
+  const tlSetupCache = new Map<string, TrendlineSetupPair>();
+  const tlSetupFor = (rules: RegimeRules): TrendlineSetupPair | null => {
+    const kind = trendlineSetupKind(rules);
+    if (!kind) return null;
+    const bars = Math.max(1, Math.floor(rules.trendlineSetupBars ?? 6));
+    const zone = rules.trendlineSetupZone ?? 1;
+    const key = `${kind}|${bars}|${zone}`;
+    let hit = tlSetupCache.get(key);
+    if (!hit) {
+      hit = getTrendlineSetupAt(candles, currentIndex, config, kind, bars, zone) ?? { long: null, short: null };
+      tlSetupCache.set(key, hit);
+    }
+    return hit;
+  };
 
   // Shared indicators at this bar
   const currentPivot = pivots.find(p => p.time === currentTs) ?? null;
@@ -706,11 +1130,113 @@ export function evaluateAutoSignals(
     return cached;
   };
 
+  // Leg-pattern feature window — same per-bar-cache reasoning as entryMetrics above, but
+  // built LAZILY: it is the single most expensive thing on this path, and a session with
+  // no pattern configured must never pay for it. Nothing here runs unless some enabled
+  // regime's pattern gate actually asks. Keyed on detail because the up-to-4 regimes tried
+  // per bar may differ in whether they need the per-candle arrays.
+  //
+  // legSequenceCount / barRangeLookback / barOverlapLookback all come from Session
+  // Settings — no metric window is a literal at this call site.
+  const legWindowCache = new Map<string, LegPatternWindow>();
+  const legPatternCtx: LegPatternCtx = needsPerCandle => {
+    const key = needsPerCandle ? 'full' : 'avg';
+    let cached = legWindowCache.get(key);
+    if (!cached) {
+      cached = buildLegWindow(candles, currentIndex, {
+        windowLegs: config.legSequenceCount ?? 10,
+        needsPerCandle,
+        baselineLookback: config.barRangeLookback,
+        overlapLookback: config.barOverlapLookback,
+        structureConfig: config,
+      });
+      legWindowCache.set(key, cached);
+    }
+    return cached;
+  };
+
+  // Custom entry hook environment for this bar. The trigger read comes off the same shared
+  // AlBrooks cache the rest of the engine uses, but from `signalsByBar` rather than
+  // `markers`: that array is dense, causal by construction and UNFILTERED, so H3/H4/L5 are
+  // all present. `markers` is depth-filtered and would silently drop them.
+  //
+  // Only the label read happens eagerly (one array index). The per-regime trigger — which
+  // applies that regime's Entry Mode — and the context are resolved lazily, and only once a
+  // regime actually has a hook to run.
+  const hookSignal = hookTriggerAt(candles, currentIndex);
+  const hookTriggerCache = new Map<string, HookTrigger | null>();
+
+  // The completed breakout leg the hook grades, on the TRIGGER's own side. Derived from
+  // getAlBrooksLegsAt rather than currentAbMarker.legStartIndex, because a marker can have
+  // been suppressed by the pullback-depth filter on exactly the H3+/L3+ bars this feature
+  // exists to reach — leaving the hook with no leg on the bars it most wants one.
+  const hookLegWindowFor = (trigger: HookTrigger | null): LegWindow | null => {
+    if (!trigger) return null;
+    const { bull, bear } = getAlBrooksLegsAt(candles, currentIndex);
+    const leg = trigger.side === 'long' ? bull : bear;
+    return leg ? { startIndex: leg.startIndex, endIndex: leg.endIndex } : null;
+  };
+
+  const hookEnv: HookBarEnv = {
+    triggerFor: rules => {
+      const key = `${rules.entryMode}:${rules.confluenceLookback}`;
+      if (!hookTriggerCache.has(key)) {
+        hookTriggerCache.set(key, resolveHookTrigger(rules, hookSignal, currentPivot, pivots, currentIndex, candles));
+      }
+      return hookTriggerCache.get(key)!;
+    },
+    runState: hookRunState ?? createHookRunState(),
+    legWindowFor: hookLegWindowFor,
+    buildCtx: ({ rules, regime, trigger, metrics, logs }) => buildEntryHookContext({
+      candles,
+      currentIndex,
+      config,
+      rules,
+      regime,
+      trigger,
+      ltMarket,
+      htMarket,
+      pivotSeq,
+      pivots,
+      ema21,
+      ema60,
+      atr,
+      metrics,
+      legWindow: hookLegWindowFor(trigger),
+      state: hookEnv.runState.state,
+      logs,
+    }),
+  };
+
   for (const regime of regimeOrder) {
     const regimeRules = config[regime];
     if (!regimeRules.enabled) continue;
     if (!passesStructureFilter(regimeRules.htStructureFilter, htMarket)) continue;
     if (!passesStructureFilter(regimeRules.ltStructureFilter, ltMarket)) continue;
+    if (pivotStructureActive(regimeRules) && !passesPivotStructure(regimeRules, pivotStructure())) continue;
+
+    // Trendline setup gate — a location condition; with no setup on either side the regime
+    // cannot fire this bar. The side check happens in evalLong/evalShort (and the hook path).
+    const tlSetup = tlSetupFor(regimeRules);
+    if (tlSetup && !tlSetup.long && !tlSetup.short) continue;
+    const extras = riskExtras(regimeRules, tlSetup, tlState);
+
+    // ── Custom entry hook, 'replace' mode ────────────────────────────────────
+    // The whole passesXxx chain and the leg-strength block below are skipped: the hook IS
+    // the strategy. It still runs behind the enabled + structure + trendline-setup gates
+    // above, so a regime can still refuse to fire outside its intended market structure.
+    const resolvedHook = resolveEntryHook(regimeRules);
+    if (resolvedHook?.mode === 'replace') {
+      const signal = evalHook(
+        regimeRules, resolvedHook, hookEnv, currentCandle,
+        getEntryMetrics(hookEnv.legWindowFor(hookEnv.triggerFor(regimeRules))), pivots, currentIndex, candles, atr,
+        pivotSeq, ltMarket, htMarket, regime, extras
+      );
+      if (signal && (!tlSetup || tlSetup[signal.type === 'BUY' ? 'long' : 'short'])) {
+        return stampTrendline(signal, candles, currentIndex, tlState, tlSetup);
+      }
+      continue; // 'replace' never falls through to the built-in chain
+    }
 
     // For pullback-continuation entries (H_SIGNAL/CONFLUENCE), the leg-strength filters
     // (ER, Bar Overlap, Break Count, ranges, gap-bar, consecutive breaks) window over the
@@ -734,14 +1260,16 @@ export function evaluateAutoSignals(
     if (regimeRules.entryMode !== 'PIVOT' && legStrengthFiltersActive(regimeRules)
       && (!legWindow || entryMetrics.legTooShort)) continue;
 
-    if (regimeRules.direction !== 'SHORT_ONLY') {
-      const signal = evalLong(regimeRules, currentCandle, currentPivot, currentAbMarker, pivots, ema21, ema60, atr, currentIndex, candles, pivotSeq, ltMarket, htMarket, regime, entryMetrics);
-      if (signal) return signal;
+    const gate = resolvedHook?.mode === 'gate' ? resolvedHook : null;
+
+    if (regimeRules.direction !== 'SHORT_ONLY' && (!tlSetup || tlSetup.long)) {
+      const signal = evalLong(regimeRules, currentCandle, currentPivot, currentAbMarker, pivots, ema21, ema60, atr, currentIndex, candles, pivotSeq, ltMarket, htMarket, regime, entryMetrics, legPatternCtx, gate, hookEnv, extras, tlSetup?.long ?? null);
+      if (signal) return stampTrendline(signal, candles, currentIndex, tlState, tlSetup);
     }
 
-    if (regimeRules.direction !== 'LONG_ONLY') {
-      const signal = evalShort(regimeRules, currentCandle, currentPivot, currentAbMarker, pivots, ema21, ema60, atr, currentIndex, candles, pivotSeq, ltMarket, htMarket, regime, entryMetrics);
-      if (signal) return signal;
+    if (regimeRules.direction !== 'LONG_ONLY' && (!tlSetup || tlSetup.short)) {
+      const signal = evalShort(regimeRules, currentCandle, currentPivot, currentAbMarker, pivots, ema21, ema60, atr, currentIndex, candles, pivotSeq, ltMarket, htMarket, regime, entryMetrics, legPatternCtx, gate, hookEnv, extras, tlSetup?.short ?? null);
+      if (signal) return stampTrendline(signal, candles, currentIndex, tlState, tlSetup);
     }
   }
 
@@ -765,14 +1293,20 @@ function evalLong(
   ltMarket: string,
   htMarket: string,
   regime: RegimeKey,
-  entryMetrics: EntryMetricsSnapshot
+  entryMetrics: EntryMetricsSnapshot,
+  legPatternCtx: LegPatternCtx | null,
+  gate: ResolvedHook | null,
+  hookEnv: HookBarEnv,
+  extras: RiskExtras,
+  tl: TrendlineSetup | null
 ): AutoSignal | null {
-  const allowed = new Set<string>();
-  if (rules.allowH1) allowed.add('H1');
-  if (rules.allowH2) allowed.add('H2');
-
   const isBullPivot = currentPivot?.type === 'bullish';
-  const isHSig = currentAb !== null && allowed.has(currentAb.signal);
+  // With a hook gating this regime, EVERY H count qualifies as a trigger — allowH1/allowH2
+  // stop gating and the hook does its own trigger filtering off ctx.trigger.count. That is
+  // the only way H3+ becomes reachable; see the note on RegimeRules.entryHookMode.
+  const isHSig = gate
+    ? hookEnv.triggerFor(rules)?.side === 'long'
+    : currentAb !== null && allowedHSignals(rules).has(currentAb.signal);
 
   let pivotForSl: PivotPoint | null = isBullPivot ? currentPivot : null;
   let triggerLabel = '';
@@ -782,14 +1316,14 @@ function evalLong(
     triggerLabel = 'Pivot';
   } else if (rules.entryMode === 'H_SIGNAL') {
     if (!isHSig) return null;
-    triggerLabel = currentAb!.signal;
+    triggerLabel = hSignalLabel(rules, gate, currentAb, hookEnv);
     pivotForSl = findRecentBullPivot(pivots, currentIndex, candles, rules.confluenceLookback * 2);
   } else {
     if (!isHSig) return null;
     const recent = findRecentBullPivot(pivots, currentIndex, candles, rules.confluenceLookback);
     if (!recent) return null;
     pivotForSl = recent;
-    triggerLabel = `CONF ${currentAb!.signal}`;
+    triggerLabel = `CONF ${hSignalLabel(rules, gate, currentAb, hookEnv)}`;
   }
 
   if (rules.ltPivotSequence !== 'any' && pivotSeq !== rules.ltPivotSequence) return null;
@@ -809,15 +1343,24 @@ function evalLong(
   if (!passesSeqFilter(rules.highSeqFilter, rules.highSeqPatterns, entryMetrics.pivotHighSeq ?? [])) return null;
   if (!passesSeqFilter(rules.lowSeqFilter, rules.lowSeqPatterns, entryMetrics.pivotLowSeq ?? [])) return null;
   if (!passesPivotGap(rules, entryMetrics.pivotGapAvgBars)) return null;
+  // Last in the chain, so only the few bars that survived everything above ever build a
+  // leg window. Unconfigured regimes never reach the builder at all.
+  if (!passesLegPattern(rules, legPatternCtx, true)) return null;
 
-  const sl = slLong(rules, entry, pivotForSl, atr);
+  const sl = slLong(rules, entry, pivotForSl, atr, extras.stop('long'));
   if (sl <= 0 || sl >= entry) return null;
   const risk = entry - sl;
   if (risk <= 0) return null;
-  const tp = entry + risk * rules.targetRR;
+  const tp = extras.target('long', entry) ?? entry + risk * rules.targetRR;
 
+  if (tl) triggerLabel = `${TL_SETUP_LABELS[tl.kind]} ${triggerLabel}`;
   const reason = `Long [${REGIME_LABELS[regime]}] ${triggerLabel} | ${pivotSeq || '—'} | LT:${ltMarket} | HT:${htMarket}`;
-  return { type: 'BUY', entryPrice: entry, sl, tp, reason, regime, ltMarket, htMarket, llhhPivot: pivotSeq, entryMetrics };
+  const base: AutoSignal = { type: 'BUY', entryPrice: entry, sl, tp, reason, regime, ltMarket, htMarket, llhhPivot: pivotSeq, entryMetrics };
+
+  // The hook gate runs dead last — after every filter AND after sl/tp are computed, so the
+  // hook can see the engine's own stop and target before deciding whether to override them.
+  if (!gate) return base;
+  return applyHookGate(base, gate, hookEnv, rules, entryMetrics, pivotForSl, atr, reason, extras);
 }
 
 // ─── Short evaluation ─────────────────────────────────────────────────────────
@@ -837,14 +1380,18 @@ function evalShort(
   ltMarket: string,
   htMarket: string,
   regime: RegimeKey,
-  entryMetrics: EntryMetricsSnapshot
+  entryMetrics: EntryMetricsSnapshot,
+  legPatternCtx: LegPatternCtx | null,
+  gate: ResolvedHook | null,
+  hookEnv: HookBarEnv,
+  extras: RiskExtras,
+  tl: TrendlineSetup | null
 ): AutoSignal | null {
-  const allowed = new Set<string>();
-  if (rules.allowL1) allowed.add('L1');
-  if (rules.allowL2) allowed.add('L2');
-
   const isBearPivot = currentPivot?.type === 'bearish';
-  const isLSig = currentAb !== null && allowed.has(currentAb.signal);
+  // See evalLong: a gating hook widens the trigger set to every L count, H3+/L3+ included.
+  const isLSig = gate
+    ? hookEnv.triggerFor(rules)?.side === 'short'
+    : currentAb !== null && allowedLSignals(rules).has(currentAb.signal);
 
   let pivotForSl: PivotPoint | null = isBearPivot ? currentPivot : null;
   let triggerLabel = '';
@@ -854,14 +1401,14 @@ function evalShort(
     triggerLabel = 'Pivot';
   } else if (rules.entryMode === 'H_SIGNAL') {
     if (!isLSig) return null;
-    triggerLabel = currentAb!.signal;
+    triggerLabel = hSignalLabel(rules, gate, currentAb, hookEnv);
     pivotForSl = findRecentBearPivot(pivots, currentIndex, candles, rules.confluenceLookback * 2);
   } else {
     if (!isLSig) return null;
     const recent = findRecentBearPivot(pivots, currentIndex, candles, rules.confluenceLookback);
     if (!recent) return null;
     pivotForSl = recent;
-    triggerLabel = `CONF ${currentAb!.signal}`;
+    triggerLabel = `CONF ${hSignalLabel(rules, gate, currentAb, hookEnv)}`;
   }
 
   if (rules.ltPivotSequence !== 'any') {
@@ -886,16 +1433,383 @@ function evalShort(
   if (!passesSeqFilter(rules.highSeqFilter, rules.highSeqPatterns, entryMetrics.pivotHighSeq ?? [])) return null;
   if (!passesSeqFilter(rules.lowSeqFilter, rules.lowSeqPatterns, entryMetrics.pivotLowSeq ?? [])) return null;
   if (!passesPivotGap(rules, entryMetrics.pivotGapAvgBars)) return null;
+  if (!passesLegPattern(rules, legPatternCtx, false)) return null;
 
-  const sl = slShort(rules, entry, pivotForSl, atr);
+  const sl = slShort(rules, entry, pivotForSl, atr, extras.stop('short'));
   if (sl <= 0 || sl <= entry) return null;
   const risk = sl - entry;
   if (risk <= 0) return null;
-  const tp = entry - risk * rules.targetRR;
+  const tp = extras.target('short', entry) ?? entry - risk * rules.targetRR;
   if (tp <= 0) return null;
 
+  if (tl) triggerLabel = `${TL_SETUP_LABELS[tl.kind]} ${triggerLabel}`;
   const reason = `Short [${REGIME_LABELS[regime]}] ${triggerLabel} | ${pivotSeq || '—'} | LT:${ltMarket} | HT:${htMarket}`;
-  return { type: 'SELL', entryPrice: entry, sl, tp, reason, regime, ltMarket, htMarket, llhhPivot: pivotSeq, entryMetrics };
+  const base: AutoSignal = { type: 'SELL', entryPrice: entry, sl, tp, reason, regime, ltMarket, htMarket, llhhPivot: pivotSeq, entryMetrics };
+
+  if (!gate) return base;
+  return applyHookGate(base, gate, hookEnv, rules, entryMetrics, pivotForSl, atr, reason, extras);
+}
+
+// ─── Custom entry hook — evaluation ───────────────────────────────────────────
+
+function allowedHSignals(rules: RegimeRules): Set<string> {
+  const allowed = new Set<string>();
+  if (rules.allowH1) allowed.add('H1');
+  if (rules.allowH2) allowed.add('H2');
+  return allowed;
+}
+
+function allowedLSignals(rules: RegimeRules): Set<string> {
+  const allowed = new Set<string>();
+  if (rules.allowL1) allowed.add('L1');
+  if (rules.allowL2) allowed.add('L2');
+  return allowed;
+}
+
+// With a gating hook the marker may not exist at all — the pullback-depth filter suppresses
+// markers on exactly the H3+/L3+ bars a hook is there to reach — so the label comes from the
+// unfiltered trigger instead.
+function hSignalLabel(
+  rules: RegimeRules,
+  gate: ResolvedHook | null,
+  currentAb: { time: number; signal: string } | null,
+  hookEnv: HookBarEnv
+): string {
+  if (gate) return hookEnv.triggerFor(rules)?.label ?? '';
+  return currentAb?.signal ?? '';
+}
+
+/** Build the sl/tp the engine itself would use, for a given side and entry price. Shared by
+ *  both hook modes so an overriding hook always starts from the same base the built-in
+ *  chain would have produced. */
+function hookDefaultsFor(
+  rules: RegimeRules,
+  pivotForSl: PivotPoint | null,
+  atr: number,
+  extras: RiskExtras
+) {
+  return (side: 'long' | 'short', entryPrice: number) => {
+    const sl = side === 'long'
+      ? slLong(rules, entryPrice, pivotForSl, atr, extras.stop('long'))
+      : slShort(rules, entryPrice, pivotForSl, atr, extras.stop('short'));
+    if (sl <= 0) return null;
+    const risk = side === 'long' ? entryPrice - sl : sl - entryPrice;
+    if (risk <= 0) return null;
+    const tp = extras.target(side, entryPrice)
+      ?? (side === 'long' ? entryPrice + risk * rules.targetRR : entryPrice - risk * rules.targetRR);
+    if (tp <= 0) return null;
+    return { sl, tp };
+  };
+}
+
+// ─── Trendline setup / stop / target helpers ──────────────────────────────────
+
+type TrendlineSetupPair = { long: TrendlineSetup | null; short: TrendlineSetup | null };
+
+const TL_SETUP_LABELS: Record<TrendlineSetupKind, string> = {
+  bounce: 'TL-bounce', break_retest: 'TL-retest', failed_break: 'TL-failed-BO',
+};
+
+function trendlineSetupKind(rules: RegimeRules): TrendlineSetupKind | null {
+  const k = rules.trendlineSetup;
+  return k && k !== 'none' ? k : null;
+}
+
+/** Trendline-derived stop / target for one regime at one bar. Both return null when the
+ *  regime does not use them (or no line qualifies), and callers fall back to the regular
+ *  slMethod / targetRR — so a config without trendline settings computes exactly as before. */
+interface RiskExtras {
+  stop(side: 'long' | 'short'): number | null;
+  target(side: 'long' | 'short', entry: number): number | null;
+}
+
+const NO_EXTRAS: RiskExtras = { stop: () => null, target: () => null };
+
+function riskExtras(
+  rules: RegimeRules,
+  setup: TrendlineSetupPair | null,
+  tlState: () => TrendlineState | null
+): RiskExtras {
+  const useStop = rules.slMethod === 'trendline';
+  const useTarget = rules.targetMode === 'trendline';
+  if (!useStop && !useTarget) return NO_EXTRAS;
+  return {
+    // The stop sits one line-tolerance beyond the anchor — a stop exactly on the line would
+    // be taken out by the ordinary touches the line is defined by.
+    stop: side => {
+      const s = useStop ? setup?.[side] : null;
+      if (!s) return null;
+      return side === 'long' ? s.anchor - s.line.tolerance : s.anchor + s.line.tolerance;
+    },
+    // The opposite line, one tolerance short of it (price tends to stall INTO the line).
+    target: (side, entry) => {
+      if (!useTarget) return null;
+      const st = tlState();
+      const l = side === 'long' ? st?.resistance[0] : st?.support[0];
+      if (!l) return null;
+      const tp = side === 'long' ? l.priceNow - l.tolerance : l.priceNow + l.tolerance;
+      return (side === 'long' ? tp > entry : tp < entry) && tp > 0 ? tp : null;
+    },
+  };
+}
+
+/** Stamp the trendline read of the entry bar onto the signal's entry metrics — journals and
+ *  reports show it. Only signals pay for it, never the bars in between. */
+function stampTrendline(
+  signal: AutoSignal,
+  candles: Candle[],
+  currentIndex: number,
+  tlState: () => TrendlineState | null,
+  setup: TrendlineSetupPair | null
+): AutoSignal {
+  const st = tlState();
+  if (!st) return signal;
+  const close = candles[currentIndex].close;
+  const ts = trendStrength(st, close);
+  const sup = st.support[0], res = st.resistance[0];
+  const used = setup?.[signal.type === 'BUY' ? 'long' : 'short'];
+  return {
+    ...signal,
+    entryMetrics: {
+      ...signal.entryMetrics,
+      tlStrength: ts.dirStrength,
+      tlSupDist: sup ? (close - sup.priceNow) / sup.medianSwing : undefined,
+      tlResDist: res ? (res.priceNow - close) / res.medianSwing : undefined,
+      tlChannel: ts.channel ?? undefined,
+      tlSetup: used ? used.kind : undefined,
+    },
+  };
+}
+
+/** Turn a validated decision into an AutoSignal, carrying over the bar-level context. */
+function signalFromDecision(
+  decision: NormalizedDecision,
+  hookId: string,
+  reason: string,
+  regime: RegimeKey,
+  ltMarket: string,
+  htMarket: string,
+  pivotSeq: string,
+  entryMetrics: EntryMetricsSnapshot
+): AutoSignal {
+  return {
+    type: decision.side === 'long' ? 'BUY' : 'SELL',
+    entryPrice: decision.entryPrice,
+    sl: decision.sl,
+    tp: decision.tp,
+    reason: hookReason(reason, decision, hookId),
+    regime,
+    ltMarket,
+    htMarket,
+    llhhPivot: pivotSeq,
+    entryMetrics,
+    quantity: decision.quantity,
+    hookId,
+  };
+}
+
+/**
+ * 'gate' mode — the built-in chain already approved this entry and computed sl/tp. The hook
+ * sees both and has the final say, and may still override side/qty/SL/target.
+ */
+function applyHookGate(
+  base: AutoSignal,
+  gate: ResolvedHook,
+  hookEnv: HookBarEnv,
+  rules: RegimeRules,
+  entryMetrics: EntryMetricsSnapshot,
+  pivotForSl: PivotPoint | null,
+  atr: number,
+  reason: string,
+  extras: RiskExtras
+): AutoSignal | null {
+  // A hook the user switched on must never be silently skipped — a missing registry entry
+  // means the id was renamed or deleted, and passing the trade through would quietly run a
+  // strategy the config no longer describes.
+  const trigger = hookEnv.triggerFor(rules);
+  if (!gate.hook || !trigger) return null;
+
+  const logs: string[] = [];
+  const ctx = hookEnv.buildCtx({ rules, regime: base.regime, trigger, metrics: entryMetrics, logs });
+  const decision = runEntryHook({
+    hook: gate.hook,
+    ctx,
+    rules,
+    defaults: { compute: hookDefaultsFor(rules, pivotForSl, atr, extras), entryPrice: base.entryPrice },
+    logs,
+    runState: hookEnv.runState,
+  });
+  if (!decision) return null;
+
+  return signalFromDecision(
+    decision, gate.id, reason, base.regime, base.ltMarket, base.htMarket,
+    base.llhhPivot, entryMetrics
+  );
+}
+
+/**
+ * 'replace' mode — no built-in filters ran at all. Every trigger bar the regime's Entry
+ * Mode qualifies (pivot bars for PIVOT; H/L signal bars at any counter value for H_SIGNAL;
+ * those with a recent same-side pivot for CONFLUENCE) reaches the hook, in an enabled regime
+ * that passed the structure gates.
+ *
+ * Direction is NOT pre-filtered on the trigger's side: a hook is allowed to fade its trigger
+ * (short an H3), and runEntryHook checks the FINAL side against rules.direction.
+ */
+function evalHook(
+  rules: RegimeRules,
+  resolved: ResolvedHook,
+  hookEnv: HookBarEnv,
+  candle: Candle,
+  entryMetrics: EntryMetricsSnapshot,
+  pivots: PivotPoint[],
+  currentIndex: number,
+  candles: Candle[],
+  atr: number,
+  pivotSeq: string,
+  ltMarket: string,
+  htMarket: string,
+  regime: RegimeKey,
+  extras: RiskExtras
+): AutoSignal | null {
+  const trigger = hookEnv.triggerFor(rules);
+  if (!trigger) return null;
+  if (!resolved.hook) return null; // see applyHookGate — fail closed on an unknown id
+
+  // Same pivot the built-in chain would have anchored a pivot-method stop to, so
+  // slMethod: 'pivot' keeps working when a hook leaves the stop to the engine.
+  // A pivot / confluence trigger carries its own pivot — the one evalLong/evalShort anchor to.
+  const pivotForSl = trigger.pivot ?? resolvePivotForSl(trigger.side, pivots, currentIndex, candles, rules);
+
+  const logs: string[] = [];
+  const ctx = hookEnv.buildCtx({ rules, regime, trigger, metrics: entryMetrics, logs });
+  const decision = runEntryHook({
+    hook: resolved.hook,
+    ctx,
+    rules,
+    defaults: { compute: hookDefaultsFor(rules, pivotForSl, atr, extras), entryPrice: candle.close },
+    logs,
+    runState: hookEnv.runState,
+  });
+  if (!decision) return null;
+
+  const dirWord = decision.side === 'long' ? 'Long' : 'Short';
+  const reason = `${dirWord} [${REGIME_LABELS[regime]}] ${trigger.label} | ${pivotSeq || '—'} | LT:${ltMarket} | HT:${htMarket}`;
+
+  return signalFromDecision(
+    decision, resolved.id, reason, regime, ltMarket, htMarket, pivotSeq, entryMetrics
+  );
+}
+
+/**
+ * Run just the hook for one bar, for the config UI's live filter-preview strip.
+ *
+ * Returns undefined when the hook is not consulted at this bar at all — no hook configured,
+ * or no trigger for the regime's Entry Mode — so the strip can omit the column instead of scoring a
+ * non-decision as a failure. Otherwise true/false is exactly what the real engine's gate
+ * would have concluded, because it goes through the same buildEntryHookContext +
+ * runEntryHook path.
+ *
+ * Caveat worth knowing when reading the strip: each previewed bar gets a FRESH run state,
+ * so a hook whose answer depends on ctx.state (a cooldown, a counter) will preview
+ * differently from how it behaves inside a real run, where that state accumulates.
+ */
+export function previewEntryHook(
+  candles: Candle[],
+  currentIndex: number,
+  config: AutoBacktestConfig,
+  rules: RegimeRules,
+  regime: RegimeKey,
+  metrics: EntryMetricsSnapshot
+): boolean | undefined {
+  const resolved = resolveEntryHook(rules);
+  if (!resolved) return undefined;
+  const pivots = getPivotPointsUpTo(candles, currentIndex, resolveMinPivotGapBars(config));
+  const currentPivot = pivots.find(p => p.time === candles[currentIndex].timestamp) ?? null;
+  const trigger = resolveHookTrigger(
+    rules, hookTriggerAt(candles, currentIndex), currentPivot, pivots, currentIndex, candles
+  );
+  if (!trigger) return undefined;
+  if (!resolved.hook) return false; // unknown id — fails closed, same as the engine
+
+  const { ltMarket, htMarket } = resolveLtMarketAt(candles, currentIndex, pivots, config);
+  const { bull, bear } = getAlBrooksLegsAt(candles, currentIndex);
+  const leg = trigger.side === 'long' ? bull : bear;
+  const atr = getAtrAt(candles, currentIndex);
+
+  const logs: string[] = [];
+  const runState = createHookRunState();
+  const ctx = buildEntryHookContext({
+    candles,
+    currentIndex,
+    config,
+    rules,
+    regime,
+    trigger,
+    ltMarket,
+    htMarket,
+    pivotSeq: getPivotSeq(pivots),
+    pivots,
+    ema21: getEmaAt(candles, currentIndex, 21),
+    ema60: getEmaAt(candles, currentIndex, 60),
+    atr,
+    metrics,
+    legWindow: leg ? { startIndex: leg.startIndex, endIndex: leg.endIndex } : null,
+    state: runState.state,
+    logs,
+  });
+
+  // A pivot / confluence trigger carries its own pivot — the one evalLong/evalShort anchor to.
+  const pivotForSl = trigger.pivot ?? resolvePivotForSl(trigger.side, pivots, currentIndex, candles, rules);
+
+  return runEntryHook({
+    hook: resolved.hook,
+    ctx,
+    rules,
+    defaults: {
+      compute: hookDefaultsFor(rules, pivotForSl, atr, NO_EXTRAS),
+      entryPrice: candles[currentIndex].close,
+    },
+    logs,
+    runState,
+  }) !== null;
+}
+
+/**
+ * The single place trade quantity is decided, for every caller of evaluateAutoSignals.
+ *
+ * A hook-set quantity wins outright — it bypasses useAutoQty/riskPerTrade/min/maxQuantity,
+ * because a hook that sized the trade has already accounted for its own risk. Otherwise the
+ * engine's own sizing applies. Previously this arithmetic was duplicated in the batch
+ * simulator and the store action; they must not drift.
+ */
+export function resolveTradeQuantity(
+  signal: AutoSignal,
+  config: AutoBacktestConfig,
+  fallbackQty: number
+): { qty: number; skipReason?: string } {
+  if (signal.quantity !== undefined) return { qty: signal.quantity };
+  if (!config.useAutoQty) return { qty: fallbackQty };
+
+  const riskPoints = Math.abs(signal.entryPrice - signal.sl);
+  // Round DOWN to whole lots so the realised risk never exceeds riskPerTrade.
+  const lot = Math.max(1, Math.floor(config.lotSize ?? DEFAULT_LOT_SIZE));
+  const qty = riskPoints > 0 ? Math.floor(config.riskPerTrade / riskPoints / lot) * lot : 0;
+  if (qty < config.minQuantity || qty === 0) {
+    const reason = qty === 0 && lot > 1 ? `qty 0 (< 1 lot of ${lot})` : `qty ${qty} < min ${config.minQuantity}`;
+    return {
+      qty,
+      skipReason: `Skipped: ${reason} (SL ${riskPoints.toFixed(1)} pts too wide)`,
+    };
+  }
+  const maxQty = config.maxQuantity ?? 0;
+  if (maxQty > 0 && qty > maxQty) {
+    return {
+      qty,
+      skipReason: `Skipped: qty ${qty} > max ${maxQty} (SL ${riskPoints.toFixed(1)} pts too tight)`,
+    };
+  }
+  return { qty };
 }
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
@@ -1087,18 +2001,6 @@ export function passesMa(filter: string, candle: Candle, ema21: number | null, e
   return true;
 }
 
-function slLong(rules: RegimeRules, entry: number, pivot: PivotPoint | null, atr: number): number {
-  if (rules.slMethod === 'pivot' && pivot) return entry - pivot.slDistance;
-  if (rules.slMethod === 'atr' && atr > 0) return entry - atr * rules.slAtrMultiplier;
-  return entry - rules.slFixedPoints;
-}
-
-function slShort(rules: RegimeRules, entry: number, pivot: PivotPoint | null, atr: number): number {
-  if (rules.slMethod === 'pivot' && pivot) return entry + pivot.slDistance;
-  if (rules.slMethod === 'atr' && atr > 0) return entry + atr * rules.slAtrMultiplier;
-  return entry + rules.slFixedPoints;
-}
-
 function getPivotSeq(pivots: PivotPoint[]): string {
   let bull: PivotPoint | null = null;
   let bear: PivotPoint | null = null;
@@ -1119,26 +2021,6 @@ export function getAtrAt(candles: Candle[], index: number): number {
   return getAtrValueAt(candles, index, 14);
 }
 
-function findRecentBullPivot(pivots: PivotPoint[], idx: number, candles: Candle[], lookback: number): PivotPoint | null {
-  const ts = candles[idx].timestamp;
-  const minTs = idx >= lookback ? candles[idx - lookback].timestamp : 0;
-  for (let i = pivots.length - 1; i >= 0; i--) {
-    const p = pivots[i];
-    if (p.type === 'bullish' && p.time <= ts && p.time >= minTs) return p;
-  }
-  return null;
-}
-
-function findRecentBearPivot(pivots: PivotPoint[], idx: number, candles: Candle[], lookback: number): PivotPoint | null {
-  const ts = candles[idx].timestamp;
-  const minTs = idx >= lookback ? candles[idx - lookback].timestamp : 0;
-  for (let i = pivots.length - 1; i >= 0; i--) {
-    const p = pivots[i];
-    if (p.type === 'bearish' && p.time <= ts && p.time >= minTs) return p;
-  }
-  return null;
-}
-
 // ─── Exit engine (auto-BT positions only) ─────────────────────────────────────
 //
 // Both per-bar loops (interactive step-through via autoBacktestActions and the
@@ -1146,32 +2028,57 @@ function findRecentBearPivot(pivots: PivotPoint[], idx: number, candles: Candle[
 // identical by construction. Canonical per-bar order:
 //   1. evaluateTrailStop        (before the SL/TP touch check)
 //   2. SL/TP touch check        (existing machinery, possibly-trailed SL)
-//   3. evaluateAutoExitSignal   (REVERSAL → OPP_SIGNAL → LEG_DECAY, fill at close)
+//   3. evaluateAutoExitSignal   (REVERSAL → OPP_SIGNAL → EXIT_HOOK, fill at close)
 //   4. auto square-off
 //   5. entry check
 
-export type AutoExitReason = 'REVERSAL' | 'OPP_SIGNAL' | 'LEG_DECAY';
+export type AutoExitReason = 'REVERSAL' | 'OPP_SIGNAL' | 'TRENDLINE_BREAK' | 'EXIT_HOOK';
 
 export interface AutoExitPositionInfo {
   quantity: number;               // signed — sign gives direction
+  averagePrice?: number;          // needed by a custom exit hook (open P&L, breakeven stops)
   stopLoss?: number;
+  target?: number;
   entryBarIndex?: number;
   entryRegime?: RegimeKey;        // rules come from config[entryRegime]; fallback: current ltMarket's regime
   exitWithTrendSeen?: boolean;
   exitAgainstBars?: number;
+  slTrailed?: boolean;
+  id?: string;                    // multi-trade mode — lets a hook key ctx.state per trade
 }
 
-// Generic min/max gate for the leg-decay checks — same shape as the entry
-// predicates but keyed by explicit filter/threshold instead of RegimeRules fields.
-export function passesMinMax(
-  filter: 'none' | 'min' | 'max' | undefined,
-  threshold: number,
-  value: number | undefined
+/** Supplies the leg-pattern feature window for the current bar, built at most once per
+ *  bar and shared across every regime that asks. See evaluateAutoSignals. */
+export type LegPatternCtx = (needsPerCandle: boolean) => LegPatternWindow;
+
+/** True when this regime has a leg pattern that would actually filter something. */
+export function legPatternRuleActive(rules: RegimeRules): boolean {
+  return legPatternActive(rules.legPattern);
+}
+
+/**
+ * The leg-pattern entry gate.
+ *
+ * Deliberately the LAST gate in the chain: it is by far the most expensive one, and the
+ * flat scalar filters ahead of it already reject most bars, so the window is built only
+ * for the few bars that survive everything else. (Spec §6.1's cheapest-first ordering
+ * applies *within* the pattern's own tree — window aggregates before the matcher — which
+ * is handled inside the engine. Both orderings hold, at their own levels.)
+ *
+ * Unconfigured is a strict no-op that never builds a window, so a regime without a
+ * pattern pays literally nothing.
+ */
+export function passesLegPattern(
+  rules: RegimeRules,
+  legPatternCtx: LegPatternCtx | null,
+  isLong: boolean
 ): boolean {
-  const mode = filter ?? 'none';
-  if (mode === 'none' || value === undefined) return true;
-  if (mode === 'min') return value >= threshold;
-  return value <= threshold;
+  const matcher: Matcher | null = getMatcher(rules.legPattern);
+  if (!matcher) return true;
+  // No context supplied (e.g. a caller that cannot build windows) — the pattern cannot be
+  // honoured, and a filter the user switched on must not be silently skipped.
+  if (!legPatternCtx) return false;
+  return matcher.test(legPatternCtx(matcher.needsPerCandle), isLong);
 }
 
 const resolveExitRules = (
@@ -1183,8 +2090,8 @@ const resolveExitRules = (
   if (entryRegime) return config[entryRegime];
   // Restored old session with an open auto position but no stamped regime —
   // fall back to the regime the current LT structure maps to.
-  const pivots = getPivotPointsUpTo(candles, currentIndex);
-  const { ltMarket } = analyzeMarketStructureAt(candles, currentIndex, pivots);
+  const pivots = getPivotPointsUpTo(candles, currentIndex, resolveMinPivotGapBars(config));
+  const { ltMarket } = resolveLtMarketAt(candles, currentIndex, pivots, config);
   return config[getRegimeKey(ltMarket)];
 };
 
@@ -1196,76 +2103,160 @@ const resolveExitRules = (
 export function evaluateTrailStop(
   candles: Candle[],
   currentIndex: number,
-  position: Pick<AutoExitPositionInfo, 'quantity' | 'stopLoss' | 'entryRegime'>,
+  position: Pick<AutoExitPositionInfo, 'quantity' | 'stopLoss' | 'entryRegime' | 'entryBarIndex'>,
   config: AutoBacktestConfig
 ): { newStopLoss: number } | null {
   if (currentIndex < 5 || position.quantity === 0) return null;
   const rules = resolveExitRules(candles, currentIndex, position.entryRegime, config);
-  if (!rules.exitTrailPivot) return null;
+  if (!rules.exitTrailPivot && !rules.exitTrailTrendline) return null;
 
   const isLong = position.quantity > 0;
-  const pivots = getPivotPointsUpTo(candles, currentIndex - 1);
-  let pivot: PivotPoint | null = null;
-  for (let i = pivots.length - 1; i >= 0; i--) {
-    if (pivots[i].type === (isLong ? 'bullish' : 'bearish')) { pivot = pivots[i]; break; }
-  }
-  if (!pivot || pivot.barIndex < 2) return null;
+  const tighter = (a: number | null, b: number | null) =>
+    a === null ? b : b === null ? a : isLong ? Math.max(a, b) : Math.min(a, b);
+  let candidate: number | null = null;
 
-  const buffer = rules.exitTrailPivotBufferPoints ?? 2;
-  const b = pivot.barIndex;
-  let candidate: number;
-  if (isLong) {
-    const swingLow = Math.min(candles[b].low, candles[b - 1].low, candles[b - 2].low);
-    candidate = swingLow - buffer;
-    if (position.stopLoss !== undefined && candidate <= position.stopLoss) return null;
-  } else {
-    const swingHigh = Math.max(candles[b].high, candles[b - 1].high, candles[b - 2].high);
-    candidate = swingHigh + buffer;
-    if (position.stopLoss !== undefined && candidate >= position.stopLoss) return null;
+  if (rules.exitTrailPivot) {
+    const pivots = getPivotPointsUpTo(candles, currentIndex - 1, resolveMinPivotGapBars(config));
+    let pivot: PivotPoint | null = null;
+    for (let i = pivots.length - 1; i >= 0; i--) {
+      if (pivots[i].type === (isLong ? 'bullish' : 'bearish')) { pivot = pivots[i]; break; }
+    }
+    if (pivot && pivot.barIndex >= 2) {
+      const buffer = rules.exitTrailPivotBufferPoints ?? 2;
+      const b = pivot.barIndex;
+      candidate = isLong
+        ? Math.min(candles[b].low, candles[b - 1].low, candles[b - 2].low) - buffer
+        : Math.max(candles[b].high, candles[b - 1].high, candles[b - 2].high) + buffer;
+    }
   }
-  if (candidate <= 0) return null;
+
+  // Trendline trail — the with-trade line as known at the PRIOR bar, projected to this one,
+  // one line-tolerance plus the buffer beyond it (touches inside the band are the line
+  // working, not failing).
+  if (rules.exitTrailTrendline) {
+    const line = withTradeLine(candles, currentIndex - 1, position.entryBarIndex, isLong, config);
+    if (line) {
+      const pad = line.tolerance + (rules.exitTrailTrendlineBufferPoints ?? 2);
+      const at = trendlinePriceAt(line, currentIndex);
+      candidate = tighter(candidate, isLong ? at - pad : at + pad);
+    }
+  }
+
+  if (candidate === null || candidate <= 0) return null;
+  if (position.stopLoss !== undefined && (isLong ? candidate <= position.stopLoss : candidate >= position.stopLoss)) return null;
   return { newStopLoss: candidate };
 }
 
-// Phase 2 — signal exits, evaluated on bar close (fill = candles[currentIndex].close).
-// Fixed precedence: REVERSAL → OPP_SIGNAL → LEG_DECAY. Always returns the updated
-// per-bar reversal state — callers must persist it onto the position even when
-// exit is null, or the confirm-bars counter resets every bar.
+/** The line managing a trade at bar `refIndex`: the best support (long) / resistance (short)
+ *  of the state at the entry bar, or of the state at `refIndex` when that one sits tighter
+ *  (higher for a long) at `refIndex + 1`. Both states are cached; nothing past `refIndex`
+ *  is read. Null when neither state has a line. */
+function withTradeLine(
+  candles: Candle[],
+  refIndex: number,
+  entryBarIndex: number | undefined,
+  isLong: boolean,
+  config: AutoBacktestConfig
+): Trendline | null {
+  const pick = (idx: number | undefined): Trendline | null => {
+    if (idx === undefined || idx < 0 || idx > refIndex) return null;
+    const st = getTrendlinesAt(candles, idx, config);
+    return (isLong ? st?.support[0] : st?.resistance[0]) ?? null;
+  };
+  const a = pick(entryBarIndex);
+  const b = pick(refIndex);
+  if (!a || !b) return a ?? b;
+  const x = refIndex + 1;
+  const pa = trendlinePriceAt(a, x), pb = trendlinePriceAt(b, x);
+  return (isLong ? pb > pa : pb < pa) ? b : a;
+}
+
+// ─── Custom exit hook — resolution ────────────────────────────────────────────
+
+/** What a regime's exit-hook settings resolve to. */
+export interface ResolvedExitHook {
+  mode: 'gate' | 'replace';
+  id: string;
+  /** null when the configured id is not in the registry — the regime then runs NO signal
+   *  exits at all, rather than silently falling back to the built-in ones. A mechanism the
+   *  user switched on must never be skipped without saying so (same reasoning as
+   *  resolveEntryHook and passesLegPattern). */
+  hook: ExitHook | null;
+}
+
+export function resolveExitHook(rules: RegimeRules): ResolvedExitHook | null {
+  const mode = rules.exitHookMode ?? 'off';
+  if (mode !== 'gate' && mode !== 'replace') return null;
+  const id = rules.exitHookId ?? '';
+  if (!id) return null; // a mode with no hook chosen is still the identity state
+  return { mode, id, hook: getExitHook(id) ?? null };
+}
+
+/** True when this regime consults an exit hook at all. */
+export function exitHookActive(rules: RegimeRules): boolean {
+  return resolveExitHook(rules) !== null;
+}
+
+/** What evaluateAutoExitSignal hands back. `adjust` is independent of `exit`: a hook may
+ *  move the stop on a bar it holds, and the callers must apply it either way. */
+export interface AutoExitDecision {
+  exit: { reason: AutoExitReason; detail: string; fillPrice?: number } | null;
+  /** Stop/target moves requested by a custom exit hook, already validated. Null when there
+   *  are none. Takes effect from the NEXT bar — this runs after the touch check. */
+  adjust: { stopLoss?: number; target?: number } | null;
+  state: { exitWithTrendSeen: boolean; exitAgainstBars: number };
+}
+
+// Phase 2 — signal exits, evaluated on bar close (fill = candles[currentIndex].close, or a
+// price inside the bar a hook named). Fixed precedence: REVERSAL → OPP_SIGNAL → EXIT_HOOK,
+// with the hook able to veto the first two in 'gate' mode and replacing them outright in
+// 'replace' mode. Always returns the updated per-bar reversal state — callers must persist
+// it onto the position even when exit is null, or the confirm-bars counter resets every bar.
 export function evaluateAutoExitSignal(
   candles: Candle[],
   currentIndex: number,
   position: AutoExitPositionInfo,
-  config: AutoBacktestConfig
-): {
-  exit: { reason: AutoExitReason; detail: string } | null;
-  state: { exitWithTrendSeen: boolean; exitAgainstBars: number };
-} {
+  config: AutoBacktestConfig,
+  // Per-RUN exit-hook state — the scratch object hooks keep across bars and across open
+  // trades, plus trapped-error bookkeeping. Owned by the caller because this function is
+  // per-bar and stateless. Omitted, each call gets a fresh one: hooks still work, but
+  // ctx.state no longer carries between bars.
+  exitRunState?: ExitHookRunState
+): AutoExitDecision {
   const state = {
     exitWithTrendSeen: position.exitWithTrendSeen ?? false,
     exitAgainstBars: position.exitAgainstBars ?? 0,
   };
-  if (currentIndex < 50 || position.quantity === 0) return { exit: null, state };
+  const hold: AutoExitDecision = { exit: null, adjust: null, state };
+  if (currentIndex < 50 || position.quantity === 0) return hold;
 
   const rules = resolveExitRules(candles, currentIndex, position.entryRegime, config);
-  if (!rules.exitOnReversal && !rules.exitOnOppSignal && !rules.exitLegDecay) return { exit: null, state };
+  const resolvedHook = resolveExitHook(rules);
+  if (!rules.exitOnReversal && !rules.exitOnOppSignal && !rules.exitOnTrendlineBreak && !resolvedHook) return hold;
   const isLong = position.quantity > 0;
 
+  // In 'replace' mode the built-in signal exits are skipped entirely — the hook IS the exit
+  // strategy. The reversal state machine then stops advancing too, which is correct: nothing
+  // consumes it, and a counter nobody reads is just a stale number on the position.
+  const runBuiltIns = resolvedHook?.mode !== 'replace';
+  let pending: PendingExit | null = null;
+
   // 1. REVERSAL — LT structure against the position for N consecutive checks
-  if (rules.exitOnReversal) {
-    const pivots = getPivotPointsUpTo(candles, currentIndex);
-    const { ltMarket } = analyzeMarketStructureAt(candles, currentIndex, pivots);
+  if (runBuiltIns && rules.exitOnReversal) {
+    const pivots = getPivotPointsUpTo(candles, currentIndex, resolveMinPivotGapBars(config));
+    const { ltMarket } = resolveLtMarketAt(candles, currentIndex, pivots, config);
     const isAgainst = isLong ? ltMarket.startsWith('Bear') : ltMarket.startsWith('Bull');
     const isWith = isLong ? ltMarket.startsWith('Bull') : ltMarket.startsWith('Bear');
     if (isWith) state.exitWithTrendSeen = true;
     state.exitAgainstBars = isAgainst ? state.exitAgainstBars + 1 : 0;
     const armed = state.exitWithTrendSeen || !(rules.exitReversalRequireWithTrend ?? true);
     if (armed && state.exitAgainstBars >= (rules.exitReversalConfirmBars ?? 1)) {
-      return { exit: { reason: 'REVERSAL', detail: `LT:${ltMarket} against for ${state.exitAgainstBars} bar(s)` }, state };
+      pending = { reason: 'REVERSAL', detail: `LT:${ltMarket} against for ${state.exitAgainstBars} bar(s)` };
     }
   }
 
   // 2. OPP_SIGNAL — opposite Brooks pullback signal on the current bar
-  if (rules.exitOnOppSignal) {
+  if (runBuiltIns && !pending && rules.exitOnOppSignal) {
     const marker = getAlBrooksMarkersUpTo(candles, currentIndex).find(m => m.time === candles[currentIndex].timestamp) ?? null;
     if (marker) {
       const opp1 = isLong ? 'L1' : 'H1';
@@ -1274,55 +2265,153 @@ export function evaluateAutoExitSignal(
         (marker.signal === opp1 && (rules.exitOppAllow1 ?? false)) ||
         (marker.signal === opp2 && (rules.exitOppAllow2 ?? true));
       if (fired) {
-        return { exit: { reason: 'OPP_SIGNAL', detail: `${marker.signal} against ${isLong ? 'long' : 'short'}` }, state };
+        pending = { reason: 'OPP_SIGNAL', detail: `${marker.signal} against ${isLong ? 'long' : 'short'}` };
       }
     }
   }
 
-  // 3. LEG_DECAY — re-grade the newest completed with-trend leg formed after entry
-  if (rules.exitLegDecay && position.entryBarIndex !== undefined
-    && currentIndex - position.entryBarIndex >= (rules.exitLegDecayMinBarsInTrade ?? 3)) {
+  // 2b. TRENDLINE_BREAK — this bar's close beyond the with-trade line (as known at the prior
+  //     bar) by more than the line's tolerance.
+  if (runBuiltIns && !pending && rules.exitOnTrendlineBreak) {
+    const line = withTradeLine(candles, currentIndex - 1, position.entryBarIndex, isLong, config);
+    if (line) {
+      const at = trendlinePriceAt(line, currentIndex);
+      const close = candles[currentIndex].close;
+      if (isLong ? close < at - line.tolerance : close > at + line.tolerance) {
+        pending = {
+          reason: 'TRENDLINE_BREAK',
+          detail: `close ${close.toFixed(2)} ${isLong ? 'below support' : 'above resistance'} ${at.toFixed(2)} (${line.touches}t)`,
+        };
+      }
+    }
+  }
+
+  // 3. EXIT_HOOK — the user's own trade management gets the last word.
+  if (resolvedHook) {
+    // A mode set against an unregistered id: no exit at all, deliberately. Falling back to
+    // the built-ins would make a broken config look like a working one.
+    if (!resolvedHook.hook) return { exit: null, adjust: null, state };
+
+    const normalized = runExitHookAt(
+      candles, currentIndex, config, rules, position,
+      resolvedHook.mode === 'gate' ? pending : null,
+      resolvedHook.hook,
+      exitRunState ?? createExitHookRunState()
+    );
+
+    if (normalized.exit) {
+      return {
+        exit: { reason: 'EXIT_HOOK', detail: normalized.exit.detail, fillPrice: normalized.exit.fillPrice },
+        adjust: normalized.adjust,
+        state,
+      };
+    }
+    // An explicit `{ exit: false }` vetoes whatever the built-ins decided. A silent `false`
+    // is "no opinion" and lets the pending exit stand — that distinction is the whole point
+    // of gate mode.
+    if (normalized.veto) return { exit: null, adjust: normalized.adjust, state };
+    if (pending) return { exit: { ...pending }, adjust: normalized.adjust, state };
+    return { exit: null, adjust: normalized.adjust, state };
+  }
+
+  return { exit: pending ? { ...pending } : null, adjust: null, state };
+}
+
+/**
+ * Builds the hook's context and runs it. Split out of evaluateAutoExitSignal purely to keep
+ * that function readable — everything here is the lazy `env` thunk the context defers to,
+ * which is why none of these cached lookups happen on a bar whose hook never touches a
+ * market field.
+ */
+function runExitHookAt(
+  candles: Candle[],
+  currentIndex: number,
+  config: AutoBacktestConfig,
+  rules: RegimeRules,
+  position: AutoExitPositionInfo,
+  pendingExit: PendingExit | null,
+  hook: ExitHook,
+  runState: ExitHookRunState
+): NormalizedExit {
+  const isLong = position.quantity > 0;
+  const logs: string[] = [];
+
+  const env = (): ExitHookEnv => {
+    const pivots = getPivotPointsUpTo(candles, currentIndex, resolveMinPivotGapBars(config));
+    const { ltMarket, htMarket } = resolveLtMarketAt(candles, currentIndex, pivots, config);
+    // The newest COMPLETED leg on the POSITION's side — the same window the old built-in
+    // leg-decay check graded, which is what lets the ported 'leg-decay' hook behave
+    // identically to the mechanism it replaced.
     const legs = getAlBrooksLegsAt(candles, currentIndex);
     const leg = isLong ? legs.bull : legs.bear;
-    // Only grade legs whose extreme formed after entry — never re-judge the
-    // entry leg the confirmation filters already approved.
-    if (leg && leg.endIndex > position.entryBarIndex) {
-      const metrics = computeEntryMetrics(candles, currentIndex, config, leg);
-      if (!metrics.legTooShort) {
-        const fails: string[] = [];
-        if (!passesMinMax(rules.exitDecayEfficiencyFilter, rules.exitDecayEfficiencyThreshold ?? 0.25,
-          metrics.efficiencyRatio)) fails.push('ER');
-        if (!passesMinMax(rules.exitDecayConsecBreakFilter, rules.exitDecayConsecBreakThreshold ?? 3,
-          isLong ? metrics.maxConsecutiveHighBreaks : metrics.maxConsecutiveLowBreaks)) fails.push('consecBreak');
-        if (!passesMinMax(rules.exitDecayBarBreakFilter, rules.exitDecayBarBreakThreshold ?? 4,
-          isLong ? metrics.highBreakCount : metrics.lowBreakCount)) fails.push('barBreak');
-        if (!passesMinMax(rules.exitDecayEma21SlopeFilter, rules.exitDecayEma21SlopeThreshold ?? 0,
-          aligned(metrics.ema21Slope, isLong))) fails.push('ema21Slope');
-        if (!passesMinMax(rules.exitDecayGapBarFilter, rules.exitDecayGapBarThreshold ?? 0.3,
-          metrics.ema20GapBarRatio)) fails.push('gapBar');
-        if (fails.length >= (rules.exitLegDecayMinFails ?? 1)) {
-          return { exit: { reason: 'LEG_DECAY', detail: `leg[${leg.startIndex}-${leg.endIndex}] failed: ${fails.join(', ')}` }, state };
-        }
-      }
-    }
-  }
+    const legWindow: LegWindow | null = leg
+      ? { startIndex: leg.startIndex, endIndex: leg.endIndex }
+      : null;
+    return {
+      ltMarket,
+      htMarket,
+      pivotSeq: getPivotSeq(pivots),
+      pivots,
+      ema21: getEmaAt(candles, currentIndex, 21),
+      ema60: getEmaAt(candles, currentIndex, 60),
+      atr: getAtrAt(candles, currentIndex),
+      legWindow,
+      metrics: computeEntryMetrics(candles, currentIndex, config, legWindow),
+    };
+  };
 
-  return { exit: null, state };
+  const positionInput: ExitHookPositionInput = {
+    id: position.id,
+    quantity: position.quantity,
+    // A position restored from an old session may predate averagePrice being threaded here.
+    // 0 would make every open-P&L number nonsense, so fall back to the bar's close: open
+    // profit then reads as flat, which is the honest answer when entry is unknown.
+    averagePrice: position.averagePrice ?? candles[currentIndex].close,
+    stopLoss: position.stopLoss,
+    target: position.target,
+    entryBarIndex: position.entryBarIndex,
+    slTrailed: position.slTrailed,
+  };
+
+  const ctx = buildExitHookContext({
+    candles,
+    currentIndex,
+    config,
+    rules,
+    // The regime that OPENED the trade manages it for its whole life; resolveExitRules
+    // already applied the same fallback to pick `rules`, so this only re-derives the label.
+    regime: position.entryRegime ?? getRegimeKey(env().ltMarket),
+    position: positionInput,
+    pendingExit,
+    env,
+    state: runState.state,
+    logs,
+  });
+
+  return runExitHook({ hook, ctx, logs, runState });
 }
 
 // Count of exit mechanisms switched on for a regime — UI badge helper.
 export function countActiveExitMechanisms(rules: RegimeRules): number {
-  return [rules.exitOnReversal, rules.exitOnOppSignal, rules.exitTrailPivot, rules.exitLegDecay]
+  return [rules.exitOnReversal, rules.exitOnOppSignal, rules.exitTrailPivot, rules.exitOnTrendlineBreak, rules.exitTrailTrendline, exitHookActive(rules)]
     .filter(Boolean).length;
 }
 
 // ─── Current market state utility (used by UI for live display) ───────────────
 
-export function getCurrentMarketState(candles: Candle[], currentIndex: number): { ltMarket: string; htMarket: string; regime: RegimeKey } {
+export function getCurrentMarketState(
+  candles: Candle[],
+  currentIndex: number,
+  // Resolve from the active AutoBacktestConfig via resolveMinPivotGapBars so the header
+  // readout classifies structure off the same pivot set the engine trades off.
+  minPivotGapBars: number = DEFAULT_MIN_PIVOT_GAP_BARS,
+  // Optional so the readout honours Session Settings → Regime source. Omitted = EMA read.
+  config?: AutoBacktestConfig,
+): { ltMarket: string; htMarket: string; regime: RegimeKey } {
   if (currentIndex < 25 || candles.length < 26) {
     return { ltMarket: 'Range', htMarket: 'Range', regime: 'range' };
   }
-  const pivots = getPivotPointsUpTo(candles, currentIndex);
-  const { ltMarket, htMarket } = analyzeMarketStructureAt(candles, currentIndex, pivots);
+  const pivots = getPivotPointsUpTo(candles, currentIndex, minPivotGapBars);
+  const { ltMarket, htMarket } = config ? resolveLtMarketAt(candles, currentIndex, pivots, config) : analyzeMarketStructureAt(candles, currentIndex, pivots);
   return { ltMarket, htMarket, regime: getRegimeKey(ltMarket) };
 }

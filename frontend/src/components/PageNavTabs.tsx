@@ -1,14 +1,15 @@
-import { LineChart, ClipboardList, Zap, Activity } from 'lucide-react';
+import { LineChart, ClipboardList, Zap, Activity, BarChart3 } from 'lucide-react';
 
 /** Every full-page view the app can switch between. Kept mounted (hidden, not unmounted) once
  * visited so scroll position, filters, expanded rows, etc. survive navigating away and back. */
-export type ActivePage = 'chart' | 'tradeLog' | 'backtest' | 'dashboard';
+export type ActivePage = 'chart' | 'tradeLog' | 'backtest' | 'dashboard' | 'structureStats';
 
 const PAGES: { key: ActivePage; label: string; icon: React.ReactNode }[] = [
   { key: 'chart', label: 'Chart', icon: <LineChart size={14} /> },
   { key: 'tradeLog', label: 'Trade Log', icon: <ClipboardList size={14} /> },
   { key: 'backtest', label: 'Backtest', icon: <Zap size={14} /> },
   { key: 'dashboard', label: 'Dashboard', icon: <Activity size={14} /> },
+  { key: 'structureStats', label: 'Structure', icon: <BarChart3 size={14} /> },
 ];
 
 interface PageNavTabsProps {
@@ -18,7 +19,7 @@ interface PageNavTabsProps {
 }
 
 /** Persistent page switcher rendered in the header of every full-page view (chart controls bar,
- * Trade Log, Backtest, Dashboard) so any page is reachable directly from any other. */
+ * Trade Log, Backtest, Dashboard, Structure Stats) so any page is reachable directly from any other. */
 export function PageNavTabs({ active, onNavigate, className = '' }: PageNavTabsProps) {
   return (
     <div className={`flex bg-slate-100 p-1 rounded-lg border border-slate-200 ${className}`}>

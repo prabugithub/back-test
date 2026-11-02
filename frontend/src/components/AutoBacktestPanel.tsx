@@ -2,7 +2,7 @@ import { useMemo, useState, useEffect } from 'react';
 import { createPortal } from 'react-dom';
 import {
   Zap, TrendingUp, TrendingDown, Minus, RefreshCw, BarChart2, Save, Trash2, FolderOpen,
-  Settings2, Compass, LogIn, ShieldCheck, LogOut, ShieldAlert, Download, Calendar, X,
+  Settings2, Compass, LogIn, ShieldCheck, LogOut, ShieldAlert, Download, Calendar, X, Waves, Receipt,
 } from 'lucide-react';
 import { useSessionStore } from '../stores/sessionStore';
 import { EntryMetricsDashboard } from './EntryMetricsDashboard';
@@ -16,20 +16,28 @@ import {
   AUTO_BT_PRESETS,
   REGIME_LABELS,
   getCurrentMarketState,
+  resolveMinPivotGapBars,
   countActiveExitMechanisms,
 } from '../utils/autoBacktestEngine';
 import { useFilterPreviewData, type PreviewFilterKey } from '../hooks/useFilterPreviewData';
 import { FilterPreviewStrip } from './autobacktest-visuals/FilterPreviewStrip';
+import { HookDebugToggle } from './autobacktest-visuals/HookDebugToggle';
 import { Chip } from './autobacktest-visuals/Chip';
 import { ToggleSwitch } from './autobacktest-visuals/ToggleSwitch';
 import { AccordionSection } from './autobacktest-visuals/AccordionSection';
-import { StrategySummaryBar, countActiveConfirmationFilters } from './autobacktest-visuals/StrategySummaryBar';
+import { StrategySummaryBar, countActiveConfirmationFilters, countLegPatternSlots } from './autobacktest-visuals/StrategySummaryBar';
+import { LegPatternStep } from './autobacktest-visuals/legpattern/LegPatternStep';
 import { SessionSettingsPanel } from './autobacktest-visuals/SessionSettingsPanel';
 import {
   MarketStep, EntryStep, ConfirmationStep, ExitStep, RiskStep,
   type RegimeStepProps, type WorkflowStep, type StepDef,
 } from './autobacktest-visuals/RegimeWorkflowSteps';
 import { PageNavTabs, type ActivePage } from './PageNavTabs';
+import { ChargesSettingsPanel } from './ChargesSettingsPanel';
+import { useChargesStore } from '../stores/chargesStore';
+import { computePositionsCharges } from '../utils/charges';
+import { groupTradesIntoPositions } from '../utils/tradeAnalysis';
+import { formatCurrency } from '../utils/formatters';
 
 interface AutoBacktestPanelProps {
   onNavigate: (page: ActivePage) => void;
@@ -75,6 +83,7 @@ const WORKFLOW_STEPS: StepDef[] = [
   { key: 'market', label: 'Market', icon: <Compass size={14} /> },
   { key: 'entry', label: 'Entry', icon: <LogIn size={14} /> },
   { key: 'confirmation', label: 'Confirmation', icon: <ShieldCheck size={14} /> },
+  { key: 'pattern', label: 'Leg Pattern', icon: <Waves size={14} /> },
   { key: 'exit', label: 'Exit', icon: <LogOut size={14} /> },
   { key: 'risk', label: 'Risk', icon: <ShieldAlert size={14} /> },
 ];
@@ -85,6 +94,7 @@ const STEP_COMPONENTS: Record<WorkflowStep, React.ComponentType<RegimeStepProps>
   market: MarketStep,
   entry: EntryStep,
   confirmation: ConfirmationStep,
+  pattern: LegPatternStep,
   exit: ExitStep,
   risk: RiskStep,
 };
@@ -96,8 +106,9 @@ interface RegimeEditorProps {
   latestBar: RegimeStepProps['latestBar'];
   onHoverFilterKey: (key: PreviewFilterKey | null) => void;
   steps: StepDef[];
-  activeStep: WorkflowStep;
-  onStepChange: (step: WorkflowStep) => void;
+  /** null = every section collapsed. */
+  activeStep: WorkflowStep | null;
+  onStepChange: (step: WorkflowStep | null) => void;
   accentBg: string;
   accentColor: string;
   config: AutoBacktestConfig;
@@ -127,7 +138,7 @@ function RegimeEditor({
             key={step.key}
             step={step}
             isExpanded={isExpanded}
-            onToggle={() => onStepChange(step.key)}
+            onToggle={() => onStepChange(isExpanded ? null : step.key)}
             accentBg={accentBg}
             accentColor={accentColor}
           >
@@ -150,6 +161,7 @@ export function AutoBacktestPanel({ onNavigate, hidden }: AutoBacktestPanelProps
   const currentIndex = useSessionStore(s => s.currentIndex);
   const runBatchAutoBacktest = useSessionStore(s => s.runBatchAutoBacktest);
   const isBatchRunning = useSessionStore(s => s.isBatchBacktestRunning);
+  const hookDebugMode = useSessionStore(s => s.hookDebugMode);
   const batchProgress = useSessionStore(s => s.batchBacktestProgress);
   const trades = useSessionStore(s => s.trades);
   const sessionConfig = useSessionStore(s => s.sessionConfig);
@@ -165,13 +177,27 @@ export function AutoBacktestPanel({ onNavigate, hidden }: AutoBacktestPanelProps
   const deleteSavedAutoBacktestConfig = useSessionStore(s => s.deleteSavedAutoBacktestConfig);
 
   const [activeRegime, setActiveRegime] = useState<RegimeKey>('uptrend');
-  const [activeStep, setActiveStep] = useState<WorkflowStep>('market');
+  const [activeStep, setActiveStep] = useState<WorkflowStep | null>('market');
   const [showMetrics, setShowMetrics] = useState(false);
   const [showPreview, setShowPreview] = useState(false);
   const [selectedConfigId, setSelectedConfigId] = useState('');
   const [isSaveAsOpen, setIsSaveAsOpen] = useState(false);
   const [isDeleteConfirmOpen, setIsDeleteConfirmOpen] = useState(false);
   const [isSessionSettingsOpen, setIsSessionSettingsOpen] = useState(false);
+  const [isChargesPanelOpen, setIsChargesPanelOpen] = useState(false);
+  const showCharges = useChargesStore(s => s.showCharges);
+  const setShowCharges = useChargesStore(s => s.setShowCharges);
+  const chargesConfig = useChargesStore(s => s.config);
+
+  // Gross / charges / net over CLOSED positions of the current run — display-time
+  // overlay only; the batch result and stored trade P&L stay gross.
+  const chargesSummary = useMemo(() => {
+    if (!showCharges || trades.length === 0) return null;
+    const closed = groupTradesIntoPositions(trades).filter(p => p.status === 'CLOSED');
+    const { totals } = computePositionsCharges(closed, chargesConfig);
+    const gross = closed.reduce((sum, p) => sum + p.realizedPnL, 0);
+    return { gross, totals, net: gross - totals.total };
+  }, [showCharges, trades, chargesConfig]);
   const [hoveredFilterKey, setHoveredFilterKey] = useState<PreviewFilterKey | null>(null);
 
   // Date range control — lets the date span be changed without leaving this page
@@ -228,12 +254,12 @@ export function AutoBacktestPanel({ onNavigate, hidden }: AutoBacktestPanelProps
 
   // Live market state
   const marketState = useMemo(
-    () => getCurrentMarketState(candles, currentIndex),
-    [candles, currentIndex]
+    () => getCurrentMarketState(candles, currentIndex, resolveMinPivotGapBars(config), config),
+    [candles, currentIndex, config]
   );
 
   const activeRules = config[activeRegime];
-  const previewBars = useFilterPreviewData(candles, currentIndex, activeRules, config);
+  const previewBars = useFilterPreviewData(candles, currentIndex, activeRules, config, activeRegime);
   const latestBar = previewBars[previewBars.length - 1];
 
   const updateGlobal = (patch: Partial<AutoBacktestConfig>) =>
@@ -245,7 +271,7 @@ export function AutoBacktestPanel({ onNavigate, hidden }: AutoBacktestPanelProps
   const applyPreset = (name: string) => {
     const preset = AUTO_BT_PRESETS[name];
     if (!preset) return;
-    setAutoBacktestConfig({
+    const next: AutoBacktestConfig = {
       ...defaultAutoBacktestConfig,
       ...preset,
       enabled: config.enabled,
@@ -255,7 +281,23 @@ export function AutoBacktestPanel({ onNavigate, hidden }: AutoBacktestPanelProps
       useAutoQty: config.useAutoQty,
       riskPerTrade: config.riskPerTrade,
       minQuantity: config.minQuantity,
-    });
+      maxQuantity: config.maxQuantity,
+      lotSize: config.lotSize,
+    };
+    // Carry the custom entry AND exit hooks across. No preset defines either, so spreading
+    // defaultAutoBacktestConfig would silently switch a configured hook off — the run would
+    // then quietly go back to the built-in chain with no indication the strategy had been
+    // dropped. Presets describe filter thresholds; they have no opinion on your hooks.
+    for (const k of ['uptrend', 'downtrend', 'range', 'reversal'] as RegimeKey[]) {
+      next[k] = {
+        ...next[k],
+        entryHookId: config[k].entryHookId,
+        entryHookMode: config[k].entryHookMode,
+        exitHookId: config[k].exitHookId,
+        exitHookMode: config[k].exitHookMode,
+      };
+    }
+    setAutoBacktestConfig(next);
   };
 
   const handleExportConfig = () => {
@@ -277,9 +319,11 @@ export function AutoBacktestPanel({ onNavigate, hidden }: AutoBacktestPanelProps
   const regimes: RegimeKey[] = ['uptrend', 'downtrend', 'range', 'reversal'];
   const confirmationCount = countActiveConfirmationFilters(activeRules);
   const exitMechanismCount = countActiveExitMechanisms(activeRules);
+  const patternSlotCount = countLegPatternSlots(activeRules);
   const stepsWithBadge: StepDef[] = WORKFLOW_STEPS.map(s =>
     s.key === 'confirmation' ? { ...s, badge: confirmationCount }
       : s.key === 'exit' ? { ...s, badge: exitMechanismCount }
+      : s.key === 'pattern' ? { ...s, badge: patternSlotCount }
       : s
   );
 
@@ -525,7 +569,8 @@ export function AutoBacktestPanel({ onNavigate, hidden }: AutoBacktestPanelProps
               return (
                 <button
                   key={r}
-                  onClick={() => { setActiveRegime(r); setActiveStep('market'); }}
+                  // Keep the open section (or all-collapsed) when switching regimes
+                  onClick={() => setActiveRegime(r)}
                   className={`flex-1 flex flex-col items-center gap-0.5 py-1.5 rounded-lg border text-[10px] font-medium transition-all duration-150 active:scale-[0.98] relative ${
                     isActive
                       ? `${meta.activeBg} text-white border-transparent shadow-sm`
@@ -578,7 +623,7 @@ export function AutoBacktestPanel({ onNavigate, hidden }: AutoBacktestPanelProps
               </button>
               {showMetrics && (
                 <div className="px-3 pb-3">
-                  <EntryMetricsDashboard trades={trades} />
+                  <EntryMetricsDashboard trades={trades} chargesConfig={showCharges ? chargesConfig : undefined} />
                 </div>
               )}
             </div>
@@ -602,6 +647,35 @@ export function AutoBacktestPanel({ onNavigate, hidden }: AutoBacktestPanelProps
             )}
           </div>
 
+          {trades.length > 0 && !isBatchRunning && (
+            <div className={`rounded p-2 text-[11px] flex items-center gap-2 ${chargesSummary ? 'bg-amber-50 border border-amber-200' : 'bg-gray-50 border border-gray-200'}`}>
+              <Receipt size={12} className="text-amber-600 shrink-0" />
+              {chargesSummary ? (
+                <span className="flex-1 min-w-0 text-gray-600" title={`Brokerage ${chargesSummary.totals.brokerage.toFixed(2)} | STT ${chargesSummary.totals.stt.toFixed(2)} | Exch ${chargesSummary.totals.exchange.toFixed(2)} | GST ${chargesSummary.totals.gst.toFixed(2)} | Stamp ${chargesSummary.totals.stamp.toFixed(2)} | SEBI+IPFT ${(chargesSummary.totals.sebi + chargesSummary.totals.ipft).toFixed(2)}`}>
+                  Gross <b className={chargesSummary.gross >= 0 ? 'text-green-600' : 'text-red-600'}>{formatCurrency(chargesSummary.gross)}</b>
+                  {' · '}Charges <b className="text-amber-600">{formatCurrency(chargesSummary.totals.total)}</b>
+                  {' · '}Net <b className={chargesSummary.net >= 0 ? 'text-green-600' : 'text-red-600'}>{formatCurrency(chargesSummary.net)}</b>
+                  <span className="text-gray-400">{' · '}Turnover {formatCurrency(chargesSummary.totals.turnover)} ({chargesSummary.totals.orders} orders)</span>
+                </span>
+              ) : (
+                <span className="flex-1 text-gray-400">Charges hidden — P&amp;L shown gross</span>
+              )}
+              <button
+                onClick={() => setShowCharges(!showCharges)}
+                className="shrink-0 px-1.5 py-0.5 rounded text-[10px] font-semibold text-amber-700 hover:bg-amber-100"
+              >
+                {showCharges ? 'Hide' : 'Show charges'}
+              </button>
+              <button
+                onClick={() => setIsChargesPanelOpen(true)}
+                className="shrink-0 p-0.5 rounded text-amber-700 hover:bg-amber-100"
+                title="Edit charge rates"
+              >
+                <Settings2 size={12} />
+              </button>
+            </div>
+          )}
+
           {isBatchRunning && (
             <div>
               <div className="flex justify-between text-[10px] text-gray-500 mb-1">
@@ -617,10 +691,12 @@ export function AutoBacktestPanel({ onNavigate, hidden }: AutoBacktestPanelProps
             </div>
           )}
 
+          <HookDebugToggle />
+
           <button
             onClick={runBatchAutoBacktest}
             disabled={isBatchRunning || candles.length === 0 || !config.enabled}
-            className="w-full py-2.5 px-3 bg-indigo-600 hover:bg-indigo-700 disabled:opacity-50 disabled:cursor-not-allowed text-white text-xs font-bold rounded-lg flex items-center justify-center gap-2 transition-all duration-150 active:scale-[0.99] shadow-sm hover:shadow-md"
+            className={`w-full py-2.5 px-3 ${hookDebugMode ? 'bg-amber-600 hover:bg-amber-700' : 'bg-indigo-600 hover:bg-indigo-700'} disabled:opacity-50 disabled:cursor-not-allowed text-white text-xs font-bold rounded-lg flex items-center justify-center gap-2 transition-all duration-150 active:scale-[0.99] shadow-sm hover:shadow-md`}
           >
             {isBatchRunning ? (
               <>
@@ -628,12 +704,12 @@ export function AutoBacktestPanel({ onNavigate, hidden }: AutoBacktestPanelProps
                   <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
                   <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8z" />
                 </svg>
-                Running...
+                {hookDebugMode ? 'Running on main thread…' : 'Running...'}
               </>
             ) : (
               <>
                 <Zap size={13} />
-                Run Full Backtest (instant)
+                {hookDebugMode ? 'Run Full Backtest (main thread)' : 'Run Full Backtest (instant)'}
               </>
             )}
           </button>
@@ -645,7 +721,9 @@ export function AutoBacktestPanel({ onNavigate, hidden }: AutoBacktestPanelProps
         onChange={updateGlobal}
         isOpen={isSessionSettingsOpen}
         onClose={() => setIsSessionSettingsOpen(false)}
+        onOpenCharges={() => setIsChargesPanelOpen(true)}
       />
+      <ChargesSettingsPanel isOpen={isChargesPanelOpen} onClose={() => setIsChargesPanelOpen(false)} />
     </div>,
     document.body
   );

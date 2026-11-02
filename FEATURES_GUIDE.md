@@ -26,6 +26,7 @@ A complete reference of every feature available in the application.
 18. [Smart Exit (Order Chaser)](#18-smart-exit-order-chaser)
 19. [Keyboard Shortcuts](#19-keyboard-shortcuts)
 20. [Auto-Backtest Saved Configurations](#20-auto-backtest-saved-configurations)
+21. [Trading Charges (F&O)](#21-trading-charges-fo)
 
 ---
 
@@ -110,6 +111,82 @@ Each pivot marker shows:
 - Suggested SL (lowest/highest of current + previous candle ± 2 pts)
 - SL distance
 
+### Market Structure (exp.) — pivot structure bands
+
+**Experimental, off by default.** Toggle it under Indicators → **Market Structure (exp.)**. It shades the chart the way a hand-drawn structure read does: **red = Down, blue = Range, green = Up**.
+- A vertical line marks each structure change.
+- The label at the top reads like `UP · Stairs` or `RANGE · Tight range`. `RANGE → UP?` / `RANGE → DOWN?`, drawn as the blue range band hatched in green or red, means a breakout attempt that has not escaped yet.
+- Range segments show their box edges as dashed lines. Trend segments show their protected HL/LH as a dotted line.
+- `✕ failed BO` marks where a breakout fell back into the box.
+- The toolbar shows a **PS:** badge with the current bar's read.
+
+The layer is read-only: it draws on the canvas and never touches the store, markers or trades. The classifier is described under **Pivot Market Structure** in section 6.
+
+### Trendlines (pivot) — major sloped support / resistance
+
+Toggle it under Indicators → **Trendlines (pivot)**. It draws the major trendlines as of the current replay bar: **red = resistance** (through swing highs) and **green = support** (through swing lows).
+- The best line per side is solid. Other kept lines are dashed.
+- Dots mark the swing points touching the line. The label at the right end reads `R·3t` / `S·4t` (side · touches).
+- Lines update bar by bar. A line disappears as soon as a close breaks through it.
+
+**How a line is chosen** (code: `utils/marketStructure/trendlines.ts`, pivots only, no ATR/EMA):
+1. Swing points come from confirmed pivots. Each one is re-anchored to the swing's true high/low, and the sequence is repaired into a proper zigzag.
+   - The pivot detector can skip a turn. For example, a gap-down low followed by a rally fires the next high pivot with no low in between.
+   - The repair puts that missed extreme back as a swing point. It is often the major low or high.
+2. They are filtered to the chosen *Swing degree*, so lines are drawn through major swings, not every wiggle. A degree-2 high is a swing high above the swing highs on either side of it, and a degree-2 low is a swing low below the lows on either side of it. Degree 3 repeats that filter on the degree-2 points, and so on. The newest point of each type only counts once the next one has printed (look-ahead safe). The last *Window* points at that degree are used.
+   - The default is degree 2. Lower timeframes need a higher degree for the same multi-day lines: 2 on 15m, 3 on 5m. On the Nifty 29 Jan 2024 15m chart, degree 2 finds the support through the 8, 10 and 18 Jan lows (the 24 Jan wick dips just below it). Degree 3 finds the same line on 5m. Degree 1 gives short-term lines through every swing.
+   - If a side has no valid line at the chosen degree, it falls back one degree at a time. A clean trend has no degree-2 lows, so its support comes from the pullback lows instead of disappearing.
+3. Every pair of swing highs (lows) at that degree is a candidate resistance (support) line. A candidate is rejected if the current close is beyond it, or if more than *Max closes through* closes crossed it since its first touch. Beyond means past the touch tolerance, which is *Touch tolerance* × the median swing size at that degree.
+4. Survivors need *Min touches* swing points (at that degree) within tolerance. They are scored on touches (squared, so a confirming third touch outranks a longer two-point line), span, the size of the reaction off each touch, recency of the last touch, and wick pierces (penalty).
+5. Lines whose price at the current bar lies within tolerance of a better line are merged. The top *Lines per side* are kept.
+
+**Settings:** Session Settings → **Trendlines (pivot)**: Swing degree, Window (pivots), Touch tolerance, Max closes through, Min touches, Lines per side.
+
+**Custom entry/exit hooks:** `ctx.trendlines()` returns `{ medianSwing, tolerance, resistance[], support[] }`. Each line has these fields, and the result is look-ahead safe:
+- `degree`: the degree the line was built at;
+- slope, intercept and `priceNow`;
+- touches and touch points, violations, pierces, reaction, span and score;
+- `medianSwing`, `tolerance` and `slopeNorm`;
+- `distance` = (close − priceNow) ÷ median swing.
+
+**Trend strength** (toolbar badge `TL: ▲ 0.45 · 3t · par` while the Trendlines layer is on):
+- **Direction:** read from the with-trend line, meaning rising support (up), falling resistance (down) or neither (flat). A line is flat when it moves less than its own tolerance across its span.
+- **Steepness** (`slopeNorm`): net progress per swing cycle (one up and one down swing), in median swings. About 0.3–0.5 is a steady trend; 1+ is very steep, often climactic.
+- **Strength 0–1:** min(steepness, 1) × min(touches, 4)/4, cut by 30% when the channel converges.
+- **Channel:** best support vs best resistance width since their common start.
+  - *parallel*: the trend is healthy.
+  - *converging*: a wedge or triangle, so the trend is running out of room.
+  - *expanding*: the trend is accelerating or getting volatile.
+- **Extension:** how far the close has run from the with-trend line, in median swings. A large value means price is overextended and a pullback to the line is likely.
+
+**Trading with trendlines (auto-backtest, per regime, price action only):**
+- **Entry → Trendline Setup:** a location condition. The regime's Entry Signal (Pivot, H/L or Confluence) is still the trigger, but it must fire on the side the setup allows. *Within bars* (default 6) and *Zone ×* (default 1, × the line's touch tolerance) bound it.
+  - **Bounce** is for trend pullbacks. A with-trend line was touched (low within the zone) in the window and still holds: rising or flat support for longs, falling or flat resistance for shorts. A long cannot bounce off falling support.
+  - **Break & retest** is for a trend turning. A line from a recent state was closed through by more than its tolerance. Then a later bar came back to it, and every close since held on the new side.
+  - **Failed breakout** is for ranges. A close went through a line, then price closed back inside and is still inside, and the trade fades it. A false break below support gives a long; above resistance gives a short.
+  - Pick the setup by market structure (each regime has its own): bounce in Uptrend/Downtrend, failed breakout in Range, break & retest for the turn.
+- **Risk → Trendline SL:** one line-tolerance beyond the setup's line (bounce, retest), or beyond the failed excursion's extreme (failed breakout). Without a setup it falls back to the Pivot SL.
+- **Exit → Target → Opposite trendline:** the opposite line (resistance for longs, support for shorts), one tolerance short of it, at entry. If no opposite line lies beyond entry, the RR value is used.
+- **Exit → Trendline Exits:**
+  - **Exit on line break:** exits at bar close when the close goes beyond the with-trade line by more than its tolerance. The line is the one at entry, or the current one if tighter. Exit reason `TRENDLINE_BREAK` (badge *TL BREAK*). Gate-mode exit hooks can veto it.
+  - **Trail along line:** ratchets the SL to the line (as known at the prior bar) minus its tolerance and *Buffer pts*. It never loosens. If the Pivot trail is also on, the tighter stop wins.
+- **Leg Pattern → window clauses:**
+  - `TL trend strength`, `TL support/resistance distance` (median swings, + on the line's own side), `TL support/resistance touches`, `TL support/resistance slope`.
+  - The `TL channel` chips: parallel / converging / expanding.
+  - Use these as entry filters with any entry mode. Examples: `TL trend strength ≥ 0.3`, `TL resistance distance ≥ 1` (room to target), `TL channel` ≠ converging.
+- **Preset "Trendline (structure-aware)":** regime source = pivot structure, with every EMA filter off. Each regime is also gated on its pivot structure.
+
+  | Regime | Direction | Setup | SL | Target / exits |
+  |---|---|---|---|---|
+  | Uptrend | long | Bounce | Trendline | Trail + exit on break |
+  | Downtrend | short | Bounce | Trendline | Trail + exit on break |
+  | Range | both | Failed breakout | Trendline | Opposite-line target |
+  | Reversal | both | Break & retest | Trendline | Exit on break |
+
+  On Nifty 15m Jul 2023 – Jun 2024 it takes only a handful of trades. Major-line setups that coincide with an H/L signal are rare. Session auto square-off also ends intraday trades before a trendline exit can act, so turn it off for multi-day trendline trades.
+- **Trade records:** every auto entry is stamped with `tlStrengthAtEntry`, `tlSupDistAtEntry`, `tlResDistAtEntry`, `tlChannelAtEntry` and `tlSetupAtEntry`. These appear in the trade popup's raw record, and the entry reason is tagged `TL-bounce` / `TL-retest` / `TL-failed-BO`.
+- **Tests:** `npm run backtest:trendline`.
+
 ### Al Brooks H/L System
 
 Pullback counting for trend-following setups.
@@ -143,6 +220,7 @@ All drawings persist in the Zustand store and save with the session.
 | **Fibonacci Retracement** | Click high and low | Auto-draws 7 fib levels (0, 23.6, 38.2, 50, 61.8, 78.6, 100%) |
 | **Risk/Reward Tool** | Click entry, drag | Visualises risk:reward ratio with coloured zones |
 | **Callout / Text** | Click a candle | Adds an annotation label at that point |
+| **Measure** (ruler icon, `M`) | Click and drag from start to end | TradingView-style price/date range: shaded box (blue if the end is above the start, red if below) with a label showing price change, % change from the start price, bar count and elapsed time (e.g. `+12.50 (+1.25%)` / `15 bars, 1h 15m`). Saved like any other drawing, so it can be selected, moved, resized or deleted. Bar count is read from the chart at render time, so it stays correct after a reload. |
 
 ### Managing Drawings
 
@@ -203,7 +281,7 @@ At 1× speed, one candle advances per second. At 10×, ten candles per second.
 ### SL/TP Auto-Exit
 
 When `autoExitTarget` is enabled in settings, the chart checks on every candle advance whether the candle's low/high breaches the set Stop Loss or Target, and exits automatically. The **fill price** is controlled by `autoBacktestConfig.slTpFillMode` (default `'exact'`), and applies uniformly to every backtest trade — manual and auto-backtest alike:
-- **`exact`** (default): fills at the exact SL/TP price the instant intrabar high/low touches it — no slippage beyond the planned risk.
+- **`exact`** (default): fills at the exact SL/TP price the instant intrabar high/low touches it — no slippage beyond the planned risk. **Gap exception:** if a bar *opens* already beyond the SL (e.g. an overnight gap on a carry-over trade), the SL fills at that bar's open, so the loss can exceed the planned risk. TP still fills at the exact target price. Live ticks have no bar open, so they keep the SL price.
 - **`close`** (legacy/opt-in): only fires once the candle's *close* crosses the level, filled at that close price — can overshoot the planned risk substantially when a bar gaps through the level intrabar (measured ~51% average overshoot on a real sample before this mode existed).
 
 ### Settings Panels
@@ -270,17 +348,22 @@ Trades are fully simulated — no real money involved.
 
 **Component:** `AutoBacktestPanel` (full-screen panel, portals to `document.body`). Reachable from the Playback toolbar's Zap button, or directly from any other full-page view via its header's [PageNavTabs](#quick-reference--ui-layout) — see the cross-page navigation note in the Quick Reference section below. Because it's a `createPortal`, App.tsx controls its visibility with a `hidden` prop on the component itself (not a wrapping CSS class) — a wrapping `display:none` div has no effect on portaled content.
 
-Per-regime rules are configured through a 5-section **Market → Entry → Confirmation → Exit → Risk** workflow, rendered as a **single-open accordion**: each section is a collapsible `AccordionSection` header (icon + label + optional badge + chevron) stacked beneath the regime tabs (Uptrend/Downtrend/Range/Reversal), and expanding one section auto-collapses whichever other section was open — only one section's content is ever mounted at a time. Switching regime tabs collapses back to Market-only for orientation; a `WorkflowStep` value (`activeStep`) is local UI state only — it is never persisted to `RegimeRules`/`AutoBacktestConfig`, so it doesn't affect saved configs or presets.
+Per-regime rules are configured through a 5-section **Market → Entry → Confirmation → Exit → Risk** workflow, rendered as a **single-open accordion**: each section is a collapsible `AccordionSection` header (icon + label + optional badge + chevron) stacked beneath the regime tabs (Uptrend/Downtrend/Range/Reversal), and expanding one section auto-collapses whichever other section was open — only one section's content is ever mounted at a time. Clicking the open section's header again collapses it (all sections closed). Switching regime tabs keeps the same section open (or all collapsed), so you can compare e.g. Market across Bull/Bear/Range/Reversal; a `WorkflowStep` value (`activeStep`) is local UI state only — it is never persisted to `RegimeRules`/`AutoBacktestConfig`, so it doesn't affect saved configs or presets.
 
 - **Market section** — regime Enable toggle, Direction (Long/Short/Both), and two structure gates: **HT Structure** and **LT Structure**. Both offer 5 options (Any / Bull Trend / Bear Trend / Range / Reversal) and gate signal generation in `evaluateAutoSignals` — a regime's rules are skipped for the bar unless both gates pass. `bull_trend`/`bear_trend` match only the clean trend state (the choppy "Trending-range" variant is bucketed under `range`); `reversal` matches either direction. LT Structure reads the same `ltMarket` value used elsewhere to pick which regime's rules try first for a bar — this filter turns that into a hard requirement instead of just an ordering preference, so a regime's rules can be locked to only fire when the bar's own structure genuinely matches (previously a regime's rules could fire on a bar structurally classified into a *different* regime, gated only by whatever other filters were configured). HT Structure now has a real Reversal state too (`pivotAnalysis.ts`'s `analyzeMarketStructure`, mirroring the LT branch's slope+pivot-label logic) — previously HT could only ever read Bull-Trend/Bear-Trend/Range. `ltStructureFilter` is optional and defaults to `'any'`, so saved configs from before this field existed behave unchanged.
 - **Entry section** — Entry Signal mode (Pivot/H-L Signal/Confluence) with H1/H2/L1/L2 toggles and confluence lookback, MA Filter, and the single most-recent Pivot Seq filter.
 - **Confirmation section** — all Quality Setup Filters (ATR Depth, Efficiency Ratio, Bar Overlap, Bar Range, Break Count, Consecutive Breaks, EMA21/EMA50 Slope, EMA20 Gap-Bar/Bias) plus Pivot Sequence History (High/Low Sequence, Pivot Gap). Its accordion header shows a live badge counting how many of these are currently active.
-- **Exit section** — Target RR, the four Price-Action Exit Engine mechanisms (Reversal, Opposite Signal, Pivot Trailing Stop, Leg Decay — see below), plus a read-only shortcut summarizing the session's auto square-off time and SL/TP fill mode with a button that opens Session Settings. Its accordion header shows a live badge counting how many exit mechanisms are active.
+- **Leg Pattern section** — the ordered leg-shape matcher (see "Leg Pattern — describing a shape, not a threshold" below). Off by default; its accordion header badges the number of configured slots.
+- **Exit section** — Target RR, the four Price-Action Exit Engine mechanisms (Reversal, Opposite Signal, Pivot Trailing Stop, Custom Exit Hook — see below), plus a read-only shortcut summarizing the session's auto square-off time and SL/TP fill mode with a button that opens Session Settings. Its accordion header shows a live badge counting how many exit mechanisms are active.
 - **Risk section** — Stop-loss method (Pivot/ATR/Fixed) and its amount, plus a read-only shortcut summarizing position-sizing (auto risk-based vs. manual) with a button that opens Session Settings.
 
 Two elements stay pinned above the scrollable accordion regardless of which section is expanded: the **Live Preview Strip** (see below) and a **Strategy Summary** chip bar — a plain-language, read-only recap of the active regime's current rules (direction, entry mode, MA filter, confirmation-filter count, SL method, RR), derived entirely from `RegimeRules` with no new state. Clicking a chip expands the accordion section that owns that setting. A **Run Full Backtest** footer (status + progress bar + the button itself) stays pinned below the scrollable area so it's always reachable without scrolling.
 
-Session-wide settings that apply across all regimes — Position Management, Trading Window, Quantity/Risk sizing, Auto Square-off, SL/TP Fill Mode, and the Instrumentation Lookbacks — live in a **Session Settings** slide-over drawer (opened from a header button), separate from the per-regime workflow since they aren't scoped to Market/Entry/Confirmation/Exit/Risk. The Instrumentation Lookbacks card additionally hosts **Leg Min Bars** / **Leg Max Bars** (defaults 5/15) — the bounds for the completed-breakout-leg metric windows described under Entry Instrumentation below.
+Session-wide settings that apply across all regimes — Position Management, Trading Window, Quantity/Risk sizing, Auto Square-off, SL/TP Fill Mode, and the Instrumentation Lookbacks — live in a **Session Settings** slide-over drawer (opened from a header button), separate from the per-regime workflow since they aren't scoped to Market/Entry/Confirmation/Exit/Risk. The Instrumentation Lookbacks card additionally hosts **Leg Min Bars** / **Leg Max Bars** (defaults 5/15) — the bounds for the completed-breakout-leg metric windows described under Entry Instrumentation below — and **Min Pivot Gap** (default 2, range 1–10), described next.
+
+**Quantity limits.** With *Auto (risk-based)* on, quantity is `floor(₹ Risk / SL distance)`. **Min** and **Max** bound it: if the computed quantity falls below Min (SL too wide) or above Max (SL too tight), the signal is **skipped, not resized**, and the skip reason is logged (e.g. `Skipped: qty 1200 > max 300`). Leave Max empty for no upper limit. **Lot** rounds the quantity *down* to a whole number of lots (default **65**, e.g. 137 becomes 130) so the actual risk never exceeds ₹ Risk; Min/Max then apply to the rounded quantity, and a signal that can't afford one lot is skipped (`Skipped: qty 0 (< 1 lot of 65)`). Set Lot to 1 for no rounding. A custom entry hook that returns its own `quantity` bypasses all of these.
+
+**Min Pivot Gap (`minPivotGapBars`)** — the minimum bar separation between two pivots of the **same type**. Both pivot-detection branches can fire on consecutive bars, and in an uninterrupted impulse the "simple break" branch fires on nearly every one, so without a separation rule one continuous move printed a swing low on bar *i* and another on bar *i+1* — and the second was labelled `HL` purely because that bar's low happened to sit above the previous *bar's* low, with no retracement in between (mirror case: `LH` then `HH` on adjacent bars). The rule is **keep-first**: the first bar of a run of qualifying same-type signals is kept and every later signal within the window is dropped — the surviving pivot is never moved to a different bar and its price and SL distance are unchanged, so nothing repaints. Bullish and bearish are tracked independently, so a genuine fast reversal (a swing low then a swing high two bars later) still registers. Setting it to **1** restores the legacy no-suppression behaviour. Raising it gives a sparser structure skeleton; because market structure is classified off the last **4** pivots, the gap also widens the bar span that regime read covers. Configs saved before this setting existed pick up the default of 2, so their pivot sets — and therefore regime labels, pivot-sequence filters, average-pivot-gap filters and pivot stop-losses — shift accordingly; see `IMPACT.md` for the full fan-out.
 
 **Date Range control (header):** a button next to the page title showing the currently loaded span (e.g. `2021-01-01 → 2026-01-20`) — click it to open a compact popover with a **Year** quick-select, **From Date**/**To Date** inputs, and a **Load Data** button, so the date range being backtested can be changed without leaving this page (previously required switching back to the Chart page's Data Settings panel). Reuses the same Year quick-select behaviour as the Chart page (`fromDate` = Jan 1, `toDate` = Dec 31, capped at today for the current year) and keeps the current timeframe from the session's config. Refetches (API source) or re-filters (Local source) via the shared `sessionStore.reloadCandlesWithRange()` action — the same one the Chart page's Data Settings panel uses — so both stay in sync. Disabled until a session is loaded.
 
@@ -311,16 +394,18 @@ Al Brooks-style trade management for **auto-entered backtest positions only** �
 
 All four mechanisms default to **off** — existing saved configurations and sessions are unaffected until explicitly enabled.
 
-Canonical per-bar evaluation order (identical in both loops): trail stop → SL/TP touch check → signal exits (Reversal → Opposite Signal → Leg Decay) → auto square-off → new entry check.
+Canonical per-bar evaluation order (identical in both loops): trail stop → SL/TP touch check → signal exits (Reversal → Opposite Signal → Custom Exit Hook) → auto square-off → new entry check.
 
 | Mechanism | Toggle | Trigger | Exit Reason |
 |-----------|--------|---------|--------------|
 | **Reversal Exit** | `exitOnReversal` | The LT market structure (same read as the Trend Reversal flag) reads against the position for `exitReversalConfirmBars` consecutive bars (default 1). `exitReversalRequireWithTrend` (default on) requires structure to have read *with* the trade at least once before the exit can arm — turn off for counter-trend regimes (Range/Reversal), which may never see a with-trend read. | `REVERSAL` |
 | **Opposite Signal Exit** | `exitOnOppSignal` | An opposite Brooks pullback signal fires on the current bar against the position (L1/L2 for a long, H1/H2 for a short) — `exitOppAllow1`/`exitOppAllow2` pick which count (default: 2nd only, the classic Brooks reversal trigger; 3rd+ signals never count). | `OPP_SIGNAL` |
 | **Pivot Trailing Stop** | `exitTrailPivot` | Ratchets the stop-loss behind the 3-bar swing extreme of the most recent **confirmed** same-side pivot (bullish pivot's low cluster for longs, bearish pivot's high cluster for shorts), padded by `exitTrailPivotBufferPoints` (default 2). Only pivots confirmed through the prior bar are used, so a pivot can never move the same bar's own SL touch check — and the stop only ever tightens, never loosens. The actual exit still goes through the normal SL machinery; the closing trade is flagged `slTrailed`. | `SL` (+ `slTrailed`) |
-| **Leg Decay Exit** | `exitLegDecay` | Re-grades the newest **completed** with-trend leg formed *after* entry (never re-judges the entry leg the Confirmation filters already approved) using the same metrics as the Confirmation step's leg-strength filters — Efficiency Ratio, Consecutive Breaks, Break Count, EMA21 Slope, EMA20 Gap-Bar — each with its own `none`/`min`/`max` mode + threshold. Waits at least `exitLegDecayMinBarsInTrade` bars (default 3) before checking; exits once at least `exitLegDecayMinFails` of the enabled checks fail on the same bar (default 1). Windows respect the session's Leg Min/Max Bars. | `LEG_DECAY` |
+| **Custom Exit Hook** | `exitHookMode` + `exitHookId` | A TypeScript function you write decides, bar by bar, whether to hold the trade, move its stop/target, or close it. See "Custom Exit Hook" below. | `EXIT_HOOK` (or `SL` when it only moved the stop) |
 
-All three signal-based exits (Reversal, Opposite Signal, Leg Decay) fill at the current bar's **close** and exit immediately — there is no "tighten stop first" option in this version. The Pivot Trailing Stop instead only ever moves the SL; the actual exit fires later through the regular SL touch check (`slTpFillMode` still governs the fill price there).
+Both built-in signal exits (Reversal, Opposite Signal) fill at the current bar's **close** and exit immediately — there is no "tighten stop first" option for them. A Custom Exit Hook may name any price inside the bar instead, and *can* tighten the stop rather than exiting. The Pivot Trailing Stop only ever moves the SL; the actual exit fires later through the regular SL touch check (`slTpFillMode` still governs the fill price there).
+
+> **Removed: Leg Decay Exit.** The built-in mechanism (`exitLegDecay` plus eleven `exitDecayXxx` fields) is gone, replaced by the Custom Exit Hook. Its exact logic ships as the **Leg Decay** hook in `frontend/src/strategies/exits/legDecay.ts` — same five checks, same guards, now editable in code instead of through five dropdowns. Saved configurations that set the old fields simply ignore them; pick the `leg-decay` hook in the Exit step to get the behaviour back. Trades closed by the old mechanism keep their `LEG_DECAY` exit reason in the log and still render with their own badge.
 
 ---
 
@@ -333,17 +418,21 @@ The metrics below are computed into an `EntryMetricsSnapshot` once per bar for g
 - `atrDepthAtEntry` — distance from EMA21 in ATR units. Gates via `atrDepthFilter` (`none`/`max`/`min`) + `atrDepthThreshold` (default `1.5`). *(Stamped on `Trade`.)*
 - **Bar Overlap** — per-bar overlap ratio for the last N bars, and its mean (choppiness proxy: high overlap = range/chop, low overlap = clean trend bars). Lookback `N` via the **Overlap** field (default 8). Gates via `barOverlapFilter` (`none`/`max`/`min`) + `barOverlapThreshold` (default `0.4`) — **enabled by default** (`max` 0.4) on Uptrend/Downtrend regimes.
 - **Bar Range** — mean candle range (high-low) over the last N bars ending at entry, overall and split by bull/bear bar direction. Lookback `N` via the **Bar Range** field (default 20). An exact doji (close = open) counts toward the overall average only, not bull or bear. Gates via `barRangeFilter`: `none` / `min` / `max` (threshold in points, `barRangeThreshold`) / `dominance` (the trade-direction-aligned average must exceed the opposite side's average by `barRangeDominanceThreshold`×, e.g. bull range > bear range for longs) — **enabled by default** (`dominance` 1.0×) on Uptrend/Downtrend regimes.
-- `brrAvgIQRAtEntry` *(stamped on `Trade`)* — IQR-trimmed mean Body-to-Range Ratio (`|close-open|/(high-low)`) over the last N bars ending at entry: values outside the Tukey fence `[Q1-1.5×IQR, Q3+1.5×IQR]` are dropped before averaging, so one freak doji/marubozu bar can't skew the window the way a plain mean would (falls back to the plain mean if the fence would drop every sample). Robust companion to the leg-windowed `brrAvg` inside `legSequenceAtEntry`. Lookback `N` via the **Bar Quality** field (default 20). Instrumentation only — no `RegimeRules` filter/threshold gate yet.
+- `brrAvgAtEntry` / `brrAvgIQRAtEntry` *(both stamped on `Trade`)* — the plain mean and the IQR-trimmed mean Body-to-Range Ratio (`|close-open|/(high-low)`) over **the same window**: the last N bars ending at entry, or the graded breakout leg's own bars when one applies. `brrAvgAtEntry` counts every bar. `brrAvgIQRAtEntry` first drops values outside the Tukey fence `[Q1-1.5×IQR, Q3+1.5×IQR]`, so one freak doji/marubozu bar can't skew it (falls back to the plain mean if the fence would drop every sample) — meaning the two are identical whenever the window has no outliers, and a wide gap between them is itself the signal that the window was outlier-skewed. Both are companions to the leg-windowed `brrAvg` inside `legSequenceAtEntry`. Lookback `N` via the **Bar Quality** field (default 20, shared by both). Instrumentation only — no `RegimeRules` filter/threshold gate yet.
+- `rangeAvgAtEntry` / `rangeAvgIQRAtEntry` and `bodyAvgAtEntry` / `bodyAvgIQRAtEntry` *(all four stamped on `Trade`)* — actual-point-value counterparts to the BRR pair above, over the exact same window and samples (same **Bar Quality** lookback, shared — not a separate setting): `rangeAvg*` is the bar range (`high-low`, in index points) and `bodyAvg*` is the bar body (`|close-open|`, in index points), each as a plain mean and a Tukey-fence IQR-trimmed mean. Use these when you want the outlier-robust average expressed in real price units (e.g. "~40 NIFTY points") rather than BRR's normalized 0–1 ratio. Instrumentation only — no `RegimeRules` filter/threshold gate yet.
 - **Bar quality ratios** (BRR / CLV / UWR / LWR) — per-candle ratios across the graded window, oldest→newest (a 7-bar leg yields 7 values — index 0 is the leg's first bar, the last is its swing-extreme bar), plus each series' mean. Carried per segment on `legSequenceAtEntry` (`brr`/`clv`/`uwr`/`lwr` arrays in `full` detail mode, `brrAvg`/`clvAvg`/`uwrAvg`/`lwrAvg` always) — there are no flat `Trade`-level arrays for these. **Body-to-Range Ratio (BRR)** = `|close-open|/(high-low)` — high = trend/conviction bar, low = doji/spinning-top indecision. **Close Location Value (CLV)** = `(close-low)/(high-low)` — near 1 = closed near the high (bullish), near 0 = closed near the low (bearish); "where the bar finished the fight". **Upper/Lower Wick Ratio (UWR/LWR)** = `(high-max(open,close))/(high-low)` and `(min(open,close)-low)/(high-low)` — a large UWR on an up-close bar (or LWR on a down-close bar) exposes rejection at the extreme that the close alone would hide, i.e. a "big bull bar" that's actually a fakeout. Lookback `N` (when no completed leg applies) via the **Bar Quality** field (default 20). Instrumentation only — no `RegimeRules` filter/threshold gates on these yet.
 - **Efficiency Ratio** — Kaufman Efficiency Ratio over the last N bars: net price displacement divided by total bar-to-bar distance traveled, bounded 0–1 (near 1 = efficient one-directional trend, near 0 = chop/cancelling moves). Lookback `N` via the **Efficiency** field (default 10). Gates via `efficiencyRatioFilter` (`none`/`min`/`max`) + `efficiencyRatioThreshold` (default `0.3`) — e.g. require ER ≥ threshold to avoid trend-following entries into chop.
 - **Break Count** — over the last N bars, how many bars broke the immediately preceding bar's high vs. its low (independent counts — an outside bar counts toward both). A momentum/persistence proxy: a fading trend shows the count dropping even while other metrics still look fine. Lookback `N` via the **Breaks** field (default 20). Gates via `barBreakFilter` (`none`/`min`/`max`) + `barBreakThreshold` (default `5`), direction-aligned (high-break count for longs, low-break count for shorts).
 - `ema21SlopeAtEntry` / `ema50SlopeAtEntry` *(stamped on `Trade`)* — points-per-bar rate of change of the EMA21/EMA50 over their own configurable lookbacks (same formula used internally for regime detection). Lookbacks via the **EMA21**/**EMA50** fields (defaults 10 and 20). Gate via `ema21SlopeFilter` / `ema50SlopeFilter` (`none`/`min`/`max`) + paired thresholds (default `0` — sign-only: require the EMA sloping in the trade's favor, any steepness; a nonzero threshold adds a minimum-steepness requirement, but is instrument/timeframe-scale-dependent since slope is in raw price points-per-bar) — **enabled by default** (`min` 0) on Uptrend/Downtrend regimes.
 - **Consecutive Breaks** — longest run of consecutive bars that each broke the prior bar's high **without** breaking its low (mirror for low-breaks) — the Brooks "impulse micro-channel" test, e.g. a clean 4-bar breakout. Unlike Break Count (total breaks, possibly scattered), this demands an unbroken streak; outside and inside bars reset the run. In H/L entry modes the run is searched over the completed breakout leg's own bars (see the leg-window paragraph below); the **Consecutive** lookback (Session Settings, default 10) applies to `PIVOT`-mode / entry-bar windows. Gates via `consecutiveBreakFilter` (`none`/`min` "Streak Required"/`max` "Streak Capped") + `consecutiveBreakThreshold` (default `4`), direction-aligned. Off by default on all regimes and presets.
-- `legSequenceAtEntry` *(stamped on `Trade`)* — **market-context leg sequence**: the last **Leg Seq N** (Session Settings, default 10) Al Brooks impulse legs *plus the pullback candles between them*, captured as a contiguous `LegSegment[]` ordered **newest→oldest** (index 0 is the segment closest to the entry bar, walking back in time). It is the **only** per-trade record of the graded leg — index 0's `leg` segment is the completed breakout leg the strength filters used, and its `startIndex`/`endIndex`/`startTime`/`endTime`/`barCount` replace the single-leg scalars that used to be stamped alongside it. Being a walkable history, it also covers the N-1 legs before it, for reading structure/trend/context. Legs come from the same H/L signal machinery (`calculateAlBrooksLegHistory`, no pivots); a `leg` segment is one impulse (start→swing-extreme), a `pullback` segment is the retrace between two legs (tagged with the direction opposite to the leg it retraces), so every candle from the oldest kept leg up to the entry bar belongs to exactly one segment — pullbacks are never dropped. Each segment carries `direction`, `barCount`, `startIndex`/`endIndex`, `startTime`/`endTime` (candle timestamps, for index-alignment-free chart mapping), `startPrice`/`endPrice`/`movePct`, the segment's price `high`/`low` (range extremes), per-segment `brrAvg`/`clvAvg`/`uwrAvg`/`lwrAvg`, `highBreakCount`/`lowBreakCount` and `bullCount` (how many of the segment's candles closed bull). **Two detail modes** via **Leg Seq Detail** (Session Settings): `full` also attaches per-candle `brr`/`clv`/`uwr`/`lwr` and `bullBear` arrays per segment (in-memory + JSON export); `avg` keeps only the averages/counts.
-  - **Per-candle bull/bear (`bullBear`)** — one entry per candle, oldest→newest, `1` = bull candle (`close > open`), `0` = bear or doji (`close <= open`); e.g. `[1,1,0,1]` for a 4-bar segment. Present on **both** `leg` and `pullback` segments, so you can see the counter-trend candles inside an impulse and the with-trend candles inside a pullback (a "pullback" tagged bear can still contain bull bars). It lines up index-for-index with the `brr`/`clv`/`uwr`/`lwr` arrays and with bars `startIndex…endIndex`. Its sum is `bullCount`, which — unlike the arrays — **is** persisted to Firestore, so bull/bear composition survives a session restore even when the per-candle detail doesn't. The per-candle arrays are **not persisted to Firestore** (stripped on save — averages/structure retained) to keep session docs small; the full arrays are recoverable via **Export JSON (full detail)** on the Performance dashboard. Rendered as a compact leg/pullback chip strip in the chart's trade-record popup; **clicking a chip highlights that segment's candles on the chart** (a translucent band, dashed for pullbacks, panned into view) and **expands a detail panel** with the segment's move/high/low/range/breaks/bull-bear bar counts/averages and a per-candle table (Dir ▲/▼ + BRR/CLV/UWR/LWR) aligned to the highlighted bars. Instrumentation only in Phase 1 (no `RegimeRules` filter gates yet — see Phase 2).
+- `legSequenceAtEntry` *(stamped on `Trade`)* — **market-context leg sequence**: the last **Leg Seq N** (Session Settings, default 10) Al Brooks impulse legs *plus the pullback candles between them*, captured as a contiguous `LegSegment[]` ordered **newest→oldest** (index 0 is the segment closest to the entry bar, walking back in time). It is the **only** per-trade record of the graded leg — index 0's `leg` segment is the completed breakout leg the strength filters used, and its `startIndex`/`endIndex`/`startTime`/`endTime`/`barCount` replace the single-leg scalars that used to be stamped alongside it. Being a walkable history, it also covers the N-1 legs before it, for reading structure/trend/context. Legs come from the same H/L signal machinery (`calculateAlBrooksLegHistory`, no pivots); a `leg` segment is one impulse (start→swing-extreme), a `pullback` segment is the retrace between two legs (tagged with the direction opposite to the leg it retraces), so every candle from the oldest kept leg up to the entry bar belongs to exactly one segment — pullbacks are never dropped. Each segment carries `direction`, `barCount`, `startIndex`/`endIndex`, `startTime`/`endTime` (candle timestamps, for index-alignment-free chart mapping), `startPrice`/`endPrice`/`movePct`, the segment's price `high`/`low` (range extremes), per-segment `brrAvg`/`clvAvg`/`uwrAvg`/`lwrAvg`, `highBreakCount`/`lowBreakCount`, `bullCount` (how many of the segment's candles closed bull) and `hlSeq` (the Al Brooks H/L labels fired inside it). **Two detail modes** via **Leg Seq Detail** (Session Settings): `full` also attaches per-candle `brr`/`clv`/`uwr`/`lwr`, `bullBear`, `hl` and raw `o`/`h`/`l`/`c` arrays per segment (in-memory + JSON export); `avg` keeps only the averages/counts/sequences. **No longer instrumentation-only:** the same sequence now also feeds entry gating via the Leg Pattern step (see "Leg Pattern — describing a shape, not a threshold" below), which rebuilds it live from the candles rather than reading the stamped copy — so a restored session whose per-candle arrays were stripped for storage still gates correctly.
+  - **Per-candle bull/bear (`bullBear`)** — one entry per candle, oldest→newest, `1` = bull candle (`close > open`), `0` = bear or doji (`close <= open`); e.g. `[1,1,0,1]` for a 4-bar segment. Present on **both** `leg` and `pullback` segments, so you can see the counter-trend candles inside an impulse and the with-trend candles inside a pullback (a "pullback" tagged bear can still contain bull bars). It lines up index-for-index with the `brr`/`clv`/`uwr`/`lwr` arrays and with bars `startIndex…endIndex`. Its sum is `bullCount`, which — unlike the arrays — **is** persisted to Firestore, so bull/bear composition survives a session restore even when the per-candle detail doesn't.
+  - **Per-candle Al Brooks H/L (`hl` / `hlSeq`)** — which candle each H1/H2/H3… / L1/L2/L3… pullback signal fired on, from the same H/L state machine that draws the chart's H/L markers (no pivots). `hl` is one entry per candle, oldest→newest, index-aligned with `bullBear`/`brr`/etc: the label on the bar it fired, `null` everywhere else — e.g. `[null,"H1",null,"H2",null,null,"H3",null]`. `hlSeq` is the same thing collapsed to a `'-'`-joined string (`"H1-H2-H3"`, `""` when none), and **is** persisted to Firestore, so the pullback count survives a session restore even when the array doesn't. **At most one label per candle** — H and L are mutually exclusive per bar (on an outside bar that breaks both sides, the close direction decides). Notes on reading it: (1) a segment can legitimately mix H and L labels (`"H7-L1-H8-L2"` on a pullback) — the H and L counters are independent state machines, only the per-bar slot is exclusive; (2) a count can restart mid-segment (`"L1-L2-L1"`) — that means price broke the swing, so Brooks counting reset, not that a signal was lost; (3) the labels are recorded unfiltered, so the ATR pullback-depth filter (which only hides markers on the chart) never leaves a hole like `H1 → H3` in the sequence; (4) a `leg` segment normally opens on its own side's label, since legs only ever start at an H/L bar. The per-candle arrays are **not persisted to Firestore** (stripped on save — averages/structure retained) to keep session docs small; the full arrays are recoverable via **Export JSON (full detail)** on the Performance dashboard. Rendered as a compact leg/pullback chip strip in the chart's trade-record popup; **clicking a chip highlights that segment's candles on the chart** (a translucent band, dashed for pullbacks, panned into view) and **expands a detail panel** with the segment's move/high/low/range/breaks/bull-bear bar counts/Brooks H/L sequence/averages and a per-candle table (Dir ▲/▼ + H/L label + BRR/CLV/UWR/LWR) aligned to the highlighted bars. ("Brooks H/L" is the pullback-count sequence; the separate "H/L breaks" stat is the high/low break counts.) Instrumentation only in Phase 1 (no `RegimeRules` filter gates yet — see Phase 2).
+  - **Per-candle OHLC (`o` / `h` / `l` / `c`)** — the raw price of every candle in the segment, as four parallel arrays oldest→newest, index-aligned with `bullBear`/`hl`/`brr`/etc. and with bars `startIndex…endIndex`. This is what makes a segment self-describing: instead of only knowing that bar 3 was a bull bar with BRR 0.82 and an H2 label, you have the prices it actually traded at, so an exported trade is a complete record of the price action leading into the entry — replayable without the original candle data. Careful with the names: `h`/`l` are the **per-candle** high/low series, while the segment's own `high`/`low` fields are the **extremes across the whole segment** (`high` = max of `h`, `low` = min of `l`; likewise `startPrice` = `o[0]` and `endPrice` = the last `c`). Like the other per-candle arrays these are `full`-detail only and **not persisted to Firestore** (stripped on save) — but nothing is really lost on a restore, because the four aggregates that summarise them are always-present fields that do persist; only the bar-by-bar resolution goes, recoverable via **Export JSON (full detail)**. Shown as **O/H/L/C** columns in the segment detail panel's per-candle table (which scrolls sideways now that it carries 11 columns), between the H/L label and the BRR/CLV/UWR/LWR ratios.
 
   **Completed-breakout-leg windows for pullback entries:** the leg-strength filters — Efficiency Ratio, Bar Overlap, Break Count, Consecutive Breaks, Bar Range (incl. dominance), and EMA20 Gap-Bar — plus the (currently unfiltered) Bar Quality instrumentation (BRR/CLV/UWR/LWR) grade the breakout leg that led into the pullback the entry sits in, over **the leg's own bars** (no fixed lookback). A leg **starts at the last H/L signal bar fired before its breakout** — breaking `hSwingHigh`/`lSwingLow` (the H/L-count reset) confirms it; if the pullback makes a deeper extreme before breaking out, the candidate is discarded and the next H/L signal becomes the new start — and **ends at the swing extreme frozen when the next pullback begins**. Every signal of the same pullback grades the same completed leg; the reference moves only when a newer leg completes. Legs longer than **Leg Max Bars** (Session Settings, default 15) are trimmed to their most recent that-many bars; pair-wise metrics (overlap, breaks, ER, consecutive runs) use one fewer comparison so the window never reaches before the leg start. Auto entries with a leg shorter than **Leg Min Bars** (default 5) — or with no completed leg yet — are **blocked** whenever at least one leg-strength filter is active (`legTooShort` on the metrics snapshot; the Live Filter Preview shows those filters failing). Manual trades are never blocked: they grade the completed leg **matching the trade's direction** (BUY → bull leg, SELL → bear leg, via `calculateAlBrooksLegs`), record over the available bars even when under the minimum, and fall back to entry-bar windows when no leg exists. EMA21/EMA50 Slopes keep their configured Instrumentation Lookbacks (window ending at the leg extreme in H/L modes); EMA20 Bias (always-in direction), ATR Depth, and the pivot-sequence filters always measure at the entry bar, since they describe current context rather than leg strength. `PIVOT`-mode entries keep all windows at the entry bar with the configured lookbacks.
 - `ema20GapBarRatioAtEntry` / `ema20CloseAboveRatioAtEntry` / `ema20InteractionWindowAtEntry` — Brooks-style EMA20 interaction over the last N bars ending at entry: the fraction of bars whose full range never touches the EMA20 ("gap bars" — a strong-trend signal) and the fraction of closes above the EMA20 ("always-in" direction bias; below = 1 minus this), plus the actual window size used. Lookback `N` via the **EMA20 Int** field (default 20). Two independent gates: `ema20GapBarFilter` (`none`/`min`/`max`) + `ema20GapBarThreshold` (default `0.5`, not direction-aligned), and `ema20BiasFilter` (`none`/`min`/`max`) + `ema20BiasThreshold` (default `0.5`, direction-aligned).
+- `openBarTimestampAtEntry` / `dayOpenAtEntry` / `prevDayCloseAtEntry` / `gapPointsAtEntry` / `gapPercentAtEntry` / `barsSinceOpenAtEntry` *(all stamped on `Trade`)* — **session-open context**: which bar opened the entry's trading day, how far that day gapped from the previous day's close, and how deep into the session the entry sat. The open bar is the first candle sharing the entry bar's IST calendar day (the 09:15–15:30 IST session never crosses IST midnight, so the calendar day is an exact session key); `gapPointsAtEntry` = `dayOpen − prevDayClose`, **signed** — positive is a gap up, negative a gap down — with `gapPercentAtEntry` the same figure as a percentage of the previous close, so gaps stay comparable across instruments and price levels. `barsSinceOpenAtEntry` is `0` on the open bar itself and counts up through the session, separating opening-range entries from mid-day ones. Weekends and holidays need no special handling: "previous day's close" is simply the last bar before the day boundary, whatever the calendar gap. **No configurable lookback** — every value is fixed by the data's own day boundary, so there is nothing in Session Settings for this. Gap fields are **absent, not `0`**, when the loaded candle array has no previous trading day (i.e. on its very first day), keeping "no data" distinguishable from "flat open"; the open-bar and bars-since-open fields are still present there. Gaps are timeframe-invariant (5m, 15m and 60m report the same gap for a given day) while `barsSinceOpen` scales with the bar size. Unlike the metrics above, these are **not** part of the per-bar `EntryMetricsSnapshot` — they are deterministic from the candle array and entry index alone, so there is nothing for the auto engine to override. Instrumentation only — no `RegimeRules` filter/threshold gate.
 
 Range/Reversal regimes leave all 4 default-on filters at `none` (chop-tolerant by design). When a trade comes from the auto-engine, the stamped instrumentation values are the exact ones used for the entry decision (computed once in `evaluateAutoSignals`), not a fresh recompute — avoids double-running the EMA-slope/EMA-interaction calculations, which rerun EMA over the full visible candle history.
 
@@ -359,6 +448,228 @@ Every filter in the Auto-Backtest panel (Quality Setup Filters plus MA Filter, P
 - Categorical filters with no numeric threshold — MA Filter, Pivot Seq, HT Structure — get the same segmented-button treatment plus an illustrative diagram (candle position relative to an EMA line, a 2-point swing zigzag, a trend-direction icon), just without a slider.
 - Pivot Sequence History patterns are picked from a 4×4 grid where each button shows a mini staircase icon (rising for a run of "Higher" swings, falling for a run of "Lower" swings) instead of only the raw four-letter code.
 
+### Leg Pattern — describing a shape, not a threshold
+
+Every filter above asks a question about an *average*: "was body-to-range at least 0.4?", "did the last four pivots make higher highs?". None of them can ask about a **sequence**. You cannot say:
+
+> *the last three impulse legs all bull, each 3–10 candles, each moving 0.2–0.8%, each followed by a retrace that gives back at most half of it.*
+
+That ordered shape is what the **Leg Pattern** step (its own accordion section, per regime) configures. It runs over the same leg sequence already recorded on every trade (`legSequenceAtEntry`), and it is **off by default** — an unconfigured pattern changes nothing about how the regime trades.
+
+**Positions, not searches.** A pattern is an ordered list: `leg[0]` is the most recent impulse leg, `leg[1]` the one before it, `leg[2]` the one before that. The index *is* the position, so there is nothing to search for — "this is the most recent leg" is simply what `leg[0]` means. Each position states its own direction, so an uptrend shape reads literally as *leg[0] bull, leg[1] bear, leg[2] bull* if that is what you want.
+
+**Pullbacks are not numbered.** The index counts impulse legs only. That is deliberate: numbering raw segments would be unstable, because legs are sometimes adjacent with no retrace between them — measured on real 5-minute data, segment 2 is a leg only 75% of the time and segment 3 only 25%, so a rule written against a segment position would silently drift. Numbering legs keeps every position meaningful; each of `leg[0]`–`leg[3]` runs roughly 46% bull / 54% bear, so "is `leg[0]` bull?" genuinely splits the data.
+
+**Nothing is lost, because each leg carries its own retrace.** Every position has an **"…and then the retrace that followed it"** block describing the pullback immediately after *that* leg. `leg[0]`'s retrace is the one running into the current bar. Because the retrace is attached to a specific leg:
+
+- **"Gave back"** always means a fraction of the leg you just described. Half of *this* leg — never "half of whichever leg happened to be nearby".
+- Two positions can never argue about the same retrace, because each owns only the one that followed it.
+- A position you leave on "Either" with no conditions is a wildcard: it still has to EXIST, but nothing is asked of it. That is how you say "leg[0] and leg[2] matter, leg[1] can be anything".
+- If the window holds fewer legs than your pattern names, the bar is rejected — "there are only two legs and you described three" is not a match.
+
+**Must a retrace exist?** — three answers, and the third is the interesting one:
+
+| Setting | Meaning |
+|---|---|
+| **Required** | A retrace must have followed this leg. |
+| **Optional** | It may be absent — but if it is there, it must still satisfy the conditions. |
+| **None** | The leg ran straight on. Matches when it is the newest segment (no retrace *yet*), or when the next segment is another leg. |
+
+**Things worth knowing before you tune it:**
+
+- **The newest segment is still forming.** It runs up to and including the current bar, so its candle count, averages and depth keep growing as the bar advances — a tight ceiling on it can flip from pass to fail mid-bar. Tick *"Require the retrace to be complete"* to exclude it.
+- **"Analyse my data"** puts the real distribution (p10–p90) under each field and opens a newly-enabled bound at the middle half of it, so a condition starts near-neutral and gets *tightened*. **Expect the numbers to be humbling** — real impulse legs are far shorter and messier than the ones people picture, and a condition written for a long, clean leg will match almost nothing.
+- **"At the current bar"** tells you which part rejected the bar. A pattern matching nothing is the normal starting point, not a malfunction. It also flags conditions it could not *evaluate* (amber) — those **fail** rather than passing, so a high count there means the data is incomplete rather than the spec being too tight.
+- **Direction basis.** Legs can be read by where they actually ended up, or by the structural label the leg detector gave them. These disagree more often than expected — a leg can be labelled bull and still close below its open. Note the retrace of a bull leg is labelled *bear*, so leave a nested pullback's direction on "Any" unless you specifically want that inverted convention.
+- The **plain-English sentence** under each section is the spec read back to you. If it doesn't say what you meant, the pattern doesn't either.
+
+The **Retrace at the current bar** gate is a separate, whole-structure question: how far back into the recent range price has come, regardless of any single pullback's depth. Its ceiling is capped at 50% — beyond that it stops being a filter.
+
+### Custom Entry Hook — writing the entry logic in code
+
+The Leg Pattern above describes a shape *declaratively*. The **Custom Entry Hook** (last card in the **Entry** step, per regime) goes one step further: it hands a bar to a **TypeScript function you write** and lets that function decide. It exists for the strategy that no combination of thresholds and shapes can state — "if the last three legs did X *and* the session opened above Y *and* my own indicator says Z, go short with double size and a stop under the pullback low".
+
+**Where you write it.** Add a file to `frontend/src/strategies/`, export a function, and register it under an id in `strategies/index.ts`. `strategies/example.ts` is a worked reference with two hooks already registered. Vite hot-reloads on save. The full context type is documented in `utils/entryHook/types.ts`.
+
+```ts
+export const myEntry: EntryHook = ctx => {
+  if (ctx.trigger.count < 3) return false;              // H3+/L3+ only
+  if ((ctx.metrics.efficiencyRatio ?? 0) < 0.4) return false;
+  return { side: 'short', quantity: 50, slPoints: 30, targetRR: 2.5 };
+};
+```
+
+**Hooks that ship registered** (pick one in the Entry step → Custom Entry Hook dropdown):
+
+| Hook | What it takes |
+|---|---|
+| **Strong-Trend H1** | Long only. First decides whether **today is a strong bull trend day**, the way an Al Brooks trader reads the chart, then buys **H1/H2 near EMA21** on such days only. The day verdict is a **weighted score plus hard vetoes**. *Yesterday:* range vs average daily range (contraction scores, too tight or too wide costs), close in the top quarter, a late breakout that **closes** above the earlier day high in **two pushes** with clean bull bars, no buy climax (2+ oversized bull bars) into the close, pivot structure resolved up (a higher swing low above the day's midpoint), EMA21 rising at the close. *Broader structure* (daily bars built from the 5m data): daily higher lows, breaking out of a multi-day range, not opening just under a multi-day high. *Today:* gap size vs ADR, first bar a bull trend bar whose low holds, a trending (not choppy) first hour, no big bear bar, a run of gap bars above EMA21. **Vetoes kill the day** (no more entries this session): no close above the previous day's high within the first N bars, a close back below it after the break, a big bear bar or two bear closes below EMA21, a close below the opening swing low. An **H1 far from the EMA** is allowed once price has gone 20+ bars without touching it on a very high-scoring day. The old H1-streak / clean-bar / EMA-slope reads are now score points, room to resistance (below) is still a veto, and entries are capped per day. |
+| **Higher-High Shallow Pullback** | Long only. H2+, higher high, a bear pullback holding entirely above the previous leg's high and retracing at most 50%. |
+| **S/R Guard (trendline + swing resistance)** | Both sides, a **Gate-mode** veto only: your regime's entry, filters, SL, target and size decide the trade, and this can only refuse it. Blocks a long under an intact **falling trendline** (first-to-last touch ≥ 80 bars) or near a **real swing top** from the last 150 bars. Shorts mirror this with rising support and swing bottoms. Never takes the first break; see *S/R Guard* below. |
+| **Deep Pullback Continuation** | H2+/L2+ with the structure, clean breakout leg, stop beyond the pullback extreme. |
+| **Take Every Signal** | Every H/L signal at any count, with the engine's own sizing and stops — the baseline to measure the others against. |
+
+**S/R Guard.** Set it up in Entry → Custom Entry Hook → *S/R Guard*, mode **Gate**, on each regime it should guard. The code is `strategies/srGuard.ts`.
+- **Counter trendline:** a falling resistance line (rising support for shorts) from the pivot trendlines (Session Settings → Trendlines), whose first and last pivot touch are at least **80 bars** apart. While it is intact, that side is blocked however far away it is. Broken lines are remembered for 100 bars so their break can be tracked. A flatter "fan" line drawn through the breakout's own pullback high is ignored.
+- **Horizontal resistance (real swing tops, not every pivot):** a bar whose high is the highest of the **10 bars on each side** (bar count), after which price fell at least **0.5%** before closing back above it (move %). Tops within 0.05% merge into one level. An intact level only blocks when price is within **0.3%** of it; an entry with room below it is fine.
+- **Second entry, never the first break:** the first close through a line or level is not traded. The side reopens on either:
+  - a **retest** (a wick back to it, closing on the breakout side), or
+  - a **held pullback** (a swing low that prints after the break and stays above it), or
+  - a **re-break** after price fell back inside.
+- **Why trend entries survive:** a pullback entry at the bottom of the pullback that made a top a level is at least 0.5% below it, so it is never "near" it. After a break, the first pullback that holds above the level reopens it. In a rising-staircase test every pivot-low entry passed.
+- **The verdict is in the trade reason**, e.g. `SR ok: tl=held lvl=intact res=21950.0 room=0.82%`. `__hook.table()`, `__hook.stats('srRoomPct')` and the `srReason` column show the blocked bars too.
+- **Tuning:** all thresholds are named constants at the top of `srGuard.ts`. They are **starting values**; tune 0.5% / 0.3% to your instrument and timeframe from `__hook.stats('srRoomPct')`. Tests: `npm run backtest:srguard`.
+
+**Room to resistance (Strong-Trend H1).** The trade is refused when the next resistance overhead is too close to allow the target. Three things make it behave the way a discretionary trader would:
+
+- **Resistance is prior-day swing highs only.** Levels come from the system's own pivots (a *bearish* pivot is a swing high, a *bullish* one a swing low), restricted to **previous trading days**. Today's swing highs are ignored on purpose — they were made by the very move being traded, and a strong trend exceeds them within bars, so counting them would refuse every continuation entry.
+- **The test is 1:2 against the engine's real stop.** Entry, the stop the regime would actually place, and the nearest resistance must leave at least a 1:2 reward:risk (more when the regime's own `targetRR` is higher — a 3R target that can't reach 3R is a target you won't make). Nothing overhead at all is *unlimited* room and passes.
+- **Broken resistance stops counting — this is what keeps pullback entries alive.** A level counts only while **today's session high has not yet reached it**. Once the session trades up through a prior-day high, that level is support, and the pullback back into it is exactly the entry to take. A naive "is there a swing high above my entry" test rejects those bars, because after the pullback the broken level sits overhead again; measuring against the session high instead drops every already-taken-out level automatically, so the trade is judged against the next *untouched* level above — the one that can actually stop it.
+
+**Strong-trend-day windows (Session Settings → Instrumentation Lookbacks, `TD …` inputs).** ADR Days (10), Multi-Day (5), Late Bars (18 — yesterday's last 90 min), PDH Bars (6 — bars allowed to break the previous day's high), 1st Hour (12), Gap Bars (20), Max/Day (3). Ratio thresholds and score weights are named constants at the top of `strategies/strongTrendH1.ts` and are **starting values**; tune them from `__hook.stats('tdScore')`, `__hook.stats('rangeAdr')` and the rest. Every trade's reason starts with the score and the components that produced it, e.g. `TD score=8/6 [contraction+2 lateBreakout+1 goodGap+1 …] pdh=… brk@0 nearEMA …`, and `killed` in the probe row says which veto ended a day.
+
+The trade's reason string carries the verdict (`res=20074.30 rr=9.0/2 sup=none`), and `__hook.stats('headroomRR')` gives the distribution of reward:risk actually available on your instrument. `sup` — the nearest prior-day swing low the session hasn't broken — is measured and recorded but deliberately gates nothing.
+
+Every threshold in these is a named constant at the top of its file with the reasoning written beside it, and every one records its intermediate values through `probe()` **before** it decides — so `__hook.stats('cleanBars')` or `__hook.stats('ema50SlopeAtr')` gives you the real distribution on your own instrument to re-tune against. Window sizes (slope lookbacks, leg-sequence length) come from Session Settings, never from the strategy file.
+
+**When it fires follows the regime's Entry Signal (Trade Settings → Entry mode)** — the same switch the built-in chain enters on, in both Gate and Replace mode:
+
+| Entry mode | The hook fires on | `ctx.trigger` |
+|---|---|---|
+| **Pivot** | every bar a pivot is confirmed on — whether or not it carries an H/L signal | `{ source: 'pivot', label: 'Pivot', count: 0, side, pivot }` (side from the pivot type) |
+| **H/L Signal** | every H/L signal bar, at any count | `{ source: 'signal', label: 'H3', count: 3, side }` |
+| **Confluence** | H/L signal bars with a same-side pivot within the Confluence lookback | as H/L Signal, plus the qualifying `pivot` |
+
+With slMethod **Pivot** and no stop from the hook, a pivot/confluence trigger's own pivot anchors the stop — exactly as the built-in chain does.
+
+**In the H/L modes it fires at any count.** This is the headline difference from everything else in the panel. The built-in chain can only ever enter on **H1/H2/L1/L2** — the H1/H2 checkboxes are the whole vocabulary. The signal detector labels H3, H4, L5 and beyond all the same; a hook sees them all. **While a hook is on, those checkboxes stop gating** and your own code does the trigger filtering (`ctx.trigger.count`).
+
+**Two modes**, chosen per regime:
+
+| Mode | Behaviour |
+|---|---|
+| **Off** | Not consulted. This is the default, and selecting a hook without leaving Off changes nothing. |
+| **Gate** | The whole built-in filter chain runs first, SL and TP are computed, and *then* your hook gets the final say — so it can see the engine's own stop and target before deciding whether to veto or override them. |
+| **Replace** | Every filter is skipped. Each trigger bar (per Entry mode, above) goes straight to your code, behind only the regime's **enabled** switch and its **market-structure** gates. The summary bar says *"Confirmation filters bypassed by hook"* so the chips can't mislead you. |
+
+**What your function receives.** Everything the engine already computed at that bar, so nothing has to be recalculated or maintained:
+
+- `ctx.candles` — **the last 1200 candles** ending at the trigger bar, oldest-first. The count is **Session Settings → Instrumentation Lookbacks → Hook Candles** (50–5000). This is why a hook never keeps its own history.
+- `ctx.trigger` — `{ source: 'signal', label: 'H3', side: 'long', count: 3, barIndex }`, or for Pivot entry mode `{ source: 'pivot', label: 'Pivot', count: 0, pivot, ... }`. Check `source` before filtering on `count`.
+- `ctx.metrics` — the same instrumentation snapshot the built-in filters gate on and the trade record is stamped from: efficiency ratio, bar overlap, break counts, BRR averages, EMA slopes, pivot sequences.
+- `ctx.pivots`, `ctx.ema21`, `ctx.ema60`, `ctx.atr`, `ctx.ltMarket`, `ctx.htMarket`, `ctx.pivotSeq`, `ctx.regime`.
+- `ctx.legWindow` — bar bounds of the completed breakout leg on the trigger's side.
+- `ctx.signals` — the recent H/L label history, aligned with `ctx.candles`, for questions like *"was there an L2 in the last 20 bars?"*.
+- `ctx.legs()` and `ctx.legFeatures()` — the leg sequence and its derived features, built **only if you ask** so an unused one costs nothing.
+- `ctx.state` — a scratch object that **persists across bars for the whole run** and starts empty on the next one. This is where cooldowns, counters and accumulators live.
+- `ctx.log(msg)` — a note appended to the trade's reason string.
+
+Nothing reachable from `ctx` describes a bar after the trigger, so a hook cannot accidentally look ahead.
+
+**What it can return.** `false` (skip), `true` (take it exactly as the engine would), or an object overriding any of: `side`, `quantity`, `sl` / `slPoints`, `target` / `targetRR`, `entryPrice`, `reason`.
+
+**It fails closed, on purpose.** Unlike the threshold filters — which pass a bar through when their metric could not be measured — a hook that misbehaves takes *no* trade rather than a wrong one:
+
+- A long stop above entry (or a short stop below), a quantity that floors below 1, or a fill price the trigger bar never traded through → **no trade**, and the reason is recorded.
+- A hook that **throws** → no trade on that bar, but the run continues; the first error message and a count are reported.
+- A **hook id that isn't registered** (renamed or deleted) → the regime takes no trades, rather than quietly reverting to the built-in chain and running a strategy the config no longer describes.
+- A regime's **direction** setting still wins: a `LONG_ONLY` regime will not take a hook's short.
+
+**If the hook seems never to fire, check HT/LT Structure first.** Both structure gates live in the **Market** step and run *before* the hook — a signal outside that structure never reaches your code at all, and nothing in the trade log shows why. They matter because `bull_trend` / `bear_trend` are **shipped defaults** on the Uptrend/Downtrend regimes: measured over real 5-minute NSE data, the default HT Structure alone silences about **65% of signal bars** (691 of 1960 reach the hook). Set both to **Any** if the hook should judge every signal itself. The card warns when either is filtered.
+
+Two smaller things in the same vein: a regime that is **disabled** never runs its hook, and the regime's **direction** still wins — a `LONG_ONLY` regime discards a hook's short. Entry mode decides the trigger bars in both modes (see the table above).
+
+The **Live Preview Strip** shows a hook column, but only on the regime's trigger bars (pivots in Pivot mode, H/L signals otherwise). Note that each previewed bar is evaluated with fresh `ctx.state`, so a hook built around a cooldown will preview differently from how it behaves inside a real run.
+
+**Debugging a hook — the "Run on main thread" switch.** **Run Full Backtest** normally runs the simulation in a **Web Worker**, so a breakpoint inside your hook executes on the worker thread and never pauses the main-thread devtools. That is the "my breakpoint never hits" symptom, and it is why there is a switch.
+
+Turn on **Run on main thread**, in the Custom Entry Hook card and again in the panel footer beside the Run button. The run then executes inline, breakpoints behave normally, and the button relabels to **Run Full Backtest (main thread)** so the active path is never ambiguous. The UI freezes while it runs — expected, and why this is not the default. The setting is remembered in this browser and **never travels with a saved strategy** (it is not part of the auto-backtest config). `?debugHook` in the URL still forces it on, and greys the switch out while present.
+
+**A trap worth knowing.** A breakpoint set through the DevTools **Sources** panel can attach to the *worker's* copy of your strategy file — Vite serves it to both threads as separate module instances. With main-thread mode on, the worker never runs, so a breakpoint bound there silently stops firing. Use `pauseWhen(...)` or a literal `debugger` in the source instead: those live in whichever copy actually executes, so they are immune to this.
+
+**Every hooked run now tells you what happened**, e.g. `Entry hook: main thread · called 1960× · 2 rejected — …`. The call count is the thing to read first:
+
+| It says | It means |
+|---|---|
+| `called 0×` | Your hook was never reached. A configuration problem, not a debugger problem — check HT/LT Structure in the Market step, the regime's enabled toggle, and (in Gate mode) that Entry Signal isn't Pivot. |
+| `called N×` with no trades | Your hook ran and declined every bar. The logic is the thing to look at. |
+| `worker` when you expected `main thread` | The switch is off, so no breakpoint will pause. |
+
+`console.log` works on either thread.
+
+**Exploring the data to frame your logic.** `src/strategies/debug.ts` ships two helpers for exactly this:
+
+```ts
+import { probe, pauseWhen } from './debug';
+
+export const myHook: EntryHook = ctx => {
+  probe(ctx, { myScore: whatever });                       // record one row per trigger bar
+  pauseWhen(ctx.trigger.count === 3 && ctx.atr > 5, ctx);  // conditional breakpoint
+  return false;                                            // take no trades while exploring
+};
+```
+
+Run the backtest, then work in the console against `__hook`:
+
+| Call | What you get |
+|---|---|
+| `__hook.table()` | every trigger bar as a sortable table — label, count, side, structure, close, ATR, EMA gap, leg bars, BRR, efficiency ratio, overlap, EMA slope, plus your own columns |
+| `__hook.stats('brrAvg')` | `{n, min, p25, median, p75, max}` — pick a threshold from the real distribution instead of guessing |
+| `__hook.where(r => r.count >= 3).length` | how many bars a candidate condition would keep |
+| `__hook.ctx` | the last full context object, live — drill into `legs()`, `signals`, `metrics` |
+| `copy(__hook.csv())` | the whole run on the clipboard, tab-separated for a spreadsheet |
+
+Rows reset automatically at the start of each run (they key off the run's `ctx.state` identity), so you can iterate without stale data piling up. A bare `debugger` stops on the very first trigger bar out of thousands — `pauseWhen` is what makes stepping usable. And if a hook throws or returns something invalid, the run no longer swallows it silently — the count and first message surface as a notification and a `console.warn`.
+
+Run `npm run backtest:entryhook` for the acceptance suite covering the window contract, causality, the overrides and the fail-closed paths.
+
+### Custom Exit Hook — writing the trade management in code
+
+The exit-side mirror of the Custom Entry Hook, and the last card in the **Exit** step (per regime). Where the entry hook is asked *"should this signal bar become a trade?"*, the exit hook is asked, once per bar a trade is open, *"hold it, move its stop, or close it?"*. It exists for the management rule no combination of switches can state — "give it 8 bars, then demand a new high every 3, and go to breakeven once it pays 1R".
+
+**Where you write it.** Add a file to `frontend/src/strategies/exits/`, export a function, and register it under an id in `strategies/exits/index.ts`. `exits/example.ts` is a worked reference with three hooks registered; `exits/legDecay.ts` is the ported built-in. Vite hot-reloads on save. The full context type is documented in `utils/exitHook/types.ts`.
+
+**Modes** (per regime, default Off):
+
+| Mode | What runs |
+|------|-----------|
+| **Gate** | Reversal and Opposite Signal evaluate first. Their verdict reaches the hook as `ctx.pendingExit`, and the hook has the final say — return nothing to let it stand, `{ exit: false }` to **veto** it, or an exit of your own. |
+| **Replace** | Reversal and Opposite Signal are skipped entirely. Your code alone decides when the trade closes. |
+
+Either way the SL/TP touch check and the Pivot Trailing Stop keep running — those are price levels, not opinions. Turn the trail off yourself if a hook should own the stop.
+
+**What the hook returns.** ⚠ An object return **exits the trade** unless it says `exit: false` — the same convention as the entry hook's `take`. `return { sl: x }` closes the position; `return { exit: false, sl: x }` moves the stop and holds. `return false` always holds.
+
+| Field | Effect |
+|-------|--------|
+| `exit` | Defaults to `true` on an object return. `false` holds (and vetoes a pending built-in exit in Gate mode). |
+| `price` | Fill price for the exit; defaults to the bar's close. Must lie inside the bar's high/low — a price the bar never traded is refused, not clamped. |
+| `reason` | Replaces the auto-generated detail text. `ctx.log(...)` output is appended. |
+| `sl` / `target` | Move the stop or target, applied whether or not the trade exits. Must stay on the correct side of the close. **Not ratcheted** — a hook may widen a stop, so a trailing hook must refuse to loosen its own. |
+
+**Timing.** The hook runs *after* that bar's SL/TP touch check, so a bar that already stopped out never reaches it, and a stop the hook moves first bites on the **next** bar. That is causally correct — the hook decides on the bar's close.
+
+**What it can read.** `ctx.position` (side, absolute quantity, entry price, `barsInTrade`, current stop/target, `openPoints`, `riskPoints`, `mfePoints`/`maePoints`), the market read the engine computed for the bar (`ltMarket`, `htMarket`, `pivotSeq`, EMAs, ATR, pivots), `ctx.metrics` graded over the newest completed leg on the trade's own side, `ctx.legs()` / `ctx.legFeatures()`, the raw H/L labels in `ctx.signals`, and a `ctx.state` scratch object that persists for the whole run. Everything expensive is built on first access — a hook that reads only `ctx.position` costs almost nothing per bar, which matters because this runs on *every* bar of *every* open trade.
+
+**Hooks that ship registered** (pick one in the Exit step → Custom Exit Hook dropdown):
+
+| Id | What it does |
+|----|--------------|
+| `leg-decay` | The former built-in Leg Decay Exit: re-grades the newest completed with-trend leg formed after entry (ER, consecutive breaks, break count, EMA21 slope, EMA20 gap-bar) and closes once enough checks fail. |
+| `breakeven-trail` | Stop to entry at +1R, then trails 2 ATR behind the best price seen (ratchet only). Cuts any trade still under +0.3R after 20 bars. |
+| `time-stop` | Closes anything still open after 30 bars, win or lose. Pairs with Gate mode. |
+| `hold-winners` | Gate mode only. Never exits on its own — vetoes a pending Reversal or Opposite-Signal exit while the trade is still up 1.5R or better. |
+| `climax-profit` | **4x candle profit booking**, longs and shorts alike. When a bar's range (high − low) is ≥ **Climax Multiple** × the mean range of the prior **Climax Lookback** bars (Session Settings → Instrumentation Lookbacks, default **4x / 20**), any trade that is in profit at that bar's close is closed there. Bar colour is ignored (a 4x bar for or against the trade both count); a losing trade is left to its stop; the entry bar is never judged. Use Gate mode to keep Reversal / Opposite Signal running alongside it. |
+| `leg-decay-climax` | `leg-decay` plus the `climax-profit` rule, climax checked first — for regimes that want both, since a regime holds one exit hook. |
+
+**Window size.** `ctx.candles` is the last `exitHookLookback` candles, set by **Exit Hook Candles** in Session Settings → Instrumentation Lookbacks (default **400**, clamped `[50, 5000]`). Deliberately smaller than the entry hook's 1200: this window is rebuilt on every bar of every open trade, not only on signal bars.
+
+**Debugging.** The same story as the entry hook — the batch run happens in a Web Worker, so breakpoints never pause until you turn on **Run on main thread** (repeated in this card). `__hook.doctor()` in the console now reports the exit side too: which regimes have a hook, whether Gate mode has anything to gate, and the last run's call/error/rejection counts. An exit hook at **0 calls** almost always means the *entry* side took no trades in that regime.
+
+**Fail-closed, both halves independently.** An invalid exit is refused and the trade stays open; an invalid stop/target move is dropped and the levels keep their old values. A hook that throws is trapped, counted, and treated as having said nothing — the run never aborts. A mode set against an **unregistered id** runs *no* signal exits at all rather than silently falling back to the built-ins.
+
+**Tests:** `npm run backtest:exithook` (76 assertions, incl. the climax-profit long/short/losing/threshold cases) — `off` and a mode with no id both byte-identical to baseline; the window contract and causality guarantees; the position view's derived fields; `exitHookLookback` honoured and clamped; `ctx.state` accumulating within a run then resetting; every fail-closed path; stop moves reaching booked trades and exiting through the normal SL machinery; and each shipped hook running clean over a full backtest. `npm run backtest:exit-smoke` covers the gate/replace/veto semantics inside the engine.
+
 ### Pivot Sequence History & Pivot Gap
 
 Two per-regime filters alongside the single most-recent Pivot Seq filter above, both configured in the **Pivot Sequence History (last 4)** section:
@@ -366,7 +677,106 @@ Two per-regime filters alongside the single most-recent Pivot Seq filter above, 
 - **High/Low Sequence** (`highSeqFilter`/`lowSeqFilter`: Off/Pick patterns, with `highSeqPatterns`/`lowSeqPatterns` holding the chosen whitelist) — matches the last 4 same-type pivots (4 consecutive swing highs for High Sequence, 4 consecutive swing lows for Low Sequence), oldest to newest, against a whitelist of allowed 4-in-a-row patterns (e.g. `HH-HH-HH-HH`, `LH-LH-HH-HH`) picked from all 16 possible combinations. With fewer than 4 pivots recorded yet in the session, the filter passes through — no rejection.
 - **Pivot Gap** (Off/Fast/Slow + a bars threshold, default `5`) — average bar-count gap between consecutive pivots across both the high and low sequences, a trend-pace check. **Fast** requires the average gap at or below the threshold (pivots forming quickly — accelerating/choppy). **Slow** requires it at or above (pivots spaced out — a slower, more mature trend).
 
+### Pivot Market Structure — Up / Down / Range + 9-regime taxonomy
+
+This is a structure classifier built **only from pivots**: pivot price, bar index, and the number of candles between pivots. It uses no EMA or ATR. Code: `utils/marketStructure/`. Regime definitions: `market-structure-taxonomy.md`.
+
+**How it reads the market**
+
+The read is re-validated every bar. The window is **adaptive**: it is the whole current structure segment, however many pivots that is (often 20–30+), capped by *Max pivots / segment*.
+- **Breakout attempt (still Range):** a close above the range box's high + buffer opens an *attempt*, shown as `RANGE → UP?`. The state stays **Range**, in the same segment with the same box history. It only becomes **Up** once price *escapes*, by either:
+  - **Distance:** a close at least *Breakout escape* × the box height beyond the broken edge. The box height is floored at the swing scale (the previous trend's median impulse, else recent swings), so a newly formed sliver of a box is not easy to escape.
+  - **Hold + follow-through:** a pullback low holds at or above the broken edge − buffer, and then a close goes above the attempt's best close.
+- **Failed breakout:** a close back inside the box (past the edge − buffer) before escaping. The attempt clears and the box keeps the excursion. A correction after a strong trend therefore stays **one** range: each marginal lower low is a failed `DOWN?` attempt and the range low ratchets down to the lowest correction low. A gap out of the range with no follow-through is likewise a failed attempt, not a new trend. Down is the mirror case.
+- **Up → Range (break of structure):** a close below the protected HL − buffer. The protected HL is the low that launched the latest HH. Down → Range is the mirror case.
+- **Up ↔ Down** always passes through Range. A range can only break once it has both a swing high and a swing low.
+- The buffer is *Break buffer* × the segment's median swing size.
+
+**Sub-regimes**, read over the whole segment:
+
+| Context | Sub-regime | Rule |
+|---|---|---|
+| Trend | Wedge | The last three highs and last three lows both slope with the trend, and the channel narrows by at least *Wedge convergence*. Checked first. |
+| Trend | Expanding / Shrinking trend | Mean impulse size in the later half of the segment vs the earlier half (excluding the breakout impulse) is ≥ *Expand/shrink ratio*, or ≤ its inverse. |
+| Trend | Stairs | Mean pullback retrace ≤ *Stairs max retrace*, and mean pullback bars ÷ impulse bars ≤ *Stairs max pullback time*. |
+| Trend | Trending range | Anything else. |
+| Range | Tight range | Height ≤ *Tight range* × the previous trend's median impulse. |
+| Range | Expanding triangle | Highs rising and lows falling, each by more than one buffer. |
+| Range | Converging triangle | Highs falling and lows rising, each by more than one buffer. |
+| Range | Sideways | Anything else. |
+
+Before the segment has *Min swings for sub-regime* swings, the sub-regime is shown as forming (null).
+
+**Settings:** Session Settings → **Market Structure (pivot)**. It holds every threshold above plus **Regime source**.
+
+**Where it is used in the builder** (all opt-in; defaults change nothing):
+- **Market step → Pivot Structure:** Any / Up / Down / Range, plus optional sub-regime chips (`pivotStructureFilter`, `pivotSubFilter`). This is a hard gate per rule set and applies in Gate and Replace hook modes too. When any sub-regime is selected, a segment that is still forming fails the gate.
+- **Leg Pattern → window clauses:** *Pivot structure* and *Structure sub-regime* chips (`structureBroad` / `structureSub`, matched with `in`).
+- **Custom entry/exit hooks:** `ctx.structure()` returns broad, sub, confirmed, keyLevel, rangeHigh/Low, `segmentPivots` and `swings` (each with price, bar index and candle count) and evidence. `ctx.structureLegs()` returns the Brooks legs spanning the segment.
+- **Regime source = Pivot structure:** the pivot read replaces the EMA `ltMarket` for:
+  - regime selection,
+  - the LT Structure filter,
+  - the reversal exit,
+  - trade journals and the header readouts.
+
+  The mapping:
+  - Up + Stairs or Expanding → `Bull-Trend`; other Up → `Bull-Trending-range`.
+  - Down, mirrored → `Bear-Trend` / `Bear-Trending-range`.
+  - Range → `Range`. Reversal is never selected by the pivot source.
+
+  HT Structure stays EMA-based. Manual-mode Trend Reversal flagging and entry instrumentation's trend-aligned flag also stay EMA-based.
+
+**Tests:**
+- `npx tsx scripts/structureVerify.ts` prints the segment list and distribution and runs a look-ahead check.
+- `npx tsx scripts/structureSmoke.ts` checks the gate, regime source, leg-pattern clause and hook context against cached candles.
+
 ---
+
+### Market Structure Statistics page (Structure tab)
+
+**Component:** `StructureStatsPage.tsx`, the **Structure** tab in [PageNavTabs](#cross-page-navigation-pagenavtabs). **Logic:** `utils/marketStructure/stats.ts` (`computeStructureStats`, `summarize`, `transitionMatrix`, `subTransitions`).
+
+This page gives descriptive statistics of the pivot structure classifier, covering what the market structure itself did. They are not trade results. It recomputes live when the candles or the Session Settings → Market Structure thresholds change.
+
+- **Episode** = one structure segment (`segmentId`): an Up trend, a Down trend or a Range. A breakout attempt belongs to its range episode and is counted in its failed breakouts or as its exit. It is not a separate episode.
+- **Header controls:**
+  - **Stop at replay bar:** only uses bars up to `currentIndex`, so there is no look-ahead. The last episode is then still *open*.
+  - **Episode sub:** *Dominant* (the sub with the most bars in the episode, the default) or *Final* (its sub on its last bar, which is a hindsight label).
+  - **Min span:** hides very short episodes.
+- **Filter bar:**
+  - Structure picker: All / Up trend / Down trend / Range.
+  - Sub-regime chips: **All** + the 9 sub-regimes + *Forming* (the sub was never named). These are the same chips as the Builder's Pivot Structure control and narrow to the chosen structure.
+  - The filter applies to every section except the per-sub table, which always lists every sub and highlights the selected ones.
+  - The filter is saved per browser in `localStorage`.
+- **Summary cards:** for each of Up / Down / Range: episodes, candles and % of all candles, median/mean span, median and total move. An opposite-moves card shows the pullback count, pullback points and pullbacks as a % of the total trend move. It also shows the median confirmation lag.
+- **Summary by structure:** median · mean · [p25–p75] · max for every metric below.
+- **Sub-regimes table:** one row per structure × sub (and Forming). Columns: bars and % (counted bar by bar, so they stay exact even when an episode changed sub), episodes, median span, move and worst pullback, pullback total, efficiency, and how a range exits (up or down %). Clicking a row toggles its chip.
+- **What follows what:** a broad transition matrix, *Trend → Range → ?* continuation vs reversal %, and the most common sub-regime changes inside episodes (e.g. Stairs → Wedge).
+- **Top 10 lists:**
+  - largest up moves and largest down moves
+  - worst pullback in up trends and in down trends
+  - longest ranges
+  - most failed breakouts
+  - largest giveback
+  - longest trends
+- **All episodes:** a sortable detail table. Expanding a row shows its sub path with bars per sub, key levels, classifier evidence and every swing (counter-trend swings are highlighted).
+- **Jump to chart:** ⌖ or a top-10 item scrolls to and highlights the episode's anchor candle. An episode after the replay bar asks before advancing replay. Advancing reveals candles and runs SL/TP checks, and it is disabled in live mode. If the Market Structure chart layer is off, a banner offers to turn it on.
+
+**Metric definitions** (pivot-derived; closes are used only for net, capturable and giveback):
+
+| Metric | Definition |
+|---|---|
+| Span | Hindsight duration: the anchor swing point → the next episode's anchor. A trend's span ends at its extreme, because the following range is anchored there. |
+| Labelled bars | Bars the live (causal) label showed this episode. These add up exactly to the candle count. |
+| Confirmation lag | The first labelled bar − the anchor bar. |
+| Move / height | Trend: the anchor price → the extreme pivot (highest high or lowest low), in points and % of the anchor price. Range: box height (all swing points in the episode), as % of the box low. |
+| Capturable | The close on the confirmation bar → the extreme, in the trend direction. This is what was left once the label confirmed. |
+| Giveback | The extreme → the last close before the break of structure (blank while the episode is open). |
+| Pullbacks (opposite moves) | Counter-trend swings ending on or before the extreme: count, Σ points, worst (points / %), and worst retrace = worst pullback ÷ the impulse before it. Swings after the extreme count as giveback, not pullbacks. |
+| Efficiency | \|anchor → last close\| ÷ the total swing path (0–1). |
+| Failed breakouts | Breakout attempts in the range that closed back inside the box. |
+
+Swing points are rebuilt from the whole episode. The classifier caps its window at *Max pivots / segment*, but the statistics are not capped. Headless check: `npx tsx scripts/structureStats.ts` checks that bars sum to the candle count and that the episode count equals the number of segment ids, then prints the same tables.
 
 ## 7. Position Tracking & P&L
 
@@ -432,7 +842,7 @@ Describes where the entry candle sits relative to the EMA:
 
 - **Confidence level** (1–5)
 - **Notes** (free text)
-- **Exit reason** — `SL`, `TP`, `MANUAL`, `TIME_OVER`, plus `REVERSAL`/`OPP_SIGNAL`/`LEG_DECAY` for auto-backtest trades closed by the Price-Action Exit Engine (see section 6)
+- **Exit reason** — `SL`, `TP`, `MANUAL`, `TIME_OVER`, plus `REVERSAL`/`OPP_SIGNAL`/`EXIT_HOOK` for auto-backtest trades closed by the Price-Action Exit Engine (see section 6). `LEG_DECAY` is retired but still appears on trades booked before the Custom Exit Hook replaced that mechanism
 - **R:R Ratio** (auto-calculated from SL/Target)
 
 ---
@@ -483,6 +893,7 @@ Renders as a **full-page view** (`absolute inset-0 z-[105]`, same pattern as the
 - **Jump to candle** — click a trade to pan the chart to that candle; only recenters the viewport, does not rewind playback (`currentIndex` is untouched, so no already-revealed candles are hidden). The candle also flashes an amber highlight band + "JUMPED HERE" arrow for ~3.5s so it's visually obvious which one was navigated to. Click the highlighted candle itself to open the same execution-details popup described in section 2 (Chart Rendering → Interaction)
 - **Sort** by any column
 - **P&L recalculation** propagates correctly through all subsequent trades when one is edited
+- **Charges ON/OFF** (header, amber) — shows brokerage/STT/exchange/GST/stamp/SEBI charges and net P&L; the gear next to it edits the rates. See [Trading Charges](#21-trading-charges-fo)
 
 ---
 
@@ -813,6 +1224,44 @@ The existing **Quick Presets** row (Trend Follow / Range Trader / All Regimes) i
 
 The dropdown lists every saved configuration by name, marking the currently active one. Loading or saving as always keeps the dropdown selection in sync with the active configuration.
 
+### Default configuration on open
+
+When the Auto-Backtest page opens, it automatically loads a saved configuration so you don't start from the built-in defaults: the one you last loaded or saved on this machine, or — if that one no longer exists or you've never loaded one — the top of the list (most recently updated). It only does this while the current config is still the untouched built-in default; if a restored session brought its own config, or you've already edited/applied a preset, nothing is replaced.
+
+---
+
+## 21. Trading Charges (F&O)
+
+**Files:** `utils/charges.ts` (calculator), `stores/chargesStore.ts` (rates + toggle), `services/chargesSettingsService.ts` (Firestore), `components/ChargesSettingsPanel.tsx` (drawer)
+
+See P&L after Indian F&O costs. **Off by default** — turn it on with the **Charges** toggle.
+
+### Charge model (futures basis)
+Backtest trades record the underlying price, not option premium, so every fill's turnover is `price × quantity` and futures rates apply:
+
+| Component | Default | Applied to |
+|---|---|---|
+| Brokerage | ₹20 per executed order | every fill |
+| STT | 0.05% | sell-side turnover |
+| Exchange txn | 0.00173% | buy + sell turnover |
+| SEBI fee | ₹10 / crore | buy + sell turnover |
+| IPFT | ₹0.10 / crore | buy + sell turnover |
+| Stamp duty | 0.002% | buy-side turnover |
+| GST | 18% | brokerage + exchange + SEBI + IPFT |
+
+A flip fill (one order that closes a position and opens the opposite one) is charged brokerage once.
+
+### Where it shows (when ON)
+- **Trade Log** — first card becomes *Net P&L (after charges)* with `Gross − Charges`; a breakdown card shows turnover, order count, and each charge component; the positions table gains **Charges** (hover for breakdown) and **Net P&L** columns; win rate, PF, avg win/loss, and longs/shorts are computed on net P&L. CSV/JSON exports include the charges columns and summary.
+- **Auto-Backtest** — the Run panel shows `Gross · Charges · Net · Turnover (orders)` for closed trades of the current run, and *Entry Position Metrics* counts wins and P&L net of each trip's entry + exit charges.
+
+### Editing rates
+Open the drawer from the gear in the Trade Log header, the gear on the Auto-Backtest charges row, or **Session Settings → Trading Charges → Edit rates**. Rates are **global**: they are not stored in the session or the strategy config, so restoring an old snapshot or loading a saved config doesn't change them. They are saved to localStorage plus Firestore `appSettings/charges`. **Reset to defaults** restores the table above.
+
+Charges are a **display-time overlay**: stored trade P&L stays gross, so editing a rate updates every existing trade's charges right away.
+
+Not yet applied in the Performance Report, Performance Dashboard, or Session Statistics, which still show gross P&L.
+
 ---
 
 ## Quick Reference — UI Layout
@@ -841,7 +1290,7 @@ Full-page overlays (open on demand, `absolute inset-0`, stacked by z-index):
 
 ### Cross-page navigation (`PageNavTabs`)
 
-**Component:** `PageNavTabs.tsx` — a small pill-button switcher (Chart / Trade Log / Backtest / Dashboard) rendered in the header of every full-page view **and** in the chart page's bottom controls bar, so any of the four pages is reachable directly from any other — not just back to the chart.
+**Component:** `PageNavTabs.tsx` — a small pill-button switcher (Chart / Trade Log / Backtest / Dashboard / Structure) rendered in the header of every full-page view **and** in the chart page's bottom controls bar, so any of the five pages is reachable directly from any other — not just back to the chart.
 
 - **State:** `App.tsx` owns a single `activePage: ActivePage` plus a `visitedPages: Set<ActivePage>` (`'chart'` always included). `navigateTo(page)` sets both.
 - **Mount-once, hide-don't-unmount:** a page's component only mounts the first time it's visited (`visitedPages.has(page)`), then stays mounted — visibility toggles via a wrapping `style={{ display: activePage === page ? undefined : 'none' }}` instead of conditional `&&` rendering. This means **scroll position, expanded rows, search text, filter selections, and the active sub-tab are preserved** when navigating away and back, instead of resetting on every open (e.g. Trade History's expanded position row, the Performance Dashboard's Detailed Log search box and Dashboard/Entry Analytics/Detailed Log sub-tab, snapshot data already fetched from Firestore).
@@ -858,4 +1307,6 @@ Dialogs (open on demand, floating modal):
 
 ---
 
-**Last Updated:** 2026-07-28 (Added a Date Range control to the Auto-Backtest Panel header so the loaded date span can be changed without leaving that page; extracted the shared `sessionStore.reloadCandlesWithRange()` action so it and the Chart page's Data Settings panel stay in sync)
+**Last Updated:** 2026-10-06 (Added Trading Charges (F&O): optional gross/charges/net P&L in the Trade Log and Auto-Backtest, with editable global rates)
+
+**Previously:** 2026-07-28 (Added a Date Range control to the Auto-Backtest Panel header so the loaded date span can be changed without leaving that page; extracted the shared `sessionStore.reloadCandlesWithRange()` action so it and the Chart page's Data Settings panel stay in sync)

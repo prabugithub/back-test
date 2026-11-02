@@ -1,6 +1,9 @@
 import type { ReactNode } from 'react';
 import { TrendingUp, TrendingDown, Minus, RefreshCw, Settings2 } from 'lucide-react';
-import { type RegimeRules, type AutoBacktestConfig, generateBinaryPatterns } from '../../utils/autoBacktestEngine';
+import { type RegimeRules, type AutoBacktestConfig, generateBinaryPatterns, DEFAULT_LOT_SIZE } from '../../utils/autoBacktestEngine';
+import { ENTRY_HOOK_OPTIONS } from '../../strategies';
+import { EXIT_HOOK_OPTIONS } from '../../strategies/exits';
+import { HookDebugToggle } from './HookDebugToggle';
 import type { FilterPreviewBar, PreviewFilterKey } from '../../hooks/useFilterPreviewData';
 import { CardShell } from './CardShell';
 import { SegmentedControl } from './SegmentedControl';
@@ -18,11 +21,17 @@ import { MaPositionDiagram } from './MaPositionDiagram';
 import { PivotSeqDiagram } from './PivotSeqDiagram';
 import { AtrDepthDiagram } from './AtrDepthDiagram';
 import { PivotGapDiagram } from './PivotGapDiagram';
+import {
+  RANGE_SUBS,
+  STRUCTURE_SUB_LABELS,
+  TREND_SUBS,
+  type StructureSub,
+} from '../../utils/marketStructure';
 
 const HIGH_SEQ_PATTERNS = generateBinaryPatterns('HH', 'LH');
 const LOW_SEQ_PATTERNS = generateBinaryPatterns('HL', 'LL');
 
-export type WorkflowStep = 'market' | 'entry' | 'confirmation' | 'exit' | 'risk';
+export type WorkflowStep = 'market' | 'entry' | 'confirmation' | 'pattern' | 'exit' | 'risk';
 
 export interface StepDef {
   key: WorkflowStep;
@@ -139,7 +148,109 @@ export function MarketStep({ rules, up, meta }: RegimeStepProps) {
         onModeChange={v => up({ ltStructureFilter: v as RegimeRules['ltStructureFilter'] })}
         diagram={structureDiagram}
       />
+      <PivotStructureControl rules={rules} up={up} />
       {isShort && <p className="text-[10px] text-gray-400">Direction is Short — filter labels elsewhere flip automatically to match.</p>}
+    </div>
+  );
+}
+
+// Pivot-only structure gate (utils/marketStructure): broad Up/Down/Range plus an optional
+// multi-select of the 9-regime sub-types. Sub chips are narrowed to the chosen broad value.
+function PivotStructureControl({ rules, up }: Pick<RegimeStepProps, 'rules' | 'up'>) {
+  const broad = rules.pivotStructureFilter ?? 'any';
+  const subs = rules.pivotSubFilter ?? [];
+  const shown: readonly StructureSub[] =
+    broad === 'range' ? RANGE_SUBS : broad === 'any' ? [...TREND_SUBS, ...RANGE_SUBS] : TREND_SUBS;
+  const toggle = (sub: StructureSub) =>
+    up({ pivotSubFilter: subs.includes(sub) ? subs.filter(s => s !== sub) : [...subs, sub] });
+
+  return (
+    <div className="space-y-2">
+      <ModePickerControl
+        label="Pivot Structure"
+        tooltip="Pivot-only market structure (no EMA): Up = breakout above the range box, held by higher lows; Down = mirror; Range = after a break of structure (close through the protected HL/LH) until the box breaks. The window is the whole current structure segment, re-validated every bar. Thresholds: Session Settings → Market Structure. Independent of Regime source."
+        mode={broad}
+        offValue="any"
+        gridCols={4}
+        modeOptions={[
+          { value: 'any', label: 'Any' },
+          { value: 'up', label: 'Up' },
+          { value: 'down', label: 'Down' },
+          { value: 'range', label: 'Range' },
+        ]}
+        onModeChange={v => {
+          const nextShown: readonly StructureSub[] = v === 'range' ? RANGE_SUBS : v === 'any' ? [...TREND_SUBS, ...RANGE_SUBS] : TREND_SUBS;
+          up({ pivotStructureFilter: v, pivotSubFilter: subs.filter(s => nextShown.includes(s)) });
+        }}
+      />
+      <div className="border border-gray-200 rounded-xl p-3 space-y-2">
+        <p
+          className="text-[10px] text-gray-400 uppercase tracking-wide font-medium cursor-help"
+          title="Optional: allow entries only in these sub-regimes. None selected = any sub-regime (including a segment still forming). Any selected = the segment must already have enough swings to be named."
+        >
+          Sub-regime {subs.length > 0 ? `(${subs.length})` : '(any)'}
+        </p>
+        <div className="flex flex-wrap gap-1">
+          {shown.map(sub => (
+            <button
+              key={sub}
+              type="button"
+              onClick={() => toggle(sub)}
+              className={`px-1.5 py-1 text-[10px] rounded border transition-all duration-150 active:scale-95 ${
+                subs.includes(sub)
+                  ? 'bg-indigo-600 border-indigo-600 text-white font-medium'
+                  : 'bg-white border-gray-200 text-gray-600 hover:border-gray-300'
+              }`}
+            >
+              {STRUCTURE_SUB_LABELS[sub]}
+            </button>
+          ))}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// Trendline setup (utils/marketStructure/trendlines): a location condition on top of the
+// Entry Signal trigger — the trigger must fire on the side the setup allows.
+function TrendlineSetupControl({ rules, up }: Pick<RegimeStepProps, 'rules' | 'up'>) {
+  const setup = rules.trendlineSetup ?? 'none';
+  return (
+    <div className="space-y-2">
+      <ModePickerControl
+        label="Trendline Setup"
+        tooltip="Where the Entry Signal must fire relative to the pivot trendlines (Indicators → Trendlines; bounds in Session Settings → Trendlines). Bounce = a with-trend line (rising support for longs, falling resistance for shorts; flat allowed) was touched in the last N bars and still holds — trend pullbacks. Break & retest = a line was closed through, price came back to it and held — trend turning. Failed breakout = a close through a line, then back inside — fade it; for ranges. Pick per regime."
+        mode={setup}
+        offValue="none"
+        gridCols={4}
+        modeOptions={[
+          { value: 'none', label: 'Off' },
+          { value: 'bounce', label: 'Bounce' },
+          { value: 'break_retest', label: 'Break & retest' },
+          { value: 'failed_break', label: 'Failed breakout' },
+        ]}
+        onModeChange={v => up({ trendlineSetup: v as RegimeRules['trendlineSetup'] })}
+      />
+      {setup !== 'none' && (
+        <div className="flex items-center gap-3 px-1">
+          <label className="flex items-center gap-1" title="How many bars back the touch / break / retest may have happened.">
+            <span className="text-[10px] text-gray-500">Within bars:</span>
+            <input
+              type="number" min={1} max={50} value={rules.trendlineSetupBars ?? 6}
+              onChange={e => up({ trendlineSetupBars: Number(e.target.value) })}
+              className="w-12 px-1 py-0.5 text-[10px] border rounded text-center"
+            />
+          </label>
+          <label className="flex items-center gap-1" title="Touch band around the line, as a multiple of the line's own tolerance (Session Settings → Trendlines → Touch tolerance).">
+            <span className="text-[10px] text-gray-500">Zone ×:</span>
+            <input
+              type="number" min={0.25} max={5} step={0.25} value={rules.trendlineSetupZone ?? 1}
+              onChange={e => up({ trendlineSetupZone: Number(e.target.value) })}
+              className="w-12 px-1 py-0.5 text-[10px] border rounded text-center"
+            />
+          </label>
+        </div>
+      )}
     </div>
   );
 }
@@ -193,6 +304,8 @@ export function EntryStep({ rules, up, isShort, isBoth }: RegimeStepProps) {
         </div>
       </CardShell>
 
+      <TrendlineSetupControl rules={rules} up={up} />
+
       <div className="grid grid-cols-1 @3xl:grid-cols-2 gap-2">
         <ModePickerControl
           label="MA Filter"
@@ -226,7 +339,109 @@ export function EntryStep({ rules, up, isShort, isBoth }: RegimeStepProps) {
           diagram={m => (m === 'any' ? null : <PivotSeqDiagram pattern={m as 'HH-HL' | 'LH-HL' | 'HH-LL' | 'LH-LL'} />)}
         />
       </div>
+
+      <CustomEntryHookCard rules={rules} up={up} />
     </div>
+  );
+}
+
+// ─── Custom Entry Hook ──────────────────────────────────────────────────────
+// Picks a user-authored algorithm from src/strategies and says how it participates.
+// Deliberately the last card in the Entry step rather than a workflow step of its own: it
+// is a variant of "what triggers an entry", not a separate stage.
+// A structure filter set to anything but 'any' runs in evaluateAutoSignals' regime loop
+// BEFORE resolveEntryHook, so it silences the hook without appearing anywhere.
+function structureGate(f: string | undefined): boolean {
+  return f !== undefined && f !== 'any';
+}
+
+function CustomEntryHookCard({ rules, up }: Pick<RegimeStepProps, 'rules' | 'up'>) {
+  const mode = rules.entryHookMode ?? 'off';
+  const hookId = rules.entryHookId ?? '';
+  const known = hookId === '' || ENTRY_HOOK_OPTIONS.some(o => o.id === hookId);
+  const selected = ENTRY_HOOK_OPTIONS.find(o => o.id === hookId);
+
+  return (
+    <CardShell title="Custom Entry Hook">
+      <SegmentedControl
+        value={mode}
+        onChange={m => up({ entryHookMode: m })}
+        options={[
+          { value: 'off' as const, label: 'Off' },
+          { value: 'gate' as const, label: 'Gate' },
+          { value: 'replace' as const, label: 'Replace' },
+        ]}
+        className="mb-2"
+      />
+
+      {mode !== 'off' && (
+        <>
+          <select
+            value={hookId}
+            onChange={e => up({ entryHookId: e.target.value || undefined })}
+            className="w-full px-2 py-1 text-xs border rounded-lg"
+          >
+            <option value="">— no hook selected —</option>
+            {ENTRY_HOOK_OPTIONS.map(o => (
+              <option key={o.id} value={o.id}>{o.label}</option>
+            ))}
+          </select>
+
+          {selected?.description && (
+            <p className="mt-1.5 text-[10px] text-gray-500 leading-snug">{selected.description}</p>
+          )}
+
+          {/* A configured-but-unresolvable hook takes NO trades rather than quietly falling
+              back to the built-in chain, so this has to be loud. */}
+          {!known && (
+            <p className="mt-1.5 text-[10px] text-red-600 leading-snug">
+              No hook registered under <span className="font-mono">{hookId}</span>. This regime
+              will take no trades until you pick one or register it in src/strategies.
+            </p>
+          )}
+
+          {hookId === '' && (
+            <p className="mt-1.5 text-[10px] text-amber-600 leading-snug">
+              No hook selected — this setting has no effect until you pick one.
+            </p>
+          )}
+
+          {/* THE most common reason a hook looks dead. Both structure filters run in the
+              regime loop BEFORE the hook is reached, and 'bull_trend'/'bear_trend' are
+              shipped defaults on the uptrend/downtrend regimes — measured on real 5m NSE
+              data, the default htStructureFilter alone silences ~65% of signal bars, with
+              nothing in the trade log to show for it. */}
+          {(structureGate(rules.htStructureFilter) || structureGate(rules.ltStructureFilter)) && (
+            <p className="mt-1.5 text-[10px] text-amber-600 leading-snug">
+              {[
+                structureGate(rules.htStructureFilter) ? 'HT' : null,
+                structureGate(rules.ltStructureFilter) ? 'LT' : null,
+              ].filter(Boolean).join(' and ')} Structure is filtered in the Market step. Those
+              gates run <strong>before</strong> the hook, so signals outside that structure
+              never reach your code at all. Set them to <strong>Any</strong> if the hook
+              should judge every signal itself.
+            </p>
+          )}
+
+          <p className="mt-2 text-[10px] text-gray-500 leading-snug">
+            {mode === 'gate'
+              ? 'Runs after every filter above and after SL/TP are computed. It can veto the entry or override side, quantity, SL and target.'
+              : 'Skips every filter above. Your code alone decides, behind the regime\'s enabled + market-structure gates.'}
+            {' '}It fires on the bars the <strong>Entry Signal</strong> above selects
+            {rules.entryMode === 'PIVOT'
+              ? <> — every confirmed pivot (<code>ctx.trigger.source === 'pivot'</code>).</>
+              : <>{rules.entryMode === 'CONFLUENCE' ? ' — H/L signals with a recent pivot' : ' — every H/L signal'}, at <em>any</em> count (H3, H4, L5 included), so the H1/H2 checkboxes stop gating while a hook is on.</>}
+          </p>
+
+          {/* Same control as the panel footer. Repeated here because this is where the
+              strategy work happens, and the worker/main-thread distinction is invisible
+              until it costs you an afternoon of breakpoints that never fire. */}
+          <div className="mt-2">
+            <HookDebugToggle />
+          </div>
+        </>
+      )}
+    </CardShell>
   );
 }
 
@@ -572,15 +787,31 @@ export function ExitStep({ rules, up, meta, isShort, config, onOpenSessionSettin
   const opp2 = isShort ? 'H2' : 'L2';
   return (
     <div className="space-y-3">
-      <CardShell title="Target Risk:Reward">
-        <div className="flex items-center gap-2">
+      <CardShell title="Target">
+        <div className="flex items-center gap-2 flex-wrap">
+          <SegmentedControl
+            fullWidth={false}
+            value={rules.targetMode ?? 'rr'}
+            onChange={m => up({ targetMode: m })}
+            options={[
+              { value: 'rr' as const, label: 'Risk:Reward' },
+              { value: 'trendline' as const, label: 'Opposite trendline' },
+            ]}
+          />
           <input
             type="number" step={0.5} min={0.5} max={10} value={rules.targetRR}
             onChange={e => up({ targetRR: Number(e.target.value) })}
             className="w-20 px-2 py-1.5 text-sm border rounded-lg text-center font-semibold text-indigo-700"
           />
-          <span className="text-sm text-gray-400">× risk</span>
+          <span className="text-sm text-gray-400" title="With Opposite trendline, this RR is the fallback when there is no opposite line beyond entry.">
+            × risk{rules.targetMode === 'trendline' ? ' (fallback)' : ''}
+          </span>
         </div>
+        {rules.targetMode === 'trendline' && (
+          <p className="text-[10px] text-gray-400 mt-1">
+            Target = the opposite trendline (resistance for longs, support for shorts) one tolerance short of it, at entry.
+          </p>
+        )}
       </CardShell>
 
       <p
@@ -667,116 +898,36 @@ export function ExitStep({ rules, up, meta, isShort, config, onOpenSessionSettin
         </div>
       </CardShell>
 
-      <CardShell title="Leg Decay Exit">
-        <div className="flex items-center justify-between gap-2 flex-wrap mb-2">
+      <CardShell title="Trendline Exits">
+        <div className="space-y-2">
           <label className="flex items-center gap-2 cursor-pointer select-none"
-            title="Re-grades the newest completed with-trend leg each bar with the same metrics as the Confirmation filters (only legs formed after entry; windows respect Leg Min/Max Bars in Session Settings). Exits at bar close when enough checks fail, exit reason LEG_DECAY.">
-            <ToggleSwitch checked={rules.exitLegDecay ?? false} onChange={v => up({ exitLegDecay: v })} activeColor={meta.activeBg} />
-            <span className={`text-xs font-semibold ${rules.exitLegDecay ? meta.color : 'text-gray-400'}`}>
-              {rules.exitLegDecay ? 'On' : 'Off'}
+            title="Exit at bar close when the close goes beyond the with-trade trendline (support for longs, resistance for shorts — the line at entry, or the current one if tighter) by more than its tolerance. Exit reason TRENDLINE_BREAK.">
+            <ToggleSwitch checked={rules.exitOnTrendlineBreak ?? false} onChange={v => up({ exitOnTrendlineBreak: v })} activeColor={meta.activeBg} />
+            <span className={`text-xs font-semibold ${rules.exitOnTrendlineBreak ? meta.color : 'text-gray-400'}`}>
+              Exit on line break {rules.exitOnTrendlineBreak ? 'On' : 'Off'}
             </span>
           </label>
-          <div className="flex items-center gap-1" title="No decay exit before this many bars in the trade.">
-            <span className="text-[10px] text-gray-500">Min bars in trade:</span>
-            <input
-              type="number" min={0} max={50} value={rules.exitLegDecayMinBarsInTrade ?? 3}
-              onChange={e => up({ exitLegDecayMinBarsInTrade: Number(e.target.value) })}
-              className="w-10 px-1 py-0.5 text-[10px] border rounded text-center"
-            />
+          <div className="flex items-center justify-between gap-2 flex-wrap">
+            <label className="flex items-center gap-2 cursor-pointer select-none"
+              title="Ratchet the SL along the with-trade trendline (as known at the prior bar), one line-tolerance plus the buffer beyond it. Never loosens; with the pivot trail also on, the tighter stop wins.">
+              <ToggleSwitch checked={rules.exitTrailTrendline ?? false} onChange={v => up({ exitTrailTrendline: v })} activeColor={meta.activeBg} />
+              <span className={`text-xs font-semibold ${rules.exitTrailTrendline ? meta.color : 'text-gray-400'}`}>
+                Trail along line {rules.exitTrailTrendline ? 'On' : 'Off'}
+              </span>
+            </label>
+            <div className="flex items-center gap-1">
+              <span className="text-[10px] text-gray-500">Buffer pts:</span>
+              <input
+                type="number" min={0} step={0.5} value={rules.exitTrailTrendlineBufferPoints ?? 2}
+                onChange={e => up({ exitTrailTrendlineBufferPoints: Number(e.target.value) })}
+                className="w-12 px-1 py-0.5 text-[10px] border rounded text-center"
+              />
+            </div>
           </div>
-          <div className="flex items-center gap-1" title="Exit when at least this many of the enabled checks below fail on the same bar.">
-            <span className="text-[10px] text-gray-500">Min fails:</span>
-            <input
-              type="number" min={1} max={5} value={rules.exitLegDecayMinFails ?? 1}
-              onChange={e => up({ exitLegDecayMinFails: Number(e.target.value) })}
-              className="w-10 px-1 py-0.5 text-[10px] border rounded text-center"
-            />
-          </div>
-        </div>
-        <div className="grid grid-cols-1 @3xl:grid-cols-2 @6xl:grid-cols-3 gap-2">
-          <ThresholdFilterControl
-            label="Efficiency Ratio"
-            tooltip="Kaufman ER of the current with-trend leg. 'Hold ≥' fails the check when the leg's efficiency drops below the threshold (trend losing directness)."
-            mode={rules.exitDecayEfficiencyFilter ?? 'none'}
-            offValue="none"
-            modeOptions={[
-              { value: 'none', label: 'Off' },
-              { value: 'min', label: 'Hold ≥' },
-              { value: 'max', label: 'Stay ≤' },
-            ]}
-            onModeChange={v => up({ exitDecayEfficiencyFilter: v as RegimeRules['exitDecayEfficiencyFilter'] })}
-            threshold={rules.exitDecayEfficiencyThreshold ?? 0.25}
-            onThresholdChange={v => up({ exitDecayEfficiencyThreshold: v })}
-            diagram={null}
-            min={0} max={1} step={0.05}
-          />
-          <ThresholdFilterControl
-            label="Consecutive Breaks"
-            tooltip="Longest run of aligned prior-bar breaks in the current leg (micro-channel strength). 'Hold ≥' fails when the newest leg can no longer sustain a run of that length."
-            mode={rules.exitDecayConsecBreakFilter ?? 'none'}
-            offValue="none"
-            modeOptions={[
-              { value: 'none', label: 'Off' },
-              { value: 'min', label: 'Hold ≥' },
-              { value: 'max', label: 'Stay ≤' },
-            ]}
-            onModeChange={v => up({ exitDecayConsecBreakFilter: v as RegimeRules['exitDecayConsecBreakFilter'] })}
-            threshold={rules.exitDecayConsecBreakThreshold ?? 3}
-            onThresholdChange={v => up({ exitDecayConsecBreakThreshold: v })}
-            diagram={null}
-            min={1} max={10} step={1}
-          />
-          <ThresholdFilterControl
-            label="Break Count"
-            tooltip="Total aligned prior-bar breaks in the current leg window (momentum persistence). 'Hold ≥' fails when momentum dries up."
-            mode={rules.exitDecayBarBreakFilter ?? 'none'}
-            offValue="none"
-            modeOptions={[
-              { value: 'none', label: 'Off' },
-              { value: 'min', label: 'Hold ≥' },
-              { value: 'max', label: 'Stay ≤' },
-            ]}
-            onModeChange={v => up({ exitDecayBarBreakFilter: v as RegimeRules['exitDecayBarBreakFilter'] })}
-            threshold={rules.exitDecayBarBreakThreshold ?? 4}
-            onThresholdChange={v => up({ exitDecayBarBreakThreshold: v })}
-            diagram={null}
-            min={0} max={20} step={1}
-          />
-          <ThresholdFilterControl
-            label="EMA21 Slope"
-            tooltip="Direction-aligned EMA21 slope (flips automatically for shorts). 'Hold ≥' fails when the slope turns against the trade."
-            mode={rules.exitDecayEma21SlopeFilter ?? 'none'}
-            offValue="none"
-            modeOptions={[
-              { value: 'none', label: 'Off' },
-              { value: 'min', label: 'Hold ≥' },
-              { value: 'max', label: 'Stay ≤' },
-            ]}
-            onModeChange={v => up({ exitDecayEma21SlopeFilter: v as RegimeRules['exitDecayEma21SlopeFilter'] })}
-            threshold={rules.exitDecayEma21SlopeThreshold ?? 0}
-            onThresholdChange={v => up({ exitDecayEma21SlopeThreshold: v })}
-            diagram={null}
-            min={-2} max={2} step={0.05}
-            formatValue={v => v.toFixed(2)}
-          />
-          <ThresholdFilterControl
-            label="EMA20 Gap-Bar"
-            tooltip="Fraction of leg bars not touching the EMA20 (Brooks gap bars — strong trend). 'Hold ≥' fails when price starts hugging the average again."
-            mode={rules.exitDecayGapBarFilter ?? 'none'}
-            offValue="none"
-            modeOptions={[
-              { value: 'none', label: 'Off' },
-              { value: 'min', label: 'Hold ≥' },
-              { value: 'max', label: 'Stay ≤' },
-            ]}
-            onModeChange={v => up({ exitDecayGapBarFilter: v as RegimeRules['exitDecayGapBarFilter'] })}
-            threshold={rules.exitDecayGapBarThreshold ?? 0.3}
-            onThresholdChange={v => up({ exitDecayGapBarThreshold: v })}
-            diagram={null}
-            min={0} max={1} step={0.05}
-          />
         </div>
       </CardShell>
+
+      <CustomExitHookCard rules={rules} up={up} />
 
       <CardShell muted>
         <div className="flex items-center justify-between gap-2">
@@ -797,6 +948,99 @@ export function ExitStep({ rules, up, meta, isShort, config, onOpenSessionSettin
   );
 }
 
+// ─── Custom Exit Hook ───────────────────────────────────────────────────────
+// The exit half of the strategy builder — picks a user-authored trade-management algorithm
+// from src/strategies/exits and says how it participates. Mirrors CustomEntryHookCard above,
+// and sits last in the Exit step for the same reason that one sits last in Entry: it is a
+// variant of "what closes a trade", not a separate stage.
+//
+// This card replaced the Leg Decay Exit, whose five hard-coded checks now ship as the
+// 'leg-decay' hook — same behaviour, editable in TypeScript instead of five dropdowns.
+
+function CustomExitHookCard({ rules, up }: Pick<RegimeStepProps, 'rules' | 'up'>) {
+  const mode = rules.exitHookMode ?? 'off';
+  const hookId = rules.exitHookId ?? '';
+  const known = hookId === '' || EXIT_HOOK_OPTIONS.some(o => o.id === hookId);
+  const selected = EXIT_HOOK_OPTIONS.find(o => o.id === hookId);
+  const builtInsOn = (rules.exitOnReversal ?? false) || (rules.exitOnOppSignal ?? false);
+
+  return (
+    <CardShell title="Custom Exit Hook">
+      <SegmentedControl
+        value={mode}
+        onChange={m => up({ exitHookMode: m })}
+        options={[
+          { value: 'off' as const, label: 'Off' },
+          { value: 'gate' as const, label: 'Gate' },
+          { value: 'replace' as const, label: 'Replace' },
+        ]}
+        className="mb-2"
+      />
+
+      {mode !== 'off' && (
+        <>
+          <select
+            value={hookId}
+            onChange={e => up({ exitHookId: e.target.value || undefined })}
+            className="w-full px-2 py-1 text-xs border rounded-lg"
+          >
+            <option value="">— no hook selected —</option>
+            {EXIT_HOOK_OPTIONS.map(o => (
+              <option key={o.id} value={o.id}>{o.label}</option>
+            ))}
+          </select>
+
+          {selected?.description && (
+            <p className="mt-1.5 text-[10px] text-gray-500 leading-snug">{selected.description}</p>
+          )}
+
+          {/* A configured-but-unresolvable hook runs NO signal exits rather than quietly
+              falling back to the built-in ones, so this has to be loud. */}
+          {!known && (
+            <p className="mt-1.5 text-[10px] text-red-600 leading-snug">
+              No hook registered under <span className="font-mono">{hookId}</span>. This regime
+              will run no signal exits at all until you pick one or register it in
+              src/strategies/exits.
+            </p>
+          )}
+
+          {hookId === '' && (
+            <p className="mt-1.5 text-[10px] text-amber-600 leading-snug">
+              No hook selected — this setting has no effect until you pick one.
+            </p>
+          )}
+
+          {/* Gate mode is meaningless without something to gate: with both built-in signal
+              exits off there is never a pendingExit, so 'gate' and 'replace' behave
+              identically and a veto-only hook does literally nothing. */}
+          {mode === 'gate' && !builtInsOn && (
+            <p className="mt-1.5 text-[10px] text-amber-600 leading-snug">
+              Reversal and Opposite Signal are both off, so there is nothing for Gate mode to
+              gate — your hook will never see a <span className="font-mono">pendingExit</span>.
+              Turn one on, or switch to <strong>Replace</strong>.
+            </p>
+          )}
+
+          <p className="mt-2 text-[10px] text-gray-500 leading-snug">
+            {mode === 'gate'
+              ? 'Reversal and Opposite Signal evaluate first; your hook sees their verdict as ctx.pendingExit and has the final say — it can let it stand, veto it, or exit on its own terms.'
+              : 'Reversal and Opposite Signal are skipped entirely. Your code alone decides when the trade closes.'}
+            {' '}Runs once per bar per open trade, <em>after</em> that bar&apos;s SL/TP check —
+            so a stop it moves first bites on the next bar. The SL/TP levels and the Pivot
+            Trailing Stop keep working either way.
+          </p>
+
+          {/* Same control as the panel footer and the entry card: a hook running on the
+              worker cannot be broken into from the main thread's devtools. */}
+          <div className="mt-2">
+            <HookDebugToggle />
+          </div>
+        </>
+      )}
+    </CardShell>
+  );
+}
+
 // ─── Risk ───────────────────────────────────────────────────────────────────
 // SL method/amount + a read-only shortcut into session-wide position-sizing settings.
 export function RiskStep({ rules, up, config, onOpenSessionSettings }: RegimeStepProps) {
@@ -812,8 +1056,14 @@ export function RiskStep({ rules, up, config, onOpenSessionSettings }: RegimeSte
               { value: 'pivot' as const, label: 'Pivot SL', activeClassName: 'bg-orange-600 text-white border-orange-600' },
               { value: 'atr' as const, label: 'ATR SL', activeClassName: 'bg-orange-600 text-white border-orange-600' },
               { value: 'fixed' as const, label: 'Fixed SL', activeClassName: 'bg-orange-600 text-white border-orange-600' },
+              { value: 'trendline' as const, label: 'Trendline SL', activeClassName: 'bg-orange-600 text-white border-orange-600' },
             ]}
           />
+          {rules.slMethod === 'trendline' && (
+            <span className="text-[10px] text-gray-500" title="Bounce / retest: one line-tolerance beyond the line. Failed breakout: one tolerance beyond the failed excursion's extreme. Without a Trendline Setup on this regime, falls back to the Pivot SL.">
+              beyond the setup's line{rules.trendlineSetup && rules.trendlineSetup !== 'none' ? '' : ' (no setup → Pivot SL)'}
+            </span>
+          )}
           {rules.slMethod === 'atr' && (
             <div className="flex items-center gap-1">
               <span className="text-[10px] text-gray-500">×</span>
@@ -838,7 +1088,9 @@ export function RiskStep({ rules, up, config, onOpenSessionSettings }: RegimeSte
           <p className="text-[11px] text-gray-500">
             Position sizing:{' '}
             <span className="font-medium text-gray-600">
-              {config.useAutoQty ? `Auto · ₹${config.riskPerTrade} risk` : 'Manual qty'}
+              {config.useAutoQty
+                ? `Auto · ₹${config.riskPerTrade} risk${(config.lotSize ?? DEFAULT_LOT_SIZE) > 1 ? ` · lot ${config.lotSize ?? DEFAULT_LOT_SIZE}` : ''}`
+                : 'Manual qty'}
             </span>
           </p>
           <button

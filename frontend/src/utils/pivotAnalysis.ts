@@ -1,5 +1,5 @@
 import type { Candle } from '../types';
-import { calculatePivotPoints, calculateEMA, getEmaValueAt, type PivotPoint } from './indicators';
+import { calculatePivotPoints, calculateEMA, getEmaValueAt, DEFAULT_MIN_PIVOT_GAP_BARS, type PivotPoint } from './indicators';
 
 export interface PivotAnalysisResult {
     llhhPivot: 'HH-HL' | 'HH-LL' | 'LH-HL' | 'LH-LL' | '';
@@ -16,7 +16,11 @@ export interface PivotAnalysisResult {
 export function analyzePivotForTrade(
     candles: Candle[],
     currentIndex: number,
-    tradeType: 'BUY' | 'SELL'
+    tradeType: 'BUY' | 'SELL',
+    // Resolve from the active AutoBacktestConfig via resolveMinPivotGapBars. Taken as a
+    // plain number rather than the config itself — autoBacktestEngine imports this module,
+    // so importing the resolver back would be circular.
+    minPivotGapBars: number = DEFAULT_MIN_PIVOT_GAP_BARS
 ): PivotAnalysisResult {
     const result: PivotAnalysisResult = {
         llhhPivot: '',
@@ -34,7 +38,7 @@ export function analyzePivotForTrade(
     const visibleCandles = candles.slice(0, currentIndex + 1);
 
     // Calculate pivot points
-    const pivots = calculatePivotPoints(visibleCandles);
+    const pivots = calculatePivotPoints(visibleCandles, minPivotGapBars);
 
     if (pivots.length === 0) {
         return result;
@@ -69,7 +73,9 @@ export function analyzePivotForTrade(
 export function analyzeManualEntry(
     candles: Candle[],
     currentIndex: number,
-    tradeType: 'BUY' | 'SELL'
+    tradeType: 'BUY' | 'SELL',
+    /** See analyzePivotForTrade — resolved from AutoBacktestConfig by the caller. */
+    minPivotGapBars: number = DEFAULT_MIN_PIVOT_GAP_BARS
 ): PivotAnalysisResult {
     const result: PivotAnalysisResult = {
         llhhPivot: '',
@@ -83,7 +89,7 @@ export function analyzeManualEntry(
     }
 
     const visibleCandles = candles.slice(0, currentIndex + 1);
-    const pivots = calculatePivotPoints(visibleCandles);
+    const pivots = calculatePivotPoints(visibleCandles, minPivotGapBars);
 
     // 1. LLHH-Pivot from recent pivots
     if (pivots.length > 0) {
@@ -341,11 +347,13 @@ export interface BarQualitySample {
     clv: number; // close location value: (close-low) / (high-low) — near 1 = closed near high (bullish), near 0 = closed near low (bearish)
     uwr: number; // upper wick ratio: (high-max(open,close)) / (high-low) — large UWR on an up-close bar exposes rejection at highs (fakeout)
     lwr: number; // lower wick ratio: (min(open,close)-low) / (high-low) — large LWR on a down-close bar exposes rejection at lows (fakeout)
+    range: number; // high - low, actual points — the point-value counterpart to brr's denominator
+    body: number; // |close - open|, actual points — the point-value counterpart to brr's numerator
 }
 
 function barQualityOf(c: Candle): BarQualitySample {
     const range = c.high - c.low;
-    if (range <= 0) return { brr: 0, clv: 0, uwr: 0, lwr: 0 };
+    if (range <= 0) return { brr: 0, clv: 0, uwr: 0, lwr: 0, range: 0, body: 0 };
     const body = Math.abs(c.close - c.open);
     const upperWick = c.high - Math.max(c.open, c.close);
     const lowerWick = Math.min(c.open, c.close) - c.low;
@@ -354,6 +362,8 @@ function barQualityOf(c: Candle): BarQualitySample {
         clv: (c.close - c.low) / range,
         uwr: upperWick / range,
         lwr: lowerWick / range,
+        range,
+        body,
     };
 }
 
@@ -383,6 +393,8 @@ export function averageBarQuality(samples: BarQualitySample[]): {
     clvAvg?: number;
     uwrAvg?: number;
     lwrAvg?: number;
+    rangeAvg?: number;
+    bodyAvg?: number;
 } {
     if (samples.length === 0) return {};
     const mean = (xs: number[]) => xs.reduce((sum, x) => sum + x, 0) / xs.length;
@@ -391,6 +403,8 @@ export function averageBarQuality(samples: BarQualitySample[]): {
         clvAvg: mean(samples.map(s => s.clv)),
         uwrAvg: mean(samples.map(s => s.uwr)),
         lwrAvg: mean(samples.map(s => s.lwr)),
+        rangeAvg: mean(samples.map(s => s.range)),
+        bodyAvg: mean(samples.map(s => s.body)),
     };
 }
 
@@ -427,15 +441,22 @@ function iqrTrimmedMean(values: number[]): number | undefined {
 }
 
 /**
- * IQR-trimmed mean Body-to-Range Ratio from calculateBarQuality samples — a
- * robust variant of averageBarQuality's brrAvg. Undefined when the window is
- * empty, mirroring averageBarQuality's convention.
+ * IQR-trimmed mean Body-to-Range Ratio (plus point-value range/body counterparts)
+ * from calculateBarQuality samples — robust variants of averageBarQuality's
+ * brrAvg/rangeAvg/bodyAvg. Undefined when the window is empty, mirroring
+ * averageBarQuality's convention.
  */
 export function averageBarQualityIQR(samples: BarQualitySample[]): {
     brrAvgIQR?: number;
+    rangeAvgIQR?: number;
+    bodyAvgIQR?: number;
 } {
     if (samples.length === 0) return {};
-    return { brrAvgIQR: iqrTrimmedMean(samples.map(s => s.brr)) };
+    return {
+        brrAvgIQR: iqrTrimmedMean(samples.map(s => s.brr)),
+        rangeAvgIQR: iqrTrimmedMean(samples.map(s => s.range)),
+        bodyAvgIQR: iqrTrimmedMean(samples.map(s => s.body)),
+    };
 }
 
 /**
