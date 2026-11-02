@@ -470,9 +470,13 @@ console.log('\n[10] double top / bottom exit');
   assert(bottom !== null && bottom.detail.startsWith('double bottom:'), `short exits on the mirrored double bottom (${bottom?.detail})`);
   assert(bottom?.bar === top?.bar, '…on the same bar as the long mirror');
 
-  const closeTops: [number, number][] = [[0, 100], [70, 130], [85, 110], [100, 130], [125, 105]];
+  const tops30: [number, number][] = [[0, 100], [70, 130], [85, 110], [100, 130], [125, 105]];
+  const t30 = firstExit(fromWaypoints(tops30), 1);
+  assert(t30 !== null && t30.detail.startsWith('double top:'), `tops ~30 bars apart ARE a double top (min gap 25) (${t30?.detail})`);
+
+  const closeTops: [number, number][] = [[0, 100], [60, 130], [70, 110], [82, 130], [107, 105]];
   const close = firstExit(fromWaypoints(closeTops), 1);
-  assert(close === null || !close.detail.startsWith('double top'), 'tops 30 bars apart are not a double top (min gap 50)');
+  assert(close === null || !close.detail.startsWith('double top'), 'tops 22 bars apart are not a double top (min gap 25)');
 
   const mismatch: [number, number][] = [[0, 100], [40, 122], [70, 110], [100, 130], [125, 105]];
   const mm = firstExit(fromWaypoints(mismatch), 1);

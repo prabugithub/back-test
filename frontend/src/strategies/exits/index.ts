@@ -62,7 +62,7 @@ export const EXIT_HOOKS: Record<string, ExitHookEntry> = {
   },
   'climax-profit': {
     label: 'Climax Profit (4x candle, double top/bottom)',
-    description: 'Books profit on long and short trades when a bar\'s range reaches Climax Multiple × the average of the prior Climax Lookback bars (default 4x / 20), or on a strong reversal off a double top (longs) / double bottom (shorts) at least 50 bars apart. Only exits a trade in profit. Use Gate mode to keep the built-in exits.',
+    description: 'Books profit on long and short trades when a bar\'s range reaches Climax Multiple × the average of the prior Climax Lookback bars (default 4x / 20), or on a strong reversal off a double top (longs) / double bottom (shorts) at least 25 bars apart (Double Top Gap). Only exits a trade in profit. Use Gate mode to keep the built-in exits.',
     hook: climaxProfitExit,
   },
   'leg-decay-climax': {

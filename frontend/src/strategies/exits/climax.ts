@@ -35,7 +35,7 @@ export const DEFAULT_CLIMAX_EXIT = {
   /** Current bar range ÷ baseline range at or above which the bar is a climax. */
   climaxExitMultiple: 4,
   /** Fewest bars between the two tops / bottoms of a double top / bottom. */
-  doubleTopMinGap: 50,
+  doubleTopMinGap: 25,
   /** How far apart the two tops / bottoms may be and still count as the same level, in ATR. */
   doubleTopTolAtr: 0.5,
   /** Strong reversal: fraction of the way from the second top back to the neckline the
