@@ -422,5 +422,69 @@ console.log('\n[9] climax profit exit');
   assert(combo !== null && combo.detail.startsWith('climax:'), "'leg-decay-climax' takes the climax exit first");
 }
 
+// ─── 10. Double top / bottom (same climax-profit hook) ─────────────────────────
+
+console.log('\n[10] double top / bottom exit');
+{
+  // Piecewise-linear close path through [bar, price] waypoints; every bar's range is its
+  // body ± 0.5, so no bar is anywhere near a 4x climax.
+  const fromWaypoints = (pts: [number, number][], mirror = false): Candle[] => {
+    const base = Date.UTC(2026, 0, 5, 3, 45, 0) / 1000;
+    const n = pts[pts.length - 1][0] + 1;
+    const at = (i: number) => {
+      for (let s = 1; s < pts.length; s++) {
+        const [b0, p0] = pts[s - 1];
+        const [b1, p1] = pts[s];
+        if (i <= b1) return p0 + ((p1 - p0) * (i - b0)) / (b1 - b0);
+      }
+      return pts[pts.length - 1][1];
+    };
+    const c: Candle[] = [];
+    for (let i = 0; i < n; i++) {
+      const raw = at(i);
+      const close = mirror ? 300 - raw : raw;
+      const open = i === 0 ? close : c[i - 1].close;
+      c.push({ timestamp: base + i * 60, open, close, high: Math.max(open, close) + 0.5, low: Math.min(open, close) - 0.5, volume: 1000 });
+    }
+    return c;
+  };
+  const ENTRY = 80;
+  const dtCfg = cfg({ exitHookMode: 'replace', exitHookId: 'climax-profit' });
+  const firstExit = (c: Candle[], qty: number, conf = dtCfg) => {
+    const p = { quantity: qty, averagePrice: c[ENTRY].close, entryBarIndex: ENTRY, entryRegime: 'uptrend' as const };
+    for (let i = ENTRY + 1; i < c.length; i++) {
+      const r = evaluateAutoExitSignal(c, i, p, conf);
+      if (r.exit) return { bar: i, detail: r.exit.detail };
+    }
+    return null;
+  };
+
+  // Tops at bars ~40 and ~100 (60 apart), neck ~110 at bar 70, long entered at 80 on the
+  // way up to the second top, then a steady fall back toward the neck.
+  const DT: [number, number][] = [[0, 100], [40, 130], [70, 110], [100, 130], [125, 105]];
+  const top = firstExit(fromWaypoints(DT), 1);
+  assert(top !== null && top.detail.startsWith('double top:'), `long exits on a strong double-top reversal (${top?.detail})`);
+  assert(top !== null && top.bar > 100 && top.bar < 115, `…once it has retraced ~half way to the neck, not at the top (bar ${top?.bar})`);
+
+  const bottom = firstExit(fromWaypoints(DT, true), -1);
+  assert(bottom !== null && bottom.detail.startsWith('double bottom:'), `short exits on the mirrored double bottom (${bottom?.detail})`);
+  assert(bottom?.bar === top?.bar, '…on the same bar as the long mirror');
+
+  const closeTops: [number, number][] = [[0, 100], [70, 130], [85, 110], [100, 130], [125, 105]];
+  const close = firstExit(fromWaypoints(closeTops), 1);
+  assert(close === null || !close.detail.startsWith('double top'), 'tops 30 bars apart are not a double top (min gap 50)');
+
+  const mismatch: [number, number][] = [[0, 100], [40, 122], [70, 110], [100, 130], [125, 105]];
+  const mm = firstExit(fromWaypoints(mismatch), 1);
+  assert(mm === null || !mm.detail.startsWith('double top'), 'tops 8 points apart are not the same level');
+
+  const weak: [number, number][] = [[0, 100], [40, 130], [70, 110], [100, 130], [104, 127], [125, 127]];
+  assert(firstExit(fromWaypoints(weak), 1) === null, 'a shallow pullback off the second top is not a strong reversal');
+
+  const gapCfg = cfg({ exitHookMode: 'replace', exitHookId: 'climax-profit' }, { doubleTopMinGap: 80 });
+  const gapped = firstExit(fromWaypoints(DT), 1, gapCfg);
+  assert(gapped === null || !gapped.detail.startsWith('double top'), 'Session Settings Double Top Gap is honoured');
+}
+
 console.log(`\n${passed} passed, ${failed} failed`);
 process.exit(failed ? 1 : 0);

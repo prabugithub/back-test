@@ -429,6 +429,9 @@ export interface AutoBacktestConfig {
   // DEFAULT_CLIMAX_EXIT (in that file), so saved configs need no migration.
   climaxExitLookback?: number; // prior bars averaged into the baseline candle range (default 20)
   climaxExitMultiple?: number; // bar range ÷ baseline at or above which an in-profit trade is closed (default 4)
+  doubleTopMinGap?: number;       // same hook: fewest bars between the two tops/bottoms of a double top/bottom (default 50)
+  doubleTopTolAtr?: number;       // same hook: max price gap between the two tops/bottoms, in ATR (default 0.5)
+  doubleTopReversalFrac?: number; // same hook: retrace from the 2nd top/bottom toward the neckline that counts as strong (default 0.5)
 
   // Strong-trend-day windows read by the Strong-Trend H1 entry hook (strategies/strongTrendH1.ts).
   // Optional — undefined falls back to DEFAULT_TREND_DAY_WINDOWS (in that file), so saved configs need no migration.

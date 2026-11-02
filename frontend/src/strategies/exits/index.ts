@@ -61,13 +61,13 @@ export const EXIT_HOOKS: Record<string, ExitHookEntry> = {
     hook: legDecayExit,
   },
   'climax-profit': {
-    label: 'Climax Profit (4x candle)',
-    description: 'Books profit on long and short trades when a bar\'s range reaches Climax Multiple × the average of the prior Climax Lookback bars (Session Settings, default 4x / 20). Only exits a trade in profit. Use Gate mode to keep the built-in exits.',
+    label: 'Climax Profit (4x candle, double top/bottom)',
+    description: 'Books profit on long and short trades when a bar\'s range reaches Climax Multiple × the average of the prior Climax Lookback bars (default 4x / 20), or on a strong reversal off a double top (longs) / double bottom (shorts) at least 50 bars apart. Only exits a trade in profit. Use Gate mode to keep the built-in exits.',
     hook: climaxProfitExit,
   },
   'leg-decay-climax': {
     label: 'Leg Decay + Climax Profit',
-    description: 'Leg Decay, plus the Climax Profit rule checked first: a 4x-range bar books an in-profit long or short at its close.',
+    description: 'Leg Decay, plus the Climax Profit rules checked first: a 4x-range bar or a strong double top/bottom reversal books an in-profit long or short at its close.',
     hook: legDecayWithClimax,
   },
   'breakeven-trail': {

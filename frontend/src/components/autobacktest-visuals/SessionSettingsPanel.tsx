@@ -388,6 +388,35 @@ export function SessionSettingsPanel({ config, onChange, isOpen, onClose, onOpen
                   className="w-12 px-1.5 py-1 text-xs border rounded text-center"
                 />
               </div>
+              {/* Double top/bottom rule of the same hook. Both tops must sit inside
+                  ctx.candles, so the gap must stay below Exit Hook Candles. */}
+              <div className="flex items-center justify-between gap-1">
+                <span className="text-[10px] text-gray-500" title="Climax Profit exit hook: fewest bars between the two tops (long) or two bottoms (short) of a double top / bottom">Double Top Gap</span>
+                <input
+                  type="number" min={5} max={1000}
+                  value={config.doubleTopMinGap ?? DEFAULT_CLIMAX_EXIT.doubleTopMinGap}
+                  onChange={e => onChange({ doubleTopMinGap: Number(e.target.value) })}
+                  className="w-12 px-1.5 py-1 text-xs border rounded text-center"
+                />
+              </div>
+              <div className="flex items-center justify-between gap-1">
+                <span className="text-[10px] text-gray-500" title="Climax Profit exit hook: how far apart the two tops / bottoms may be and still count as the same level, in multiples of ATR">Double Top Tol ATR</span>
+                <input
+                  type="number" min={0.1} max={5} step={0.1}
+                  value={config.doubleTopTolAtr ?? DEFAULT_CLIMAX_EXIT.doubleTopTolAtr}
+                  onChange={e => onChange({ doubleTopTolAtr: Number(e.target.value) })}
+                  className="w-12 px-1.5 py-1 text-xs border rounded text-center"
+                />
+              </div>
+              <div className="flex items-center justify-between gap-1">
+                <span className="text-[10px] text-gray-500" title="Climax Profit exit hook: a reversal is strong once the close has retraced this fraction of the way from the second top / bottom to the neckline, on a bar closing against the trade. 1 = neckline break">Double Top Reversal</span>
+                <input
+                  type="number" min={0.1} max={1.5} step={0.1}
+                  value={config.doubleTopReversalFrac ?? DEFAULT_CLIMAX_EXIT.doubleTopReversalFrac}
+                  onChange={e => onChange({ doubleTopReversalFrac: Number(e.target.value) })}
+                  className="w-12 px-1.5 py-1 text-xs border rounded text-center"
+                />
+              </div>
               {/* Strong-trend-day windows — read only by the Strong-Trend H1 entry hook. */}
               {TREND_DAY_INPUTS.map(({ key, label, title, min, max }) => (
                 <div key={key} className="flex items-center justify-between gap-1">
