@@ -57,11 +57,19 @@ Owns all backtest-only logic. Every action guards `if (get().isLiveMode) return`
 
 #### `reloadCandlesWithRange(fromDate, toDate, timeframe, jumpToDateStr?)`
 → shared by `PlaybackControls`' Data Settings panel and `AutoBacktestPanel`'s header Date Range control — the fetch/resample logic used to be duplicated in `PlaybackControls` (`performDataReload`) before this was extracted; both callers now delegate here instead of drifting independently
-→ reads `sessionConfig` off the store (fails with a notification if null) — for `dataSource === 'api'` calls `fetchCandles()`; for `'local'` re-parses/resamples the bundled Nifty JSON and filters by date
+→ reads `sessionConfig` off the store (fails with a notification if null) — for `dataSource === 'api'` calls `fetchCandles()`; for `'local'` calls `loadLocalCandles(config.localDatasetId, …)` (see `utils/localMarketData.ts` below); the returned interval may be raised to the dataset's native bar size, and that effective interval is what lands in `sessionConfig`
 → on success calls `loadCandles()` with the updated `{ ...config, interval, fromDate, toDate }`, then optionally jumps `currentIndex` to `jumpToDateStr` via `setCurrentIndex`
 → returns `Promise<boolean>` (success/failure) — callers use this to decide whether to close their own popover/panel; does **not** manage any caller-local loading-spinner state itself
 
 **Check when changing:** both call sites (`PlaybackControls`' `performDataReload` wrapper, `AutoBacktestPanel`'s `handleLoadDateRange`) expect the same success/failure contract — a behavior change here affects both pages identically
+
+#### `utils/localMarketData.ts` — local dataset registry
+→ single loader for bundled market data. `import.meta.glob` discovers `assets/market-data/*.json` (except `nifty50.json`); `LOCAL_DATASETS`, `getLocalDataset`, `loadLocalCandles(id, interval, from, to)`, `localInstrumentLabel`, `intervalToMinutes`
+→ **3 consumers, formerly 3 hand-copied Nifty loaders:** `InstrumentSelector.handleFetch` (initial load + Resume), `TimeframeSwitcher.handleTimeframeChange`, `backtestActions.reloadCandlesWithRange`. Do not reintroduce a direct JSON import in any of them
+→ `SessionConfig.localDatasetId?` (optional; absent = `LEGACY_DATASET_ID` = `nifty5min_data`) is written in `saveRemoteSession` and read in `loadRemoteSession` (`sharedActions.ts`). It is spread only when set, so Firestore never gets `undefined`
+→ row-format dates are IST wall clock and are converted with `Date.UTC(...) - 19800`. Never use `new Date(str)`, which depends on the browser timezone
+
+**Check when changing:** the resampler's UTC-epoch assumption (`IST_OFFSET` in `resampler.ts`) · the `<NAME>_<N>minute` filename convention, which drives the label and the timeframe floor in both `InstrumentSelector` and `TimeframeSwitcher` · `instrument` label format, which is stamped on trades and used by the Performance Dashboard instrument filter
 
 #### `initiateTrade(type, qty, sl, target)`
 → called from PlaybackControls handleExecuteTrade

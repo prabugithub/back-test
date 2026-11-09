@@ -1,5 +1,5 @@
 import { useSessionStore } from '../stores/sessionStore';
-import { parseColumnarData, resampleCandles, type ColumnarData } from '../utils/resampler';
+import { loadLocalCandles, localInstrumentLabel, getLocalDataset, intervalToMinutes } from '../utils/localMarketData';
 import { useState } from 'react';
 
 const TIMEFRAMES = [
@@ -8,9 +8,6 @@ const TIMEFRAMES = [
     { value: '60', label: '1h' },
     { value: '1D', label: '1D' },
 ];
-
-// Dynamic import for the large JSON file
-const loadNiftyData = () => import('../assets/market-data/nifty5min_data.json');
 
 export function TimeframeSwitcher() {
     const sessionConfig = useSessionStore((s) => s.sessionConfig);
@@ -52,35 +49,10 @@ export function TimeframeSwitcher() {
                 const currentCandle = currentState.candles[currentState.currentIndex];
                 const currentTimestamp = currentCandle?.timestamp;
 
-                // Reload and resample local data
-                const module = await loadNiftyData();
-                const rawData: any = module.default || module;
-
-                if (!rawData || !rawData.t || !rawData.o || !rawData.h || !rawData.l || !rawData.c || !rawData.v) {
-                    throw new Error('Invalid JSON data format');
-                }
-
-                // Local data (Nifty JSON) is already offset by 5.5 hours (IST)
-                let allCandles = parseColumnarData(rawData as ColumnarData, -19800);
-
-                // Filter by date range
-                if (sessionConfig.fromDate) {
-                    const fromTs = new Date(sessionConfig.fromDate).getTime() / 1000;
-                    allCandles = allCandles.filter(c => c.timestamp >= fromTs);
-                }
-                if (sessionConfig.toDate) {
-                    const toTs = (new Date(sessionConfig.toDate).getTime() / 1000) + 86400;
-                    allCandles = allCandles.filter(c => c.timestamp < toTs);
-                }
-
-                // Determine timeframe in minutes
-                let timeframeMinutes = 5;
-                if (newInterval === '5') timeframeMinutes = 5;
-                if (newInterval === '15') timeframeMinutes = 15;
-                if (newInterval === '60') timeframeMinutes = 60;
-                if (newInterval === '1D') timeframeMinutes = 1440;
-
-                const resampledCandles = timeframeMinutes === 5 ? allCandles : resampleCandles(allCandles, timeframeMinutes);
+                // Reload and resample the session's local dataset
+                const { candles: resampledCandles } = await loadLocalCandles(
+                    sessionConfig.localDatasetId, newInterval, sessionConfig.fromDate, sessionConfig.toDate
+                );
 
                 if (resampledCandles.length > 0) {
                     const updatedConfig = { ...sessionConfig, interval: newInterval };
@@ -164,7 +136,7 @@ export function TimeframeSwitcher() {
                     }
 
                     // Load candles (this will reset state)
-                    loadCandles(resampledCandles, `NIFTY 50 (Local ${newInterval})`, updatedConfig);
+                    loadCandles(resampledCandles, localInstrumentLabel(sessionConfig.localDatasetId, newInterval), updatedConfig);
 
                     // Immediately restore the session state (synchronously)
                     // Use the saved variables, not fetching from store again
@@ -190,6 +162,9 @@ export function TimeframeSwitcher() {
         return null;
     }
 
+    // A timeframe finer than the dataset's native bars can't be built (e.g. 5m from 15m data).
+    const baseMinutes = getLocalDataset(sessionConfig.localDatasetId).baseMinutes ?? 1;
+
     return (
         <div className="relative">
             <select
@@ -200,7 +175,7 @@ export function TimeframeSwitcher() {
                 style={{ minWidth: '70px' }}
             >
                 {TIMEFRAMES.map((tf) => (
-                    <option key={tf.value} value={tf.value}>
+                    <option key={tf.value} value={tf.value} disabled={intervalToMinutes(tf.value) < baseMinutes}>
                         {tf.label}
                     </option>
                 ))}

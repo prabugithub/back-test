@@ -5,10 +5,7 @@ import { useNotificationStore } from './notificationStore';
 import type { SessionStore, StoreSet, StoreGet } from './sessionStore';
 import { isMultiTradeMode } from '../utils/autoBacktestEngine';
 import { fetchCandles } from '../services/api';
-import { parseColumnarData, resampleCandles, type ColumnarData } from '../utils/resampler';
-
-// Dynamic import for local data
-const loadNiftyData = () => import('../assets/market-data/nifty5min_data.json');
+import { loadLocalCandles, localInstrumentLabel } from '../utils/localMarketData';
 
 export function createBacktestActions(set: StoreSet, get: StoreGet) {
   return {
@@ -67,45 +64,21 @@ export function createBacktestActions(set: StoreSet, get: StoreGet) {
             throw new Error((response as any).message || 'No data received from API');
           }
         } else {
-          const module = await loadNiftyData();
-          const rawData: any = module.default || module;
-
-          if (!rawData || !rawData.t || !rawData.o || !rawData.h || !rawData.l || !rawData.c || !rawData.v) {
-            throw new Error('Invalid JSON data format');
+          const result = await loadLocalCandles(config.localDatasetId, newTimeframe, startStr, endStr);
+          if (result.clamped) {
+            useNotificationStore.getState().notify(
+              `${result.dataset.label} has ${result.interval}m bars — a lower timeframe can't be built. Using ${result.interval}m instead.`,
+              'warning'
+            );
           }
-
-          // Local data (Nifty JSON) is already offset by 5.5 hours (IST)
-          let allCandles = parseColumnarData(rawData as ColumnarData, -19800);
-
-          if (startStr) {
-            const fromTs = new Date(startStr).getTime() / 1000;
-            allCandles = allCandles.filter(c => c.timestamp >= fromTs);
-          }
-          if (endStr) {
-            const toTs = (new Date(endStr).getTime() / 1000) + 86400;
-            allCandles = allCandles.filter(c => c.timestamp < toTs);
-          }
-
-          let tfMinutes = 5;
-          if (newTimeframe === '1') {
-            tfMinutes = 5; // Fallback for local data since we only have 5m
-            useNotificationStore.getState().notify('1m timeframe not available for local data. Using 5m instead.', 'warning');
-          }
-          if (newTimeframe === '5') tfMinutes = 5;
-          if (newTimeframe === '15') tfMinutes = 15;
-          if (newTimeframe === '30') tfMinutes = 30;
-          if (newTimeframe === '60') tfMinutes = 60;
-          if (newTimeframe === '240') tfMinutes = 240;
-          if (newTimeframe === '1440' || newTimeframe === '1D') tfMinutes = 1440;
-
-          const resampledCandles = tfMinutes === 5 ? allCandles : resampleCandles(allCandles, tfMinutes);
+          const resampledCandles = result.candles;
 
           if (resampledCandles.length === 0) {
             throw new Error('No candles found for the selected range/timeframe');
           }
 
-          const newConfig = { ...config, interval: newTimeframe, fromDate: startStr, toDate: endStr };
-          get().loadCandles(resampledCandles, `NIFTY50 (Local ${newTimeframe}m)`, newConfig);
+          const newConfig = { ...config, interval: result.interval, fromDate: startStr, toDate: endStr };
+          get().loadCandles(resampledCandles, localInstrumentLabel(config.localDatasetId, result.interval), newConfig);
           useNotificationStore.getState().notify('Data reloaded successfully (Local)!', 'success');
         }
 

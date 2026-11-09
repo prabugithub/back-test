@@ -18,6 +18,8 @@ export interface SessionConfig {
   fromDate: string;
   toDate: string;
   dataSource: 'api' | 'local' | 'live';
+  /** Local dataset id (file name in assets/market-data, no extension). Absent = legacy Nifty 5m file. */
+  localDatasetId?: string;
 }
 
 // Shared set/get types imported by all action modules — avoids `set as any` casts.

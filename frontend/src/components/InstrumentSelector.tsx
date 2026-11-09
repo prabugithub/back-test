@@ -3,12 +3,19 @@ import { Search, X, Database, HardDrive, CloudDownload } from 'lucide-react';
 import { fetchCandles } from '../services/api';
 import { useSessionStore } from '../stores/sessionStore';
 import { SYMBOLS, SYMBOL_CATEGORIES, searchSymbols, type Symbol } from '../data/symbols';
-import { parseColumnarData, resampleCandles, type ColumnarData } from '../utils/resampler';
 import { useLiveStore } from '../stores/liveStore';
+import {
+  LOCAL_DATASETS, LEGACY_DATASET_ID, getLocalDataset, intervalToMinutes,
+  loadLocalCandles, localInstrumentLabel,
+} from '../utils/localMarketData';
 
-// Dynamic import for the large JSON file
-// We use a function to lazy load it only when needed
-const loadNiftyData = () => import('../assets/market-data/nifty5min_data.json');
+// Timeframes offered for local data; those finer than the dataset's native bars are hidden.
+const LOCAL_TIMEFRAMES = [
+  { value: '5', label: '5 Minutes' },
+  { value: '15', label: '15 Minutes' },
+  { value: '60', label: '1 Hour' },
+  { value: '1D', label: '1 Day' },
+];
 
 export function InstrumentSelector() {
   const [dataSource, setDataSource] = useState<'api' | 'local' | 'live'>('local');
@@ -23,6 +30,18 @@ export function InstrumentSelector() {
   const [error, setError] = useState<string | null>(null);
   const [useDateBasedLoading, setUseDateBasedLoading] = useState(false);
   const [selectedYear, setSelectedYear] = useState<string>(''); // '' = custom range
+  const [localDatasetId, setLocalDatasetId] = useState<string>(LEGACY_DATASET_ID);
+
+  const localDataset = getLocalDataset(localDatasetId);
+  const localBaseMinutes = localDataset.baseMinutes ?? 1;
+  const localTimeframes = LOCAL_TIMEFRAMES.filter(tf => intervalToMinutes(tf.value) >= localBaseMinutes);
+
+  const handleLocalDatasetChange = (id: string) => {
+    setLocalDatasetId(id);
+    // Raise the timeframe if the new dataset can't produce the current one (e.g. 5m from 15m bars).
+    const base = getLocalDataset(id).baseMinutes ?? 1;
+    if (intervalToMinutes(interval) < base) setInterval(base === 1440 ? '1D' : String(base));
+  };
 
   // Years available for quick-select (local data starts 2015)
   const yearOptions = (() => {
@@ -166,7 +185,8 @@ export function InstrumentSelector() {
       instrumentType: instrument, // Map local state 'instrument' to 'instrumentType'
       interval,
       fromDate,
-      toDate
+      toDate,
+      ...(dataSource === 'local' ? { localDatasetId } : {}),
     };
 
     try {
@@ -212,45 +232,13 @@ export function InstrumentSelector() {
       } else {
         // Handle Local Data Loading
         try {
-          const module = await loadNiftyData();
-          // detailed check for default export or direct export
-          const rawData: any = module.default || module;
-
-          if (!rawData || !rawData.t || !rawData.o || !rawData.h || !rawData.l || !rawData.c || !rawData.v) {
-            throw new Error('Invalid JSON data format: Missing required columns');
-          }
-
-          // Local data (Nifty JSON) is already offset by 5.5 hours (IST) from standard UTC
-          // We must subtract it so that displaying with local methods shows the correct time without double-offsetting.
-          let allCandles = parseColumnarData(rawData as ColumnarData, -19800);
-
-          // Filter by date range if provided
-          if (cfg.fromDate) {
-            const fromTs = new Date(cfg.fromDate).getTime() / 1000;
-            allCandles = allCandles.filter(c => c.timestamp >= fromTs);
-          }
-          if (cfg.toDate) {
-            // Add one day to include the end date fully
-            const toTs = (new Date(cfg.toDate).getTime() / 1000) + 86400;
-            allCandles = allCandles.filter(c => c.timestamp < toTs);
-          }
-
-          // Determine timeframe in minutes (Base is now 5 minutes)
-          let timeframeMinutes = 5;
-          const intv = cfg.interval;
-          if (intv === '1') {
-            timeframeMinutes = 5;
-            // No need to notify here as it's the initial load, we'll just force 5m
-          }
-          if (intv === '5') timeframeMinutes = 5;
-          if (intv === '15') timeframeMinutes = 15;
-          if (intv === '60') timeframeMinutes = 60;
-          if (intv === '1D') timeframeMinutes = 1440;
-
-          const resampledCandles = timeframeMinutes === 5 ? allCandles : resampleCandles(allCandles, timeframeMinutes);
+          const result = await loadLocalCandles(cfg.localDatasetId, cfg.interval, cfg.fromDate, cfg.toDate);
+          const resampledCandles = result.candles;
+          const loadedCfg = { ...cfg, interval: result.interval };
+          if (result.clamped) setInterval(result.interval);
 
           if (resampledCandles.length > 0) {
-            loadCandles(resampledCandles, `NIFTY 50 (Local ${intv})`, cfg);
+            loadCandles(resampledCandles, localInstrumentLabel(cfg.localDatasetId, result.interval), loadedCfg);
 
             // Apply initial jump if requested
             if (!overrideConfig && jumpToDate) {
@@ -258,7 +246,7 @@ export function InstrumentSelector() {
               if (index >= 0) setCurrentIndex(index);
             }
           } else {
-            setError('No candles generated from local data');
+            setError(`No ${result.dataset.label} candles in the selected date range`);
           }
         } catch (err: any) {
           console.error(err);
@@ -285,6 +273,7 @@ export function InstrumentSelector() {
         setInterval(config.interval);
         setFromDate(config.fromDate);
         setToDate(config.toDate);
+        setLocalDatasetId(config.localDatasetId || LEGACY_DATASET_ID);
 
         // Fetch using the restored config
         await handleFetch(config);
@@ -595,18 +584,26 @@ export function InstrumentSelector() {
           <div className="p-4 bg-blue-50 border border-blue-200 rounded-lg">
             <h3 className="font-semibold text-blue-900 mb-2">Local Data Source</h3>
             <p className="text-blue-800 text-sm">
-              Loading <strong>5-minute data</strong> for <strong>Nifty 50</strong> from local assets.
-              This file is optimized for faster loading.
+              {LOCAL_DATASETS.length} instruments bundled from <code>assets/market-data</code>.
+              Drop a <code>NAME_15minute.json</code> file there to add another.
             </p>
           </div>
 
           <div>
             <label className="block text-sm font-medium text-gray-700 mb-1">
-              Data File
+              Instrument
             </label>
-            <div className="w-full px-3 py-2 border rounded bg-gray-100 text-gray-600 cursor-not-allowed">
-              nifty5min_data.json (Nifty 50 Index - 5m)
-            </div>
+            <select
+              value={localDatasetId}
+              onChange={(e) => handleLocalDatasetChange(e.target.value)}
+              className="w-full px-3 py-2 border rounded focus:outline-none focus:ring-2 focus:ring-blue-500"
+            >
+              {LOCAL_DATASETS.map((d) => (
+                <option key={d.id} value={d.id}>
+                  {d.label}{d.baseMinutes ? ` — ${d.baseMinutes}m bars` : ''}
+                </option>
+              ))}
+            </select>
           </div>
 
           <div>
@@ -614,17 +611,18 @@ export function InstrumentSelector() {
               View Timeframe (Resampled)
             </label>
             <select
-              value={interval === '1' ? '5' : interval}
+              value={intervalToMinutes(interval) < localBaseMinutes ? localTimeframes[0]?.value : interval}
               onChange={(e) => setInterval(e.target.value)}
               className="w-full px-3 py-2 border rounded focus:outline-none focus:ring-2 focus:ring-blue-500"
             >
-              <option value="5">5 Minutes (Original)</option>
-              <option value="15">15 Minutes</option>
-              <option value="60">1 Hour</option>
-              <option value="1D">1 Day</option>
+              {localTimeframes.map((tf) => (
+                <option key={tf.value} value={tf.value}>
+                  {tf.label}{intervalToMinutes(tf.value) === localBaseMinutes ? ' (Original)' : ''}
+                </option>
+              ))}
             </select>
             <p className="mt-1 text-xs text-gray-500">
-              The system will automatically aggregate the 5-minute data into your selected timeframe.
+              Bars are aggregated up from the file's native {localBaseMinutes}m timeframe.
             </p>
           </div>
 

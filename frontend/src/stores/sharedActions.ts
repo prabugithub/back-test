@@ -661,7 +661,7 @@ export function createSharedActions(set: StoreSet, get: StoreGet) {
       };
       set({ isLoading: true });
       try {
-        await saveSession({ ...state, securityId: sessionConfig.securityId, exchangeSegment: sessionConfig.exchangeSegment, dataSource: sessionConfig.dataSource, instrumentType: sessionConfig.instrumentType || 'EQUITY' } as any);
+        await saveSession({ ...state, securityId: sessionConfig.securityId, exchangeSegment: sessionConfig.exchangeSegment, dataSource: sessionConfig.dataSource, instrumentType: sessionConfig.instrumentType || 'EQUITY', ...(sessionConfig.localDatasetId ? { localDatasetId: sessionConfig.localDatasetId } : {}) } as any);
         useNotificationStore.getState().notify('Session saved to cloud successfully!', 'success');
       } catch (e: any) {
         useNotificationStore.getState().notify(`Failed to save session: ${e.message}`, 'error');
@@ -683,6 +683,7 @@ export function createSharedActions(set: StoreSet, get: StoreGet) {
           fromDate: state.fromDate,
           toDate: state.toDate,
           dataSource: (state as any).dataSource || 'local',
+          localDatasetId: (state as any).localDatasetId,
         };
         return {
           config,

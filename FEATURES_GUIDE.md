@@ -46,7 +46,18 @@ Load historical candlestick data to backtest against.
 | Timeframe | 1 min, 5 min, 15 min, 60 min | |
 | From Date | Any past date | Max 90 days per request |
 | To Date | Any past date | |
-| Data Source | API or Local | Local = from SQLite cache |
+| Data Source | API or Local | Local = bundled JSON files in `frontend/src/assets/market-data/` |
+
+### Local instruments (multi-instrument backtesting)
+
+The **Local** source lists every JSON file in `frontend/src/assets/market-data/` in an **Instrument** dropdown. The files are discovered at build time via `import.meta.glob` in `utils/localMarketData.ts`, so you add an instrument by dropping in a file. No code change is needed. Each file is its own lazily-loaded chunk and is fetched only when selected.
+
+- **Naming:** `<NAME>_<N>minute.json` → label `NAME` (underscores → spaces), native bar size `N` minutes. `nifty5min_data.json` is the legacy Nifty 50 5-minute file and stays the default. Other names are allowed; their bar size is detected from the data.
+- **Formats:** columnar `{t,o,h,l,c,v}` (legacy, epoch already shifted +5:30) or rows `[{date:"YYYY-MM-DD HH:mm:ss", open, high, low, close, volume}]` with IST wall-clock dates. Both become true UTC epoch seconds, independent of the browser timezone.
+- **Timeframes:** only timeframes ≥ the file's native bars are offered (no 5m for a 15m file). If a reload asks for a finer one, it moves up to the native timeframe with a warning.
+- **Excluded:** `nifty50.json` (1-minute, ~100 MB) is excluded from the glob to keep builds small.
+- **Persistence:** the selected file is saved as `sessionConfig.localDatasetId`, so Resume, the timeframe switcher and Date Range reloads stay on that instrument. Sessions saved before this field existed load the legacy Nifty 5m file.
+- The loaded instrument label (e.g. `NIFTY BANK (Local 15)`) is stamped on trades and snapshots, so the Performance Dashboard instrument filter separates results per index. **Lot size is not per-instrument.** Set `lotSize` in Auto-Backtest config to match the index being tested.
 
 ### Caching
 
@@ -942,6 +953,8 @@ View two timeframes simultaneously for top-down analysis.
 1. Toggle **Show Secondary Chart** in settings or toolbar
 2. Select a **secondary timeframe** (independent from primary)
 3. Candles are resampled client-side from the loaded primary data
+
+For Local data, the primary timeframe switcher disables timeframes finer than the loaded file's native bar size (e.g. 5m on a 15-minute index file).
 
 ### Secondary chart features
 
