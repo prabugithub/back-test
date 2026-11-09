@@ -3,16 +3,16 @@ import { useChargesStore } from '../../stores/chargesStore';
 import { MULTI_TRADE_DEFAULT_CAP, DEFAULT_LOT_SIZE, type AutoBacktestConfig } from '../../utils/autoBacktestEngine';
 import { DEFAULT_TREND_DAY_WINDOWS } from '../../strategies/strongTrendH1';
 import { DEFAULT_CLIMAX_EXIT } from '../../strategies/exits/climax';
-import { DEFAULT_CLIMAX_REJECTION } from '../../strategies/climaxRejection';
+import { DEFAULT_CHOP_GUARD } from '../../strategies/chopGuard';
 
-/** Climax Rejection entry guard, rule 1. Baseline = Climax Lookback. */
-const CLIMAX_REJECTION_INPUTS: Array<{
-  key: keyof typeof DEFAULT_CLIMAX_REJECTION; label: string; title: string; min: number; max: number; step?: number;
+/** Chop Guard entry hook. ER uses the Efficiency Ratio lookback; EMA distance is in ATR. */
+const CHOP_GUARD_INPUTS: Array<{
+  key: keyof typeof DEFAULT_CHOP_GUARD; label: string; title: string; min: number; max: number; step: number;
 }> = [
-  { key: 'climaxAgainstMultiple', label: 'Climax Against ×', min: 1.5, max: 20, step: 0.5,
-    title: 'Climax Rejection guard: a bar against the entry side (bear for a long) with range ≥ this × the Climax Lookback baseline blocks that side' },
-  { key: 'climaxAgainstBlockBars', label: 'Climax Against Block', min: 1, max: 500,
-    title: 'Climax Rejection guard: bars the Climax Against block lasts after that bar' },
+  { key: 'chopMinEfficiency', label: 'Chop Min ER', min: 0, max: 1, step: 0.05,
+    title: 'Chop Guard entry hook: an entry is blocked as chop when the efficiency ratio (over the ER lookback) is below this. 0 disables this check' },
+  { key: 'chopMinEmaAtr', label: 'Chop Min EMA ATR', min: -2, max: 5, step: 0.1,
+    title: 'Chop Guard entry hook: the close must be at least this many ATRs beyond EMA21 on the trade side (above for a long, below for a short). Negative values allow entries slightly on the wrong side' },
 ];
 import {
   DEFAULT_ENTRY_HOOK_LOOKBACK,
@@ -428,9 +428,9 @@ export function SessionSettingsPanel({ config, onChange, isOpen, onClose, onOpen
                   className="w-12 px-1.5 py-1 text-xs border rounded text-center"
                 />
               </div>
-              {/* Climax Reversal exit hook + Climax Rejection entry guard. Baseline = Climax Lookback. */}
+              {/* Climax Reversal exit hook. Baseline = Climax Lookback. */}
               <div className="flex items-center justify-between gap-1">
-                <span className="text-[10px] text-gray-500" title="Climax Reversal exit / Climax Rejection entry guard: a bar whose range is at least this many times the Climax Lookback baseline is a climax bar">Climax Rev Multiple</span>
+                <span className="text-[10px] text-gray-500" title="Climax Reversal exit: a bar whose range is at least this many times the Climax Lookback baseline is a climax bar">Climax Rev Multiple</span>
                 <input
                   type="number" min={1.5} max={20} step={0.5}
                   value={config.climaxReversalMultiple ?? DEFAULT_CLIMAX_EXIT.climaxReversalMultiple}
@@ -439,7 +439,7 @@ export function SessionSettingsPanel({ config, onChange, isOpen, onClose, onOpen
                 />
               </div>
               <div className="flex items-center justify-between gap-1">
-                <span className="text-[10px] text-gray-500" title="Climax Reversal exit: a bar closing against the trade within this many bars after the climax bar books the profit. Climax Rejection guard: a held climax followed by a reversal bar blocks that side for this many bars after the climax bar">Climax Rev Window</span>
+                <span className="text-[10px] text-gray-500" title="Climax Reversal exit: a bar closing against the trade within this many bars after the climax bar books the profit.">Climax Rev Window</span>
                 <input
                   type="number" min={1} max={200}
                   value={config.climaxReversalWindow ?? DEFAULT_CLIMAX_EXIT.climaxReversalWindow}
@@ -447,12 +447,12 @@ export function SessionSettingsPanel({ config, onChange, isOpen, onClose, onOpen
                   className="w-12 px-1.5 py-1 text-xs border rounded text-center"
                 />
               </div>
-              {CLIMAX_REJECTION_INPUTS.map(({ key, label, title, min, max, step }) => (
+              {CHOP_GUARD_INPUTS.map(({ key, label, title, min, max, step }) => (
                 <div key={key} className="flex items-center justify-between gap-1">
                   <span className="text-[10px] text-gray-500" title={title}>{label}</span>
                   <input
                     type="number" min={min} max={max} step={step}
-                    value={config[key] ?? DEFAULT_CLIMAX_REJECTION[key]}
+                    value={config[key] ?? DEFAULT_CHOP_GUARD[key]}
                     onChange={e => onChange({ [key]: Number(e.target.value) })}
                     className="w-12 px-1.5 py-1 text-xs border rounded text-center"
                   />

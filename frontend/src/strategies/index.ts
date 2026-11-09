@@ -41,7 +41,7 @@ import type { EntryHook, EntryHookEntry } from '../utils/entryHook';
 import { deepPullbackContinuation, takeEverySignal } from './example';
 import { higherHighShallowPullback } from './higherHighShallowPullback';
 import { srGuard } from './srGuard';
-import { climaxRejectionGuard } from './climaxRejection';
+import { chopGuard } from './chopGuard';
 import { strongTrendH1 } from './strongTrendH1';
 
 export const ENTRY_HOOKS: Record<string, EntryHookEntry> = {
@@ -60,10 +60,10 @@ export const ENTRY_HOOKS: Record<string, EntryHookEntry> = {
     description: 'Gate mode filter, both sides. Blocks entries under an intact counter trendline (≥80-bar span) or near a real swing top/bottom (last 150 bars). Never the first break — waits for the retest, a held pullback, or a re-break.',
     hook: srGuard,
   },
-  'climax-rejection': {
-    label: 'Climax Rejection Guard (strong reversal bars)',
-    description: 'Gate mode filter, both sides (long rules shown, shorts mirror). Blocks a long: (0) after a failed 4.5x bull climax (high held, then a bear bar) within 20 bars; (1) for 50 bars after a 3x bear bar. No double top/bottom blocks. All values in Session Settings.',
-    hook: climaxRejectionGuard,
+  'chop-guard': {
+    label: 'Chop Guard (ER + EMA21 position)',
+    description: 'Gate mode filter, both sides. Skips entries in chop: blocks when the efficiency ratio (Session Settings ER lookback) is below Chop Min ER (default 0.2), or the close is not at least Chop Min EMA ATR (default 0.4) ATRs beyond EMA21 on the trade side.',
+    hook: chopGuard,
   },
   'deep-pullback': {
     label: 'Deep Pullback Continuation',
@@ -75,6 +75,13 @@ export const ENTRY_HOOKS: Record<string, EntryHookEntry> = {
     description: 'Enters on every H/L signal at any count, using the engine\'s own SL/TP/sizing.',
     hook: takeEverySignal,
   },
+};
+
+/** Retired id kept resolvable so saved configs that picked the old Climax Rejection Guard keep
+ *  trading — now through Chop Guard. Registered after ENTRY_HOOK_OPTIONS is built (below), so it
+ *  does not show in the dropdown. Never delete: a missing id makes the regime take no trades. */
+const RETIRED_ALIASES: Record<string, EntryHookEntry> = {
+  'climax-rejection': { label: 'Climax Rejection Guard (→ Chop Guard)', hook: chopGuard },
 };
 
 /**
@@ -107,3 +114,5 @@ export const ENTRY_HOOK_OPTIONS: Array<{ id: string; label: string; description?
   Object.entries(ENTRY_HOOKS)
     .map(([id, e]) => ({ id, label: e.label, description: e.description }))
     .sort((a, b) => a.label.localeCompare(b.label));
+
+for (const [id, entry] of Object.entries(RETIRED_ALIASES)) registerEntryHook(id, entry);

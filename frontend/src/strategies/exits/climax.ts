@@ -41,7 +41,7 @@ export const DEFAULT_CLIMAX_EXIT = {
   /** Strong reversal: fraction of the way from the second top back to the neckline the
    *  close must have travelled (1 = a neckline break). */
   doubleTopReversalFrac: 0.5,
-  /** Climax Reversal exit / Climax Rejection entry guard: bar range ÷ baseline for the climax bar. */
+  /** Climax Reversal exit: bar range ÷ baseline for the climax bar. */
   climaxReversalMultiple: 4.5,
   /** Same two hooks: most bars after the climax bar in which the reversal still counts. */
   climaxReversalWindow: 20,
@@ -63,7 +63,7 @@ export function isClimaxBar(
   return ratio >= multiple ? ratio : null;
 }
 
-/** Settings shared by the Climax Reversal exit and the Climax Rejection entry guard. The
+/** Settings of the Climax Reversal exit. The
  *  baseline lookback is the existing Climax Lookback. */
 export function climaxReversalSettings(c: {
   climaxExitLookback?: number; climaxReversalMultiple?: number; climaxReversalWindow?: number;

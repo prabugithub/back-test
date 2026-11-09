@@ -19,7 +19,7 @@
     "backtest:legseq-verify": "tsx scripts/legSequenceVerify.ts",
     "backtest:trendline": "tsx scripts/trendlineSmoke.ts",
     "backtest:srguard": "tsx scripts/srGuardSmoke.ts",
-    "backtest:climaxrejection": "tsx scripts/climaxRejectionSmoke.ts"
+    "backtest:chopguard": "tsx scripts/chopGuardSmoke.ts"
   },
   "dependencies": {
     "@tanstack/react-query": "^5.90.12",

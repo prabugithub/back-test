@@ -432,13 +432,13 @@ export interface AutoBacktestConfig {
   doubleTopMinGap?: number;       // same hook: fewest bars between the two tops/bottoms of a double top/bottom (default 50)
   doubleTopTolAtr?: number;       // same hook: max price gap between the two tops/bottoms, in ATR (default 0.5)
   doubleTopReversalFrac?: number; // same hook: retrace from the 2nd top/bottom toward the neckline that counts as strong (default 0.5)
-  // Climax Reversal exit (exits/climaxReversal.ts) + Climax Rejection entry guard (strategies/climaxRejection.ts).
+  // Climax Reversal exit (exits/climaxReversal.ts).
   // Baseline is climaxExitLookback; defaults in DEFAULT_CLIMAX_EXIT.
   climaxReversalMultiple?: number; // bar range ÷ baseline that makes a climax bar (default 4.5)
   climaxReversalWindow?: number;   // most bars after the climax bar the reversal still counts (default 20)
-  // Climax Rejection entry guard, extra block rules. Defaults in DEFAULT_CLIMAX_REJECTION (strategies/climaxRejection.ts).
-  climaxAgainstMultiple?: number;  // rule 1: bar against the side ≥ this × baseline blocks it (default 3)
-  climaxAgainstBlockBars?: number; // rule 1: bars that block lasts (default 50)
+  // Chop Guard entry hook (strategies/chopGuard.ts). Defaults in DEFAULT_CHOP_GUARD there.
+  chopMinEfficiency?: number; // efficiency ratio below which an entry is chop and blocked (default 0.2)
+  chopMinEmaAtr?: number;     // close must be ≥ this many ATR beyond EMA21 on the trade side (default 0.4)
 
   // Strong-trend-day windows read by the Strong-Trend H1 entry hook (strategies/strongTrendH1.ts).
   // Optional — undefined falls back to DEFAULT_TREND_DAY_WINDOWS (in that file), so saved configs need no migration.
