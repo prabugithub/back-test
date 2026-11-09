@@ -39,6 +39,19 @@ import { computePositionsCharges } from '../utils/charges';
 import { groupTradesIntoPositions } from '../utils/tradeAnalysis';
 import { formatCurrency } from '../utils/formatters';
 
+/** Tracks a CSS media query, so the panel renders exactly one of its two layouts. */
+function useMediaQuery(query: string): boolean {
+  const [matches, setMatches] = useState(() => window.matchMedia(query).matches);
+  useEffect(() => {
+    const mql = window.matchMedia(query);
+    const onChange = () => setMatches(mql.matches);
+    onChange();
+    mql.addEventListener('change', onChange);
+    return () => mql.removeEventListener('change', onChange);
+  }, [query]);
+  return matches;
+}
+
 interface AutoBacktestPanelProps {
   onNavigate: (page: ActivePage) => void;
   /** Renders into a portal on document.body, so a hiding wrapper around <AutoBacktestPanel/>
@@ -180,6 +193,8 @@ export function AutoBacktestPanel({ onNavigate, hidden }: AutoBacktestPanelProps
   const [activeStep, setActiveStep] = useState<WorkflowStep | null>('market');
   const [showMetrics, setShowMetrics] = useState(false);
   const [showPreview, setShowPreview] = useState(false);
+  const [showConfigs, setShowConfigs] = useState(false);
+  const isWide = useMediaQuery('(min-width: 1024px)');
   const [selectedConfigId, setSelectedConfigId] = useState('');
   const [isSaveAsOpen, setIsSaveAsOpen] = useState(false);
   const [isDeleteConfirmOpen, setIsDeleteConfirmOpen] = useState(false);
@@ -327,20 +342,300 @@ export function AutoBacktestPanel({ onNavigate, hidden }: AutoBacktestPanelProps
       : s
   );
 
+  // ── Layout building blocks ─────────────────────────────────────────────────
+  // Each block is defined once and placed by one of two layouts: a side rail at ≥ lg
+  // (settings get the full height on the right) or a compact stacked layout below lg.
+  const regimeTabs = (inline: boolean) => (
+    <div className={inline ? 'flex gap-1' : 'grid grid-cols-2 gap-1'}>
+      {regimes.map(r => {
+        const meta = REGIME_META[r];
+        const isActive = activeRegime === r;
+        const isCurrentMarket = marketState.regime === r;
+        return (
+          <button
+            key={r}
+            // Keep the open section (or all-collapsed) when switching regimes
+            onClick={() => setActiveRegime(r)}
+            className={`flex-1 flex items-center rounded-lg border text-[10px] font-medium transition-all duration-150 active:scale-[0.98] relative ${
+              inline ? 'flex-row justify-center gap-1 py-1' : 'flex-col gap-0.5 py-1.5'
+            } ${
+              isActive
+                ? `${meta.activeBg} text-white border-transparent shadow-sm`
+                : `${meta.bg} ${meta.color} ${meta.border} hover:brightness-95`
+            }`}
+          >
+            {meta.icon}
+            <span>{REGIME_LABELS[r]}</span>
+            {isCurrentMarket && (
+              <div className={`absolute -top-1 -right-1 w-2 h-2 rounded-full border border-white ${isActive ? 'bg-white' : meta.activeBg}`} title="Current market" />
+            )}
+            {config[r].enabled && (
+              <div className={`absolute bottom-0.5 right-1 w-1 h-1 rounded-full ${isActive ? 'bg-white/70' : meta.activeBg}`} />
+            )}
+          </button>
+        );
+      })}
+    </div>
+  );
+
+  const marketChips = (
+    <div className="flex flex-wrap items-center gap-1.5">
+      <span className="text-[10px] text-gray-400 font-medium uppercase tracking-wide">Market:</span>
+      <Chip tone="neutral">LT {marketState.ltMarket}</Chip>
+      <Chip tone={marketState.htMarket === 'Bull-Trend' ? 'green' : marketState.htMarket === 'Bear-Trend' ? 'red' : 'neutral'}>
+        HT {marketState.htMarket}
+      </Chip>
+    </div>
+  );
+
+  const presetButtons = (
+    <div className="flex flex-wrap items-center gap-1.5">
+      <span className="text-[10px] text-gray-400 font-medium uppercase tracking-wide">Presets:</span>
+      {Object.keys(AUTO_BT_PRESETS).map(name => (
+        <button key={name} onClick={() => applyPreset(name)}
+          className="px-2 py-1 text-[10px] bg-indigo-50 text-indigo-700 border border-indigo-200 rounded-lg hover:bg-indigo-100 font-medium transition-all duration-150 active:scale-95">
+          {name}
+        </button>
+      ))}
+    </div>
+  );
+
+  // The select takes the row and the buttons wrap under it when the space is narrow (the rail).
+  const savedConfigControls = (
+    <div className="flex flex-wrap items-center gap-1.5">
+      <select
+        value={selectedConfigId}
+        onChange={e => setSelectedConfigId(e.target.value)}
+        className="flex-1 min-w-[180px] text-[11px] border border-gray-300 rounded-lg px-2 py-1 bg-white"
+      >
+        <option value="">
+          {savedConfigs.length === 0 ? 'No saved configurations' : 'Select a saved configuration...'}
+        </option>
+        {savedConfigs.map(c => (
+          <option key={c.id} value={c.id}>
+            {c.name}{c.id === activeConfigId ? ' (active)' : ''}
+          </option>
+        ))}
+      </select>
+      <button
+        onClick={() => selectedConfigId && applySavedAutoBacktestConfig(selectedConfigId)}
+        disabled={!selectedConfigId}
+        title="Load selected configuration"
+        className="px-2 py-1 text-[10px] bg-blue-50 text-blue-700 border border-blue-200 rounded-lg hover:bg-blue-100 font-medium disabled:opacity-40 disabled:cursor-not-allowed flex items-center gap-1 transition-all duration-150 active:scale-95"
+      >
+        <FolderOpen size={12} /> Load
+      </button>
+      <button
+        onClick={() => selectedConfigId && setIsDeleteConfirmOpen(true)}
+        disabled={!selectedConfigId}
+        title="Delete selected configuration"
+        className="px-2 py-1 text-[10px] bg-red-50 text-red-700 border border-red-200 rounded-lg hover:bg-red-100 font-medium disabled:opacity-40 disabled:cursor-not-allowed transition-all duration-150 active:scale-95"
+      >
+        <Trash2 size={12} />
+      </button>
+      <button
+        onClick={() => updateActiveAutoBacktestConfig()}
+        disabled={!activeConfigId}
+        title={activeConfigId ? 'Overwrite the active saved configuration' : 'Load or Save As a configuration first'}
+        className="px-2 py-1 text-[10px] bg-emerald-50 text-emerald-700 border border-emerald-200 rounded-lg hover:bg-emerald-100 font-medium disabled:opacity-40 disabled:cursor-not-allowed flex items-center gap-1 transition-all duration-150 active:scale-95"
+      >
+        <Save size={12} /> Save
+      </button>
+      <button
+        onClick={() => setIsSaveAsOpen(true)}
+        className="px-2 py-1 text-[10px] bg-gray-50 text-gray-700 border border-gray-200 rounded-lg hover:bg-gray-100 font-medium transition-all duration-150 active:scale-95 whitespace-nowrap"
+      >
+        Save As...
+      </button>
+      <button
+        onClick={handleExportConfig}
+        title="Export current auto-backtest settings as JSON"
+        className="px-2 py-1 text-[10px] bg-green-50 text-green-700 border border-green-200 rounded-lg hover:bg-green-100 font-medium flex items-center gap-1 transition-all duration-150 active:scale-95"
+      >
+        <Download size={12} /> Export
+      </button>
+    </div>
+  );
+
+  const previewAndSummary = (
+    <div className="shrink-0 border-b border-slate-200 bg-white px-4 py-2 space-y-1.5">
+      <button
+        onClick={() => setShowPreview(v => !v)}
+        className="w-full flex items-center justify-between text-[10px] font-semibold text-gray-500 hover:text-gray-700 transition-colors"
+      >
+        <span className="flex items-center gap-1.5 uppercase tracking-wide">
+          <BarChart2 size={11} />
+          Live Preview Chart
+        </span>
+        <span className="text-[10px] text-gray-400">{showPreview ? '▲ Hide' : '▼ Show'}</span>
+      </button>
+      {showPreview && (
+        <FilterPreviewStrip bars={previewBars} highlightFilterKey={hoveredFilterKey} height={90} />
+      )}
+      <StrategySummaryBar regime={activeRegime} rules={activeRules} onJumpToStep={setActiveStep} />
+    </div>
+  );
+
+  const editorContent = (
+    <>
+      <RegimeEditor
+        regime={activeRegime}
+        rules={activeRules}
+        onChange={updateRegime(activeRegime)}
+        latestBar={latestBar}
+        onHoverFilterKey={setHoveredFilterKey}
+        steps={stepsWithBadge}
+        activeStep={activeStep}
+        onStepChange={setActiveStep}
+        accentBg={REGIME_META[activeRegime].activeBg}
+        accentColor={REGIME_META[activeRegime].color}
+        config={config}
+        onOpenSessionSettings={() => setIsSessionSettingsOpen(true)}
+      />
+
+      {/* Entry Metrics Dashboard — shown when batch trades with journal data exist */}
+      {trades.some(t => t.journal?.ltMarket) && (
+        <div className="mt-3 border border-indigo-100 rounded-lg overflow-hidden">
+          <button
+            onClick={() => setShowMetrics(v => !v)}
+            className="w-full flex items-center justify-between px-3 py-2 bg-indigo-50 hover:bg-indigo-100 text-[11px] font-semibold text-indigo-700 transition-colors"
+          >
+            <span className="flex items-center gap-1.5">
+              <BarChart2 size={12} />
+              Entry Position Metrics
+            </span>
+            <span className="text-[10px] text-indigo-400">{showMetrics ? '▲' : '▼'}</span>
+          </button>
+          {showMetrics && (
+            <div className="px-3 pb-3">
+              <EntryMetricsDashboard trades={trades} chargesConfig={showCharges ? chargesConfig : undefined} />
+            </div>
+          )}
+        </div>
+      )}
+    </>
+  );
+
+  const lastSignalText = !config.enabled ? 'Enable to start scanning'
+    : position ? 'Position open — waiting for exit'
+    : lastSignalReason || 'No signal yet — press Play to run';
+  const lastSignalTone = !config.enabled ? 'text-gray-400'
+    : position ? 'text-orange-600'
+    : lastSignalReason ? 'text-indigo-700' : 'text-gray-400';
+
+  // inline = one-row footer of the stacked layout; otherwise the rail's vertical footer.
+  const runPanel = (inline: boolean) => {
+    const runButton = (
+      <button
+        onClick={runBatchAutoBacktest}
+        disabled={isBatchRunning || candles.length === 0 || !config.enabled}
+        className={`${inline ? 'shrink-0 px-4' : 'w-full px-3'} py-2.5 ${hookDebugMode ? 'bg-amber-600 hover:bg-amber-700' : 'bg-indigo-600 hover:bg-indigo-700'} disabled:opacity-50 disabled:cursor-not-allowed text-white text-xs font-bold rounded-lg flex items-center justify-center gap-2 transition-all duration-150 active:scale-[0.99] shadow-sm hover:shadow-md whitespace-nowrap`}
+      >
+        {isBatchRunning ? (
+          <>
+            <svg className="animate-spin h-3.5 w-3.5" viewBox="0 0 24 24" fill="none">
+              <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+              <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8z" />
+            </svg>
+            {hookDebugMode ? 'Running on main thread…' : 'Running...'}
+          </>
+        ) : (
+          <>
+            <Zap size={13} />
+            {hookDebugMode ? 'Run Full Backtest (main thread)' : 'Run Full Backtest (instant)'}
+          </>
+        )}
+      </button>
+    );
+    const lastSignal = (
+      <div
+        title={inline ? lastSignalText : undefined}
+        className={`rounded p-2 text-[11px] ${inline ? 'flex-1 min-w-[160px] truncate' : ''} ${config.enabled ? 'bg-indigo-50 border border-indigo-200' : 'bg-gray-50 border border-gray-200'}`}
+      >
+        <span className="font-medium text-gray-600">Last signal: </span>
+        <span className={`${lastSignalTone} ${inline ? '' : '[overflow-wrap:anywhere]'}`}>{lastSignalText}</span>
+      </div>
+    );
+    return (
+      <>
+        {!inline && lastSignal}
+
+        {trades.length > 0 && !isBatchRunning && (
+          <div className={`rounded p-2 text-[11px] flex items-center gap-2 ${chargesSummary ? 'bg-amber-50 border border-amber-200' : 'bg-gray-50 border border-gray-200'}`}>
+            <Receipt size={12} className="text-amber-600 shrink-0" />
+            {chargesSummary ? (
+              <span className="flex-1 min-w-0 text-gray-600" title={`Brokerage ${chargesSummary.totals.brokerage.toFixed(2)} | STT ${chargesSummary.totals.stt.toFixed(2)} | Exch ${chargesSummary.totals.exchange.toFixed(2)} | GST ${chargesSummary.totals.gst.toFixed(2)} | Stamp ${chargesSummary.totals.stamp.toFixed(2)} | SEBI+IPFT ${(chargesSummary.totals.sebi + chargesSummary.totals.ipft).toFixed(2)} | Turnover ${formatCurrency(chargesSummary.totals.turnover)} (${chargesSummary.totals.orders} orders)`}>
+                Gross <b className={chargesSummary.gross >= 0 ? 'text-green-600' : 'text-red-600'}>{formatCurrency(chargesSummary.gross)}</b>
+                {' · '}Charges <b className="text-amber-600">{formatCurrency(chargesSummary.totals.total)}</b>
+                {' · '}Net <b className={chargesSummary.net >= 0 ? 'text-green-600' : 'text-red-600'}>{formatCurrency(chargesSummary.net)}</b>
+                {inline && (
+                  <span className="text-gray-400">{' · '}Turnover {formatCurrency(chargesSummary.totals.turnover)} ({chargesSummary.totals.orders} orders)</span>
+                )}
+              </span>
+            ) : (
+              <span className="flex-1 text-gray-400">Charges hidden — P&amp;L shown gross</span>
+            )}
+            <button
+              onClick={() => setShowCharges(!showCharges)}
+              className="shrink-0 px-1.5 py-0.5 rounded text-[10px] font-semibold text-amber-700 hover:bg-amber-100"
+            >
+              {showCharges ? 'Hide' : 'Show charges'}
+            </button>
+            <button
+              onClick={() => setIsChargesPanelOpen(true)}
+              className="shrink-0 p-0.5 rounded text-amber-700 hover:bg-amber-100"
+              title="Edit charge rates"
+            >
+              <Settings2 size={12} />
+            </button>
+          </div>
+        )}
+
+        {isBatchRunning && (
+          <div>
+            <div className="flex justify-between text-[10px] text-gray-500 mb-1">
+              <span>Processing candles…</span>
+              <span>{batchProgress}%</span>
+            </div>
+            <div className="w-full h-1.5 bg-gray-100 rounded-full overflow-hidden">
+              <div
+                className="h-full bg-indigo-500 rounded-full transition-all duration-150"
+                style={{ width: `${batchProgress}%` }}
+              />
+            </div>
+          </div>
+        )}
+
+        {inline ? (
+          <div className="flex flex-wrap items-center gap-2">
+            {lastSignal}
+            <div className="w-52 shrink-0"><HookDebugToggle compact /></div>
+            {runButton}
+          </div>
+        ) : (
+          <>
+            <HookDebugToggle compact />
+            {runButton}
+          </>
+        )}
+      </>
+    );
+  };
+
   return createPortal(
     <div
       className="fixed inset-0 z-[110] bg-slate-50 flex flex-col overflow-hidden font-sans"
       style={{ display: hidden ? 'none' : undefined }}
     >
       {/* Header */}
-      <div className="flex items-center justify-between px-6 py-4 bg-white border-b border-slate-200 shrink-0">
-        <div className="flex items-center gap-4">
+      <div className="flex flex-wrap items-center justify-between gap-x-4 gap-y-2 px-3 py-2 lg:px-6 lg:py-3 short:py-1.5 bg-white border-b border-slate-200 shrink-0">
+        <div className="flex items-center gap-4 min-w-0">
           <PageNavTabs active="backtest" onNavigate={onNavigate} />
-          <div className="w-px h-6 bg-slate-200 hidden lg:block" />
-          <div className="bg-indigo-600 p-2 rounded-xl text-white shadow-lg shadow-indigo-200 hidden lg:block">
+          <div className="w-px h-6 bg-slate-200 hidden 2xl:block" />
+          <div className="bg-indigo-600 p-2 rounded-xl text-white shadow-lg shadow-indigo-200 hidden 2xl:block">
             <Zap size={20} />
           </div>
-          <div className="hidden lg:block">
+          <div className="hidden 2xl:block">
             <h2 className="text-xl font-bold text-slate-800 tracking-tight">Auto Backtesting Engine</h2>
             <p className="text-slate-500 text-xs font-medium">Configure regime rules and run instant batch backtests</p>
           </div>
@@ -350,7 +645,7 @@ export function AutoBacktestPanel({ onNavigate, hidden }: AutoBacktestPanelProps
             <button
               onClick={() => setShowDateRange(v => !v)}
               disabled={!sessionConfig}
-              className="flex items-center gap-1.5 px-2.5 py-1.5 text-xs font-medium text-slate-600 border border-slate-200 rounded-lg hover:bg-slate-50 hover:border-slate-300 transition-all duration-150 active:scale-95 disabled:opacity-50 disabled:cursor-not-allowed"
+              className="flex items-center gap-1.5 px-2.5 py-1.5 text-xs font-medium text-slate-600 border border-slate-200 rounded-lg hover:bg-slate-50 hover:border-slate-300 transition-all duration-150 active:scale-95 disabled:opacity-50 disabled:cursor-not-allowed whitespace-nowrap"
               title="Change the loaded date range"
             >
               <Calendar size={14} />
@@ -417,8 +712,8 @@ export function AutoBacktestPanel({ onNavigate, hidden }: AutoBacktestPanelProps
         </div>
 
         {/* Enable + quick controls */}
-        <div className="flex items-center gap-4">
-          <label className="flex items-center gap-1.5 cursor-pointer select-none">
+        <div className="flex items-center gap-3 lg:gap-4">
+          <label className="flex items-center gap-1.5 cursor-pointer select-none whitespace-nowrap">
             <input type="checkbox" checked={config.skipIfPositionOpen}
               onChange={e => updateGlobal({ skipIfPositionOpen: e.target.checked })}
               className="w-3.5 h-3.5" />
@@ -426,12 +721,13 @@ export function AutoBacktestPanel({ onNavigate, hidden }: AutoBacktestPanelProps
           </label>
           <button
             onClick={() => setIsSessionSettingsOpen(true)}
-            className="flex items-center gap-1.5 px-2.5 py-1.5 text-xs font-medium text-slate-600 border border-slate-200 rounded-lg hover:bg-slate-50 hover:border-slate-300 transition-all duration-150 active:scale-95"
+            title="Session Settings"
+            className="flex items-center gap-1.5 px-2.5 py-1.5 text-xs font-medium text-slate-600 border border-slate-200 rounded-lg hover:bg-slate-50 hover:border-slate-300 transition-all duration-150 active:scale-95 whitespace-nowrap"
           >
             <Settings2 size={14} />
-            Session Settings
+            <span className="hidden xl:inline">Session Settings</span>
           </button>
-          <label className="flex items-center gap-2 cursor-pointer select-none">
+          <label className="flex items-center gap-2 cursor-pointer select-none whitespace-nowrap">
             <ToggleSwitch checked={config.enabled} onChange={v => updateGlobal({ enabled: v })} size="md" />
             <span className={`text-xs font-bold ${config.enabled ? 'text-indigo-700' : 'text-gray-400'}`}>
               {config.enabled ? 'Running' : 'Off'}
@@ -441,280 +737,91 @@ export function AutoBacktestPanel({ onNavigate, hidden }: AutoBacktestPanelProps
       </div>
 
       {/* Main Content */}
-      <div className="flex-1 flex flex-col overflow-hidden">
-        {/* Sticky live preview (collapsed by default) + Strategy Summary — always visible while configuring */}
-        <div className="shrink-0 border-b border-slate-200 bg-white px-4 py-2 space-y-1.5">
-          <button
-            onClick={() => setShowPreview(v => !v)}
-            className="w-full flex items-center justify-between text-[10px] font-semibold text-gray-500 hover:text-gray-700 transition-colors"
-          >
-            <span className="flex items-center gap-1.5 uppercase tracking-wide">
-              <BarChart2 size={11} />
-              Live Preview Chart
-            </span>
-            <span className="text-[10px] text-gray-400">{showPreview ? '▲ Hide' : '▼ Show'}</span>
-          </button>
-          {showPreview && (
-            <FilterPreviewStrip bars={previewBars} highlightFilterKey={hoveredFilterKey} height={90} />
-          )}
-          <StrategySummaryBar regime={activeRegime} rules={activeRules} onJumpToStep={setActiveStep} />
-        </div>
-
-        {/* Market state + presets + saved configs — config-level actions, not per-step */}
-        <div className="shrink-0 border-b border-slate-200 bg-white px-4 py-2 @container">
-          <div className="flex flex-wrap items-center gap-x-4 gap-y-2">
-            <div className="flex items-center gap-1.5">
-              <span className="text-[10px] text-gray-400 font-medium uppercase tracking-wide">Market:</span>
-              <Chip tone="neutral">LT {marketState.ltMarket}</Chip>
-              <Chip tone={marketState.htMarket === 'Bull-Trend' ? 'green' : marketState.htMarket === 'Bear-Trend' ? 'red' : 'neutral'}>
-                HT {marketState.htMarket}
-              </Chip>
+      {isWide ? (
+        // ≥ lg: left rail (regimes, configs, presets, Run) + full-height settings on the right
+        <div className="flex-1 flex flex-row overflow-hidden">
+          <aside className="w-64 xl:w-72 shrink-0 flex flex-col border-r border-slate-200 bg-white">
+            <div className="flex-1 overflow-y-auto p-3 space-y-3">
+              {regimeTabs(false)}
+              {marketChips}
+              <div className="space-y-1.5">
+                <div className="text-[10px] text-gray-400 font-medium uppercase tracking-wide">Configuration</div>
+                {savedConfigControls}
+              </div>
+              {presetButtons}
             </div>
-
-            <div className="flex items-center gap-1.5">
-              <span className="text-[10px] text-gray-400 font-medium uppercase tracking-wide">Presets:</span>
-              {Object.keys(AUTO_BT_PRESETS).map(name => (
-                <button key={name} onClick={() => applyPreset(name)}
-                  className="px-2 py-1 text-[10px] bg-indigo-50 text-indigo-700 border border-indigo-200 rounded-lg hover:bg-indigo-100 font-medium transition-all duration-150 active:scale-95">
-                  {name}
-                </button>
-              ))}
+            {/* Run panel — pinned to the rail bottom, always reachable */}
+            <div className="shrink-0 border-t border-slate-200 p-3 space-y-2">
+              {runPanel(false)}
             </div>
-
-            <div className="flex items-center gap-1.5 flex-1 min-w-[260px]">
-              <select
-                value={selectedConfigId}
-                onChange={e => setSelectedConfigId(e.target.value)}
-                className="flex-1 text-[11px] border border-gray-300 rounded-lg px-2 py-1 bg-white"
-              >
-                <option value="">
-                  {savedConfigs.length === 0 ? 'No saved configurations' : 'Select a saved configuration...'}
-                </option>
-                {savedConfigs.map(c => (
-                  <option key={c.id} value={c.id}>
-                    {c.name}{c.id === activeConfigId ? ' (active)' : ''}
-                  </option>
-                ))}
-              </select>
-              <button
-                onClick={() => selectedConfigId && applySavedAutoBacktestConfig(selectedConfigId)}
-                disabled={!selectedConfigId}
-                title="Load selected configuration"
-                className="px-2 py-1 text-[10px] bg-blue-50 text-blue-700 border border-blue-200 rounded-lg hover:bg-blue-100 font-medium disabled:opacity-40 disabled:cursor-not-allowed flex items-center gap-1 transition-all duration-150 active:scale-95"
-              >
-                <FolderOpen size={12} /> Load
-              </button>
-              <button
-                onClick={() => selectedConfigId && setIsDeleteConfirmOpen(true)}
-                disabled={!selectedConfigId}
-                title="Delete selected configuration"
-                className="px-2 py-1 text-[10px] bg-red-50 text-red-700 border border-red-200 rounded-lg hover:bg-red-100 font-medium disabled:opacity-40 disabled:cursor-not-allowed transition-all duration-150 active:scale-95"
-              >
-                <Trash2 size={12} />
-              </button>
-              <button
-                onClick={() => updateActiveAutoBacktestConfig()}
-                disabled={!activeConfigId}
-                title={activeConfigId ? 'Overwrite the active saved configuration' : 'Load or Save As a configuration first'}
-                className="px-2 py-1 text-[10px] bg-emerald-50 text-emerald-700 border border-emerald-200 rounded-lg hover:bg-emerald-100 font-medium disabled:opacity-40 disabled:cursor-not-allowed flex items-center gap-1 transition-all duration-150 active:scale-95"
-              >
-                <Save size={12} /> Save
-              </button>
-              <button
-                onClick={() => setIsSaveAsOpen(true)}
-                className="px-2 py-1 text-[10px] bg-gray-50 text-gray-700 border border-gray-200 rounded-lg hover:bg-gray-100 font-medium transition-all duration-150 active:scale-95"
-              >
-                Save As...
-              </button>
-              <button
-                onClick={handleExportConfig}
-                title="Export current auto-backtest settings as JSON"
-                className="px-2 py-1 text-[10px] bg-green-50 text-green-700 border border-green-200 rounded-lg hover:bg-green-100 font-medium flex items-center gap-1 transition-all duration-150 active:scale-95"
-              >
-                <Download size={12} /> Export
-              </button>
+          </aside>
+          <div className="flex-1 flex flex-col min-w-0 overflow-hidden">
+            {previewAndSummary}
+            {/* Scrollable accordion content */}
+            <div className="flex-1 overflow-y-auto p-4 @container">
+              {editorContent}
             </div>
           </div>
         </div>
-
-        <PromptDialog
-          isOpen={isSaveAsOpen}
-          onClose={() => setIsSaveAsOpen(false)}
-          onSubmit={(name) => saveAutoBacktestConfigAs(name)}
-          title="Save Auto-Backtest Configuration"
-          message="Enter a name for this configuration setup so you can load it again later."
-          placeholder="Configuration Name..."
-          confirmText="Save"
-        />
-        <ConfirmDialog
-          isOpen={isDeleteConfirmOpen}
-          onClose={() => setIsDeleteConfirmOpen(false)}
-          onConfirm={() => {
-            deleteSavedAutoBacktestConfig(selectedConfigId);
-            setSelectedConfigId('');
-          }}
-          title="Delete Configuration"
-          message={`Delete "${savedConfigs.find(c => c.id === selectedConfigId)?.name ?? ''}"? This cannot be undone.`}
-          confirmText="Delete"
-          isDestructive
-        />
-
-        {/* Regime tabs */}
-        <div className="shrink-0 bg-white px-4 pt-2 pb-1.5 border-b border-slate-200">
-          <div className="flex gap-1">
-            {regimes.map(r => {
-              const meta = REGIME_META[r];
-              const isActive = activeRegime === r;
-              const isCurrentMarket = marketState.regime === r;
-              return (
-                <button
-                  key={r}
-                  // Keep the open section (or all-collapsed) when switching regimes
-                  onClick={() => setActiveRegime(r)}
-                  className={`flex-1 flex flex-col items-center gap-0.5 py-1.5 rounded-lg border text-[10px] font-medium transition-all duration-150 active:scale-[0.98] relative ${
-                    isActive
-                      ? `${meta.activeBg} text-white border-transparent shadow-sm`
-                      : `${meta.bg} ${meta.color} ${meta.border} hover:brightness-95`
-                  }`}
-                >
-                  {meta.icon}
-                  <span>{REGIME_LABELS[r]}</span>
-                  {isCurrentMarket && (
-                    <div className={`absolute -top-1 -right-1 w-2 h-2 rounded-full border border-white ${isActive ? 'bg-white' : meta.activeBg}`} title="Current market" />
-                  )}
-                  {config[r].enabled && (
-                    <div className={`absolute bottom-0.5 right-1 w-1 h-1 rounded-full ${isActive ? 'bg-white/70' : meta.activeBg}`} />
-                  )}
-                </button>
-              );
-            })}
-          </div>
-        </div>
-
-        {/* Scrollable accordion content — the only region that scrolls */}
-        <div className="flex-1 overflow-y-auto p-4 @container">
-          <RegimeEditor
-            regime={activeRegime}
-            rules={activeRules}
-            onChange={updateRegime(activeRegime)}
-            latestBar={latestBar}
-            onHoverFilterKey={setHoveredFilterKey}
-            steps={stepsWithBadge}
-            activeStep={activeStep}
-            onStepChange={setActiveStep}
-            accentBg={REGIME_META[activeRegime].activeBg}
-            accentColor={REGIME_META[activeRegime].color}
-            config={config}
-            onOpenSessionSettings={() => setIsSessionSettingsOpen(true)}
-          />
-
-          {/* Entry Metrics Dashboard — shown when batch trades with journal data exist */}
-          {trades.some(t => t.journal?.ltMarket) && (
-            <div className="mt-3 border border-indigo-100 rounded-lg overflow-hidden">
+      ) : (
+        // < lg: compact stacked layout; the whole body scrolls so a short screen never squeezes the editor
+        <div className="flex-1 flex flex-col overflow-y-auto">
+          {previewAndSummary}
+          <div className="shrink-0 border-b border-slate-200 bg-white px-4 py-2 space-y-2">
+            <div className="flex flex-wrap items-center gap-x-4 gap-y-2">
+              {marketChips}
               <button
-                onClick={() => setShowMetrics(v => !v)}
-                className="w-full flex items-center justify-between px-3 py-2 bg-indigo-50 hover:bg-indigo-100 text-[11px] font-semibold text-indigo-700 transition-colors"
+                onClick={() => setShowConfigs(v => !v)}
+                className="ml-auto px-2 py-1 text-[10px] bg-gray-50 text-gray-700 border border-gray-200 rounded-lg hover:bg-gray-100 font-medium whitespace-nowrap"
               >
-                <span className="flex items-center gap-1.5">
-                  <BarChart2 size={12} />
-                  Entry Position Metrics
-                </span>
-                <span className="text-[10px] text-indigo-400">{showMetrics ? '▲' : '▼'}</span>
+                Configs{activeConfigName ? `: ${activeConfigName}` : ''} {showConfigs ? '▲' : '▼'}
               </button>
-              {showMetrics && (
-                <div className="px-3 pb-3">
-                  <EntryMetricsDashboard trades={trades} chargesConfig={showCharges ? chargesConfig : undefined} />
-                </div>
-              )}
             </div>
-          )}
-        </div>
-
-        {/* Sticky Run Backtest panel — always visible regardless of scroll/step */}
-        <div className="shrink-0 border-t border-slate-200 bg-white p-3 space-y-2">
-          <div className={`rounded p-2 text-[11px] ${config.enabled ? 'bg-indigo-50 border border-indigo-200' : 'bg-gray-50 border border-gray-200'}`}>
-            <span className="font-medium text-gray-600">Last signal: </span>
-            {config.enabled ? (
-              position ? (
-                <span className="text-orange-600">Position open — waiting for exit</span>
-              ) : lastSignalReason ? (
-                <span className="text-indigo-700 break-all">{lastSignalReason}</span>
-              ) : (
-                <span className="text-gray-400">No signal yet — press Play to run</span>
-              )
-            ) : (
-              <span className="text-gray-400">Enable to start scanning</span>
+            {showConfigs && (
+              <div className="flex flex-wrap items-center gap-x-4 gap-y-2">
+                {presetButtons}
+                <div className="flex-1 min-w-[260px]">{savedConfigControls}</div>
+              </div>
             )}
           </div>
 
-          {trades.length > 0 && !isBatchRunning && (
-            <div className={`rounded p-2 text-[11px] flex items-center gap-2 ${chargesSummary ? 'bg-amber-50 border border-amber-200' : 'bg-gray-50 border border-gray-200'}`}>
-              <Receipt size={12} className="text-amber-600 shrink-0" />
-              {chargesSummary ? (
-                <span className="flex-1 min-w-0 text-gray-600" title={`Brokerage ${chargesSummary.totals.brokerage.toFixed(2)} | STT ${chargesSummary.totals.stt.toFixed(2)} | Exch ${chargesSummary.totals.exchange.toFixed(2)} | GST ${chargesSummary.totals.gst.toFixed(2)} | Stamp ${chargesSummary.totals.stamp.toFixed(2)} | SEBI+IPFT ${(chargesSummary.totals.sebi + chargesSummary.totals.ipft).toFixed(2)}`}>
-                  Gross <b className={chargesSummary.gross >= 0 ? 'text-green-600' : 'text-red-600'}>{formatCurrency(chargesSummary.gross)}</b>
-                  {' · '}Charges <b className="text-amber-600">{formatCurrency(chargesSummary.totals.total)}</b>
-                  {' · '}Net <b className={chargesSummary.net >= 0 ? 'text-green-600' : 'text-red-600'}>{formatCurrency(chargesSummary.net)}</b>
-                  <span className="text-gray-400">{' · '}Turnover {formatCurrency(chargesSummary.totals.turnover)} ({chargesSummary.totals.orders} orders)</span>
-                </span>
-              ) : (
-                <span className="flex-1 text-gray-400">Charges hidden — P&amp;L shown gross</span>
-              )}
-              <button
-                onClick={() => setShowCharges(!showCharges)}
-                className="shrink-0 px-1.5 py-0.5 rounded text-[10px] font-semibold text-amber-700 hover:bg-amber-100"
-              >
-                {showCharges ? 'Hide' : 'Show charges'}
-              </button>
-              <button
-                onClick={() => setIsChargesPanelOpen(true)}
-                className="shrink-0 p-0.5 rounded text-amber-700 hover:bg-amber-100"
-                title="Edit charge rates"
-              >
-                <Settings2 size={12} />
-              </button>
-            </div>
-          )}
+          {/* Regime tabs */}
+          <div className="shrink-0 bg-white px-4 py-1.5 border-b border-slate-200">
+            {regimeTabs(true)}
+          </div>
 
-          {isBatchRunning && (
-            <div>
-              <div className="flex justify-between text-[10px] text-gray-500 mb-1">
-                <span>Processing candles…</span>
-                <span>{batchProgress}%</span>
-              </div>
-              <div className="w-full h-1.5 bg-gray-100 rounded-full overflow-hidden">
-                <div
-                  className="h-full bg-indigo-500 rounded-full transition-all duration-150"
-                  style={{ width: `${batchProgress}%` }}
-                />
-              </div>
-            </div>
-          )}
+          <div className="flex-1 min-h-[60vh] p-4 @container">
+            {editorContent}
+          </div>
 
-          <HookDebugToggle />
-
-          <button
-            onClick={runBatchAutoBacktest}
-            disabled={isBatchRunning || candles.length === 0 || !config.enabled}
-            className={`w-full py-2.5 px-3 ${hookDebugMode ? 'bg-amber-600 hover:bg-amber-700' : 'bg-indigo-600 hover:bg-indigo-700'} disabled:opacity-50 disabled:cursor-not-allowed text-white text-xs font-bold rounded-lg flex items-center justify-center gap-2 transition-all duration-150 active:scale-[0.99] shadow-sm hover:shadow-md`}
-          >
-            {isBatchRunning ? (
-              <>
-                <svg className="animate-spin h-3.5 w-3.5" viewBox="0 0 24 24" fill="none">
-                  <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
-                  <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8z" />
-                </svg>
-                {hookDebugMode ? 'Running on main thread…' : 'Running...'}
-              </>
-            ) : (
-              <>
-                <Zap size={13} />
-                {hookDebugMode ? 'Run Full Backtest (main thread)' : 'Run Full Backtest (instant)'}
-              </>
-            )}
-          </button>
+          {/* Run bar — sticky so it stays reachable while the page scrolls */}
+          <div className="sticky bottom-0 shrink-0 border-t border-slate-200 bg-white p-2 space-y-2">
+            {runPanel(true)}
+          </div>
         </div>
-      </div>
+      )}
+
+      <PromptDialog
+        isOpen={isSaveAsOpen}
+        onClose={() => setIsSaveAsOpen(false)}
+        onSubmit={(name) => saveAutoBacktestConfigAs(name)}
+        title="Save Auto-Backtest Configuration"
+        message="Enter a name for this configuration setup so you can load it again later."
+        placeholder="Configuration Name..."
+        confirmText="Save"
+      />
+      <ConfirmDialog
+        isOpen={isDeleteConfirmOpen}
+        onClose={() => setIsDeleteConfirmOpen(false)}
+        onConfirm={() => {
+          deleteSavedAutoBacktestConfig(selectedConfigId);
+          setSelectedConfigId('');
+        }}
+        title="Delete Configuration"
+        message={`Delete "${savedConfigs.find(c => c.id === selectedConfigId)?.name ?? ''}"? This cannot be undone.`}
+        confirmText="Delete"
+        isDestructive
+      />
 
       <SessionSettingsPanel
         config={config}
