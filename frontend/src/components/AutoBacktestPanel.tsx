@@ -1,8 +1,8 @@
-import { useMemo, useState, useEffect } from 'react';
+import { useMemo, useState, useEffect, useRef } from 'react';
 import { createPortal } from 'react-dom';
 import {
   Zap, TrendingUp, TrendingDown, Minus, RefreshCw, BarChart2, Save, Trash2, FolderOpen,
-  Settings2, Compass, LogIn, ShieldCheck, LogOut, ShieldAlert, Download, Calendar, X, Waves, Receipt,
+  Settings2, Compass, LogIn, ShieldCheck, LogOut, ShieldAlert, Download, Upload, Calendar, X, Waves, Receipt,
 } from 'lucide-react';
 import { useSessionStore } from '../stores/sessionStore';
 import { EntryMetricsDashboard } from './EntryMetricsDashboard';
@@ -188,6 +188,7 @@ export function AutoBacktestPanel({ onNavigate, hidden }: AutoBacktestPanelProps
   const updateActiveAutoBacktestConfig = useSessionStore(s => s.updateActiveAutoBacktestConfig);
   const applySavedAutoBacktestConfig = useSessionStore(s => s.applySavedAutoBacktestConfig);
   const deleteSavedAutoBacktestConfig = useSessionStore(s => s.deleteSavedAutoBacktestConfig);
+  const importAutoBacktestConfig = useSessionStore(s => s.importAutoBacktestConfig);
 
   const [activeRegime, setActiveRegime] = useState<RegimeKey>('uptrend');
   const [activeStep, setActiveStep] = useState<WorkflowStep | null>('market');
@@ -313,6 +314,19 @@ export function AutoBacktestPanel({ onNavigate, hidden }: AutoBacktestPanelProps
       };
     }
     setAutoBacktestConfig(next);
+  };
+
+  const importFileRef = useRef<HTMLInputElement>(null);
+  const handleImportFile = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    e.target.value = ''; // allow re-importing the same file
+    if (!file) return;
+    try {
+      const ok = importAutoBacktestConfig(JSON.parse(await file.text()), file.name);
+      if (ok) setSelectedConfigId('');
+    } catch {
+      importAutoBacktestConfig(null, file.name); // reports the invalid-file error
+    }
   };
 
   const handleExportConfig = () => {
@@ -454,6 +468,14 @@ export function AutoBacktestPanel({ onNavigate, hidden }: AutoBacktestPanelProps
       >
         <Download size={12} /> Export
       </button>
+      <button
+        onClick={() => importFileRef.current?.click()}
+        title="Import auto-backtest settings from a local JSON file"
+        className="px-2 py-1 text-[10px] bg-sky-50 text-sky-700 border border-sky-200 rounded-lg hover:bg-sky-100 font-medium flex items-center gap-1 transition-all duration-150 active:scale-95"
+      >
+        <Upload size={12} /> Import
+      </button>
+      <input ref={importFileRef} type="file" accept=".json,application/json" className="hidden" onChange={handleImportFile} />
     </div>
   );
 

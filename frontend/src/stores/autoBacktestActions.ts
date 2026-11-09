@@ -817,6 +817,31 @@ export function createAutoBacktestActions(set: StoreSet, get: StoreGet) {
       useNotificationStore.getState().notify(`Configuration "${found.name}" loaded`, 'success');
     },
 
+    importAutoBacktestConfig: (raw: unknown, sourceName: string) => {
+      const notify = useNotificationStore.getState().notify;
+      // Accept both the Export payload ({ name, exportedAt, config }) and a bare config object.
+      const payload = raw as any;
+      const cfg = payload && typeof payload === 'object' && payload.config && typeof payload.config === 'object'
+        ? payload.config
+        : payload;
+      const regimeKeys: RegimeKey[] = ['uptrend', 'downtrend', 'range', 'reversal'];
+      if (!cfg || typeof cfg !== 'object' || !regimeKeys.some(k => cfg[k] && typeof cfg[k] === 'object')) {
+        notify(`"${sourceName}" is not an auto-backtest configuration`, 'error');
+        return false;
+      }
+      // Fill fields missing from older exports with current defaults (top level and per regime).
+      const merged: AutoBacktestConfig = { ...defaultAutoBacktestConfig, ...cfg };
+      for (const k of regimeKeys) {
+        merged[k] = { ...defaultAutoBacktestConfig[k], ...(cfg[k] ?? {}) };
+      }
+      get().setAutoBacktestConfig(merged);
+      // Detach from the active saved config so "Save" can't silently overwrite it — use Save As.
+      set({ activeAutoBacktestConfigId: null, activeAutoBacktestConfigName: null });
+      const name = typeof payload?.name === 'string' && payload.name ? payload.name : sourceName;
+      notify(`Configuration "${name}" imported from file — use Save As to keep it`, 'success');
+      return true;
+    },
+
     deleteSavedAutoBacktestConfig: async (id: string) => {
       try {
         await deleteAutoBacktestConfigRemote(id);

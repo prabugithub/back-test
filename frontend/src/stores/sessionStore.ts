@@ -213,6 +213,8 @@ export interface SessionStore {
   updateActiveAutoBacktestConfig: () => Promise<void>;
   applySavedAutoBacktestConfig: (id: string) => void;
   deleteSavedAutoBacktestConfig: (id: string) => Promise<void>;
+  /** Apply a config read from a local JSON file. Detaches from any active saved config. */
+  importAutoBacktestConfig: (raw: unknown, sourceName: string) => boolean;
 }
 
 export const useSessionStore = create<SessionStore>((set, get) => ({
