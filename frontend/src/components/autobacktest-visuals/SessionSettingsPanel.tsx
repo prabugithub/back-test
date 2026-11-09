@@ -417,6 +417,25 @@ export function SessionSettingsPanel({ config, onChange, isOpen, onClose, onOpen
                   className="w-12 px-1.5 py-1 text-xs border rounded text-center"
                 />
               </div>
+              {/* Climax Reversal exit hook + Climax Rejection entry guard. Baseline = Climax Lookback. */}
+              <div className="flex items-center justify-between gap-1">
+                <span className="text-[10px] text-gray-500" title="Climax Reversal exit / Climax Rejection entry guard: a bar whose range is at least this many times the Climax Lookback baseline is a climax bar">Climax Rev Multiple</span>
+                <input
+                  type="number" min={1.5} max={20} step={0.5}
+                  value={config.climaxReversalMultiple ?? DEFAULT_CLIMAX_EXIT.climaxReversalMultiple}
+                  onChange={e => onChange({ climaxReversalMultiple: Number(e.target.value) })}
+                  className="w-12 px-1.5 py-1 text-xs border rounded text-center"
+                />
+              </div>
+              <div className="flex items-center justify-between gap-1">
+                <span className="text-[10px] text-gray-500" title="Climax Reversal exit: a bar closing against the trade within this many bars after the climax bar books the profit. Climax Rejection guard: a held climax followed by a reversal bar blocks that side for this many bars after the climax bar">Climax Rev Window</span>
+                <input
+                  type="number" min={1} max={200}
+                  value={config.climaxReversalWindow ?? DEFAULT_CLIMAX_EXIT.climaxReversalWindow}
+                  onChange={e => onChange({ climaxReversalWindow: Number(e.target.value) })}
+                  className="w-12 px-1.5 py-1 text-xs border rounded text-center"
+                />
+              </div>
               {/* Strong-trend-day windows — read only by the Strong-Trend H1 entry hook. */}
               {TREND_DAY_INPUTS.map(({ key, label, title, min, max }) => (
                 <div key={key} className="flex items-center justify-between gap-1">

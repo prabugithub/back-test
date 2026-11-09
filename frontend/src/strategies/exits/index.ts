@@ -53,6 +53,7 @@ import type { ExitHook, ExitHookEntry } from '../../utils/exitHook';
 import { breakevenThenTrail, holdWinners, timeStop } from './example';
 import { legDecayExit } from './legDecay';
 import { climaxProfitExit, legDecayWithClimax } from './climax';
+import { climaxReversalExit, legDecayWithClimaxReversal } from './climaxReversal';
 
 export const EXIT_HOOKS: Record<string, ExitHookEntry> = {
   'leg-decay': {
@@ -69,6 +70,16 @@ export const EXIT_HOOKS: Record<string, ExitHookEntry> = {
     label: 'Leg Decay + Climax Profit',
     description: 'Leg Decay, plus the Climax Profit rules checked first: a 4x-range bar or a strong double top/bottom reversal books an in-profit long or short at its close.',
     hook: legDecayWithClimax,
+  },
+  'climax-reversal': {
+    label: 'Climax Reversal (4.5x candle → reversal bar, double top/bottom)',
+    description: 'Like Climax Profit, but waits: after an in-trade bar reaches Climax Rev Multiple × the average range (default 4.5x), books an in-profit long/short on the first bar closing against it within Climax Rev Window bars (default 20). Also keeps the double top/bottom reversal rule. Never exits on the climax bar itself.',
+    hook: climaxReversalExit,
+  },
+  'leg-decay-climax-reversal': {
+    label: 'Leg Decay + Climax Reversal',
+    description: 'Leg Decay, plus the Climax Reversal rules checked first: a reversal bar after a 4.5x bar, or a strong double top/bottom reversal, books an in-profit trade at its close.',
+    hook: legDecayWithClimaxReversal,
   },
   'breakeven-trail': {
     label: 'Breakeven, then ATR Trail',

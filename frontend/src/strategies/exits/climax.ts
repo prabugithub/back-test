@@ -41,7 +41,41 @@ export const DEFAULT_CLIMAX_EXIT = {
   /** Strong reversal: fraction of the way from the second top back to the neckline the
    *  close must have travelled (1 = a neckline break). */
   doubleTopReversalFrac: 0.5,
+  /** Climax Reversal exit / Climax Rejection entry guard: bar range ÷ baseline for the climax bar. */
+  climaxReversalMultiple: 4.5,
+  /** Same two hooks: most bars after the climax bar in which the reversal still counts. */
+  climaxReversalWindow: 20,
 } as const;
+
+/**
+ * Range ratio of `candles[k]` against the mean range of the `lookback` bars before it, or
+ * null when there is no full baseline, the baseline is flat, or the ratio is below `multiple`.
+ */
+export function isClimaxBar(
+  candles: readonly { high: number; low: number }[], k: number, lookback: number, multiple: number,
+): number | null {
+  if (k < lookback || k >= candles.length) return null;
+  let sum = 0;
+  for (let j = k - lookback; j < k; j++) sum += candles[j].high - candles[j].low;
+  const avgRange = sum / lookback;
+  if (avgRange <= 0) return null;
+  const ratio = (candles[k].high - candles[k].low) / avgRange;
+  return ratio >= multiple ? ratio : null;
+}
+
+/** Settings shared by the Climax Reversal exit and the Climax Rejection entry guard. The
+ *  baseline lookback is the existing Climax Lookback. */
+export function climaxReversalSettings(c: {
+  climaxExitLookback?: number; climaxReversalMultiple?: number; climaxReversalWindow?: number;
+}): { lookback: number; multiple: number; window: number } {
+  const d = DEFAULT_CLIMAX_EXIT;
+  const lb = c.climaxExitLookback, mult = c.climaxReversalMultiple, win = c.climaxReversalWindow;
+  return {
+    lookback: Number.isFinite(lb) ? Math.max(2, Math.floor(lb as number)) : d.climaxExitLookback,
+    multiple: Number.isFinite(mult) && (mult as number) > 1 ? (mult as number) : d.climaxReversalMultiple,
+    window: Number.isFinite(win) ? Math.max(1, Math.floor(win as number)) : d.climaxReversalWindow,
+  };
+}
 
 function settings(ctx: ExitHookContext): { lookback: number; multiple: number } {
   const c = ctx.config;
@@ -67,18 +101,11 @@ function doubleTopSettings(ctx: ExitHookContext): { minGap: number; tolAtr: numb
 
 /** Climax rule: the current bar's range against the mean of the bars before it. */
 function climaxReason(ctx: ExitHookContext): string | null {
-  const { candles, index, candle, position } = ctx;
+  const { candles, index, position } = ctx;
   const { lookback, multiple } = settings(ctx);
-  // Need a full baseline window before the current bar; a short history is not evidence.
-  if (index < lookback) return null;
-
-  let sum = 0;
-  for (let k = index - lookback; k < index; k++) sum += candles[k].high - candles[k].low;
-  const avgRange = sum / lookback;
-  if (avgRange <= 0) return null;
-
-  const ratio = (candle.high - candle.low) / avgRange;
-  if (ratio < multiple) return null;
+  // Needs a full baseline window before the current bar; a short history is not evidence.
+  const ratio = isClimaxBar(candles, index, lookback, multiple);
+  if (ratio === null) return null;
   return `climax: ${ratio.toFixed(1)}x avg range (${lookback} bars), booked ${position.openPoints.toFixed(2)} pts`;
 }
 
@@ -99,7 +126,7 @@ function climaxReason(ctx: ExitHookContext): string | null {
  *   • strong — this bar closes against the trade (bear bar for a long) and has retraced at
  *              least `doubleTopReversalFrac` of the way from top 2 to the neck
  */
-function doubleTopReason(ctx: ExitHookContext): string | null {
+export function doubleTopReason(ctx: ExitHookContext): string | null {
   const { candles, index, candle, position, absoluteIndex } = ctx;
   if (position.entryBarIndex === null || ctx.atr <= 0) return null;
   const { minGap, tolAtr, reversalFrac } = doubleTopSettings(ctx);

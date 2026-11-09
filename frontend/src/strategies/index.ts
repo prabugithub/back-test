@@ -41,6 +41,7 @@ import type { EntryHook, EntryHookEntry } from '../utils/entryHook';
 import { deepPullbackContinuation, takeEverySignal } from './example';
 import { higherHighShallowPullback } from './higherHighShallowPullback';
 import { srGuard } from './srGuard';
+import { climaxRejectionGuard } from './climaxRejection';
 import { strongTrendH1 } from './strongTrendH1';
 
 export const ENTRY_HOOKS: Record<string, EntryHookEntry> = {
@@ -58,6 +59,11 @@ export const ENTRY_HOOKS: Record<string, EntryHookEntry> = {
     label: 'S/R Guard (trendline + swing resistance)',
     description: 'Gate mode filter, both sides. Blocks entries under an intact counter trendline (≥80-bar span) or near a real swing top/bottom (last 150 bars). Never the first break — waits for the retest, a held pullback, or a re-break.',
     hook: srGuard,
+  },
+  'climax-rejection': {
+    label: 'Climax Rejection Guard (4.5x bar failed)',
+    description: 'Gate mode filter, both sides. Blocks shorts after a Climax Rev Multiple (default 4.5x) bear bar whose low held and was followed by a bull bar, within Climax Rev Window bars (default 20); longs mirror on a bull climax. A break of the climax extreme or the window ending lifts the block.',
+    hook: climaxRejectionGuard,
   },
   'deep-pullback': {
     label: 'Deep Pullback Continuation',
