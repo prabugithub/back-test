@@ -439,9 +439,6 @@ export interface AutoBacktestConfig {
   // Climax Rejection entry guard, extra block rules. Defaults in DEFAULT_CLIMAX_REJECTION (strategies/climaxRejection.ts).
   climaxAgainstMultiple?: number;  // rule 1: bar against the side ≥ this × baseline blocks it (default 3)
   climaxAgainstBlockBars?: number; // rule 1: bars that block lasts (default 50)
-  dtReversalMultiple?: number;     // rule 2: reversal bar off a double top/bottom ≥ this × baseline (default 2)
-  dtReversalWithinBars?: number;   // rule 2: reversal bar at most this many bars after the second top (default 9)
-  dtReversalBlockBars?: number;    // rule 2: bars that block lasts unless the level breaks (default 50)
 
   // Strong-trend-day windows read by the Strong-Trend H1 entry hook (strategies/strongTrendH1.ts).
   // Optional — undefined falls back to DEFAULT_TREND_DAY_WINDOWS (in that file), so saved configs need no migration.

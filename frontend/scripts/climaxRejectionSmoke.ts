@@ -1,13 +1,11 @@
 // Smoke tests for the Climax Rejection entry guard (src/strategies/climaxRejection.ts):
-// rule 0 failed climax, rule 1 climax against, rule 2 double top/bottom + big reversal,
-// rule 3 at a double top/bottom — each on hand-built candles, long side and its mirror.
+// rule 0 failed climax and rule 1 climax against, on hand-built candles, long side and its
+// mirror — plus a check that a double top no longer blocks anything.
 //
 //   npm run backtest:climaxrejection   (tsx scripts/climaxRejectionSmoke.ts)
 import type { Candle } from '../src/types';
 import { defaultAutoBacktestConfig, type AutoBacktestConfig } from '../src/utils/autoBacktestEngine';
-import {
-  climaxRejectionGuard, findAtDoubleTop, findClimaxAgainst, findClimaxRejection, findDoubleTopReversal,
-} from '../src/strategies/climaxRejection';
+import { climaxRejectionGuard, findClimaxAgainst, findClimaxRejection } from '../src/strategies/climaxRejection';
 import { hookProbeStore } from '../src/strategies/debug';
 
 let passed = 0, failed = 0;
@@ -74,54 +72,8 @@ console.log('\n1. climax against (3x bar against the side → blocked 50 bars)')
   assert(findClimaxAgainst(f, 40, false, LB, 3, 50)?.bar === 30, 'mirror: 3.5x bull bar blocks shorts');
 }
 
-// ─── Double-top fixture ───────────────────────────────────────────────────────
-// Up 1000 → 1050 (bar 30), down to 1010 (bar 45), back up to 1050 (bar 60): tops 30 bars apart.
-const DT: [number, number][] = [[0, 1000], [20, 1000], [30, 1050], [45, 1010], [60, 1050], [200, 1050]];
-const dtPath = (n: number, knots = DT) => stamp(path(n, lin(knots)));
-function withReversal(revAt: number, after: (i: number) => number, knots = DT): Candle[] {
-  const c = dtPath(revAt, knots);
-  const o = c[revAt - 1].close;
-  c.push(bar(o, o - 18, o + 1, o - 19)); // range 20 ≈ 2.4x the ~8.5 baseline (under rule 1's 3x)
-  let p = o - 18;
-  for (let i = revAt + 1; i < revAt + 80; i++) { const cl = after(i) ?? p; c.push(bar(p, cl, Math.max(p, cl) + 3, Math.min(p, cl) - 3)); p = cl; }
-  return stamp(c);
-}
-
-// ─── Rule 2 ───────────────────────────────────────────────────────────────────
-console.log('\n2. double top + 2x reversal bar within 9 bars → no long for 50 bars');
-{
-  const C = withReversal(62, () => 1024);
-  const r = findDoubleTopReversal(C, 70, true, LB, 2, 9, 50, 25, TOL);
-  assert(r?.reversalBar === 62 && [30, 31].includes(r.top1) && [60, 61].includes(r.top2), `long blocked (${JSON.stringify(r && { r: r.reversalBar, t1: r.top1, t2: r.top2 })})`);
-  assert(findDoubleTopReversal(C, 112, true, LB, 2, 9, 50, 25, TOL)?.reversalBar === 62, '…still blocked 50 bars later');
-  assert(findDoubleTopReversal(C, 113, true, LB, 2, 9, 50, 25, TOL) === null, '…free after 50 bars');
-  assert(findDoubleTopReversal(C, 70, false, LB, 2, 9, 50, 25, TOL) === null, 'shorts are not blocked by a double top');
-  const lifted = withReversal(62, i => (i >= 66 && i <= 68 ? 1024 + (i - 65) * 13 : i > 68 ? 1063 : 1024));
-  assert(findDoubleTopReversal(lifted, 66, true, LB, 2, 9, 50, 25, TOL)?.reversalBar === 62, 'blocked before the level breaks');
-  assert(findDoubleTopReversal(lifted, 72, true, LB, 2, 9, 50, 25, TOL) === null, 'a close above the top + tol lifts it');
-  const late = withReversal(75, () => 1024, [[0, 1000], [20, 1000], [30, 1050], [45, 1010], [60, 1050], [66, 1030], [200, 1030]]);
-  assert(findDoubleTopReversal(late, 80, true, LB, 2, 9, 50, 25, TOL) === null, 'a reversal 15 bars after the top is outside the 9-bar window');
-  assert(findDoubleTopReversal(C, 70, true, LB, 2, 9, 50, 35, TOL) === null, 'tops 30 bars apart fail a 35-bar min gap');
-  const f = flip(C);
-  assert(findDoubleTopReversal(f, 70, false, LB, 2, 9, 50, 25, TOL)?.reversalBar === 62, 'mirror: double bottom + bull reversal blocks shorts');
-}
-
-// ─── Rule 3 ───────────────────────────────────────────────────────────────────
-console.log('\n3. at a double top (tops ≥ 25 bars apart) → no long');
-{
-  const C = dtPath(90);
-  assert([30, 31].includes(findAtDoubleTop(C, 60, true, 25, TOL)?.top1 ?? -1), 'long blocked on the second-top bar');
-  assert((findAtDoubleTop(C, 65, true, 25, TOL)?.top2 ?? 0) >= 60, '…and while price stays at the level');
-  assert(findAtDoubleTop(C, 60, false, 25, TOL) === null, 'shorts are not blocked by a double top');
-  assert(findAtDoubleTop(C, 60, true, 35, TOL) === null, 'tops 30 bars apart fail a 35-bar min gap');
-  const away = withReversal(62, () => 1020);
-  assert(findAtDoubleTop(away, 70, true, 25, TOL) === null, 'free once price has left the level');
-  const f = flip(C);
-  assert([30, 31].includes(findAtDoubleTop(f, 60, false, 25, TOL)?.top1 ?? -1), 'mirror: shorts blocked at a double bottom');
-}
-
 // ─── The hook ─────────────────────────────────────────────────────────────────
-console.log('\n4. the hook: rule order, verdict, probe');
+console.log('\n2. the hook: rule order, verdict, probe');
 {
   const cfg = { ...defaultAutoBacktestConfig } as AutoBacktestConfig;
   const state = {};
@@ -137,16 +89,21 @@ console.log('\n4. the hook: rule order, verdict, probe');
     if (process.env.DBG) console.log("   dbg", side, i, res, row.crRule, row.crDetail, logs);
     return { res, rule: row.crRule, logs };
   };
-  const C = withReversal(62, () => 1024);
-  assert(run(C, 70, 'long').rule === 'dtReversal' && run(C, 70, 'long').res === false, 'double top reversal → long refused (dtReversal)');
-  const top = dtPath(90);
-  assert(run(top, 61, 'long').rule === 'atDoubleTop', 'at the second top → long refused (atDoubleTop)');
+  // Double top 1050 (bar 30) / 1050 (bar 60), then a 2.4x bear bar off it: no longer a block.
+  const top = stamp(path(90, lin([[0, 1000], [20, 1000], [30, 1050], [45, 1010], [60, 1050], [200, 1050]])));
+  assert(run(top, 61, 'long').res === true, 'at a double top → long allowed (no double top rule)');
+  const rev = [...top.slice(0, 62)];
+  const o = rev[61].close;
+  rev.push(bar(o, o - 18, o + 1, o - 19), ...flat(10, o - 18));
+  assert(run(stamp(rev), 70, 'long').res === true, 'double top + 2.4x reversal → long allowed');
+  assert(run(stamp(flip(rev)), 70, 'short').res === true, 'mirror: double bottom + reversal → short allowed');
   const big = [...flat(30), bar(1003, 970, 1004, 969), ...flat(10, 975)].map((k, i) => ({ ...k, timestamp: T0 + i * 60 }));
   assert(run(big, 40, 'long').rule === 'climaxAgainst', '3.5x bear bar → long refused (climaxAgainst)');
   const q = stamp(path(60, i => 1000 + i * 2)); // steady climb: no big bars, no double top
   const ok = run(q, 59, 'long');
   assert(ok.res === true && ok.rule === null && ok.logs.length === 1, 'quiet market → allowed, reason logged');
-  assert(run(C, 70, 'long', 0).rule === null, 'no ATR → double top rules skipped');
+  const held = stamp([...flat(25, 1050), bar(1050, 1000, 1052, 1000), bar(1002, 1004, 1006, 1001)]);
+  assert(run(held, 26, 'short').rule === 'failedClimax', 'failed 4.5x bear climax → short refused (failedClimax)');
 }
 
 console.log(`\n${passed} passed, ${failed} failed`);

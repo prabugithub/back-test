@@ -5,7 +5,7 @@ import { DEFAULT_TREND_DAY_WINDOWS } from '../../strategies/strongTrendH1';
 import { DEFAULT_CLIMAX_EXIT } from '../../strategies/exits/climax';
 import { DEFAULT_CLIMAX_REJECTION } from '../../strategies/climaxRejection';
 
-/** Climax Rejection entry guard, rules 1 and 2. Baseline = Climax Lookback. */
+/** Climax Rejection entry guard, rule 1. Baseline = Climax Lookback. */
 const CLIMAX_REJECTION_INPUTS: Array<{
   key: keyof typeof DEFAULT_CLIMAX_REJECTION; label: string; title: string; min: number; max: number; step?: number;
 }> = [
@@ -13,12 +13,6 @@ const CLIMAX_REJECTION_INPUTS: Array<{
     title: 'Climax Rejection guard: a bar against the entry side (bear for a long) with range ≥ this × the Climax Lookback baseline blocks that side' },
   { key: 'climaxAgainstBlockBars', label: 'Climax Against Block', min: 1, max: 500,
     title: 'Climax Rejection guard: bars the Climax Against block lasts after that bar' },
-  { key: 'dtReversalMultiple', label: 'DT Reversal ×', min: 1.1, max: 20, step: 0.1,
-    title: 'Climax Rejection guard: a reversal bar off a double top (blocks longs) / double bottom (blocks shorts) must be ≥ this × the Climax Lookback baseline' },
-  { key: 'dtReversalWithinBars', label: 'DT Reversal Within', min: 1, max: 100,
-    title: 'Climax Rejection guard: the reversal bar must come at most this many bars after the second top / bottom' },
-  { key: 'dtReversalBlockBars', label: 'DT Reversal Block', min: 1, max: 500,
-    title: 'Climax Rejection guard: bars the double top/bottom reversal block lasts; a close back through the level lifts it early' },
 ];
 import {
   DEFAULT_ENTRY_HOOK_LOOKBACK,
