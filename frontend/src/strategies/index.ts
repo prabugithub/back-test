@@ -61,8 +61,8 @@ export const ENTRY_HOOKS: Record<string, EntryHookEntry> = {
     hook: srGuard,
   },
   'climax-rejection': {
-    label: 'Climax Rejection Guard (4.5x bar failed)',
-    description: 'Gate mode filter, both sides. Blocks shorts after a Climax Rev Multiple (default 4.5x) bear bar whose low held and was followed by a bull bar, within Climax Rev Window bars (default 20); longs mirror on a bull climax. A break of the climax extreme or the window ending lifts the block.',
+    label: 'Climax Rejection Guard (climax bars, double top/bottom)',
+    description: 'Gate mode filter, both sides (long rules shown, shorts mirror). Blocks a long: (0) after a failed 4.5x bull climax (high held, then a bear bar) within 20 bars; (1) for 50 bars after a 3x bear bar; (2) for 50 bars after a 2x bear bar within 9 bars of a double top, unless price closes back above it; (3) while price is at a double top whose tops are ≥ Double Top Gap (25) bars apart. All values in Session Settings.',
     hook: climaxRejectionGuard,
   },
   'deep-pullback': {

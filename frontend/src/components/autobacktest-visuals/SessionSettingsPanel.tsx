@@ -3,6 +3,23 @@ import { useChargesStore } from '../../stores/chargesStore';
 import { MULTI_TRADE_DEFAULT_CAP, DEFAULT_LOT_SIZE, type AutoBacktestConfig } from '../../utils/autoBacktestEngine';
 import { DEFAULT_TREND_DAY_WINDOWS } from '../../strategies/strongTrendH1';
 import { DEFAULT_CLIMAX_EXIT } from '../../strategies/exits/climax';
+import { DEFAULT_CLIMAX_REJECTION } from '../../strategies/climaxRejection';
+
+/** Climax Rejection entry guard, rules 1 and 2. Baseline = Climax Lookback. */
+const CLIMAX_REJECTION_INPUTS: Array<{
+  key: keyof typeof DEFAULT_CLIMAX_REJECTION; label: string; title: string; min: number; max: number; step?: number;
+}> = [
+  { key: 'climaxAgainstMultiple', label: 'Climax Against ×', min: 1.5, max: 20, step: 0.5,
+    title: 'Climax Rejection guard: a bar against the entry side (bear for a long) with range ≥ this × the Climax Lookback baseline blocks that side' },
+  { key: 'climaxAgainstBlockBars', label: 'Climax Against Block', min: 1, max: 500,
+    title: 'Climax Rejection guard: bars the Climax Against block lasts after that bar' },
+  { key: 'dtReversalMultiple', label: 'DT Reversal ×', min: 1.1, max: 20, step: 0.1,
+    title: 'Climax Rejection guard: a reversal bar off a double top (blocks longs) / double bottom (blocks shorts) must be ≥ this × the Climax Lookback baseline' },
+  { key: 'dtReversalWithinBars', label: 'DT Reversal Within', min: 1, max: 100,
+    title: 'Climax Rejection guard: the reversal bar must come at most this many bars after the second top / bottom' },
+  { key: 'dtReversalBlockBars', label: 'DT Reversal Block', min: 1, max: 500,
+    title: 'Climax Rejection guard: bars the double top/bottom reversal block lasts; a close back through the level lifts it early' },
+];
 import {
   DEFAULT_ENTRY_HOOK_LOOKBACK,
   ENTRY_HOOK_LOOKBACK_MIN,
@@ -436,6 +453,17 @@ export function SessionSettingsPanel({ config, onChange, isOpen, onClose, onOpen
                   className="w-12 px-1.5 py-1 text-xs border rounded text-center"
                 />
               </div>
+              {CLIMAX_REJECTION_INPUTS.map(({ key, label, title, min, max, step }) => (
+                <div key={key} className="flex items-center justify-between gap-1">
+                  <span className="text-[10px] text-gray-500" title={title}>{label}</span>
+                  <input
+                    type="number" min={min} max={max} step={step}
+                    value={config[key] ?? DEFAULT_CLIMAX_REJECTION[key]}
+                    onChange={e => onChange({ [key]: Number(e.target.value) })}
+                    className="w-12 px-1.5 py-1 text-xs border rounded text-center"
+                  />
+                </div>
+              ))}
               {/* Strong-trend-day windows — read only by the Strong-Trend H1 entry hook. */}
               {TREND_DAY_INPUTS.map(({ key, label, title, min, max }) => (
                 <div key={key} className="flex items-center justify-between gap-1">

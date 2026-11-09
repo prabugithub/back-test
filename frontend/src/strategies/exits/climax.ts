@@ -88,8 +88,9 @@ function settings(ctx: ExitHookContext): { lookback: number; multiple: number } 
   };
 }
 
-function doubleTopSettings(ctx: ExitHookContext): { minGap: number; tolAtr: number; reversalFrac: number } {
-  const c = ctx.config;
+export function doubleTopSettings(c: {
+  doubleTopMinGap?: number; doubleTopTolAtr?: number; doubleTopReversalFrac?: number;
+}): { minGap: number; tolAtr: number; reversalFrac: number } {
   const d = DEFAULT_CLIMAX_EXIT;
   const pos = (v: number | undefined, def: number) => (Number.isFinite(v) && (v as number) > 0 ? (v as number) : def);
   return {
@@ -126,22 +127,27 @@ function climaxReason(ctx: ExitHookContext): string | null {
  *   • strong — this bar closes against the trade (bear bar for a long) and has retraced at
  *              least `doubleTopReversalFrac` of the way from top 2 to the neck
  */
-export function doubleTopReason(ctx: ExitHookContext): string | null {
-  const { candles, index, candle, position, absoluteIndex } = ctx;
-  if (position.entryBarIndex === null || ctx.atr <= 0) return null;
-  const { minGap, tolAtr, reversalFrac } = doubleTopSettings(ctx);
-  const tol = tolAtr * ctx.atr;
+/**
+ * A double top (top = true) or double bottom (top = false) whose SECOND top is bar `top2`,
+ * in the mirrored price space described on `doubleTopReason`: `x1` / `x2` / `neckX` are
+ * highs and lows for a top, NEGATED lows and highs for a bottom. `price` converts back.
+ *
+ *   • top 1 — the nearest earlier swing extreme ≥ `minGap` bars before `top2`, within `tol`
+ *             of it; the scan stops at any bar beyond top 2 + tol
+ *   • neck  — deepest opposite extreme between them; the pattern must be ≥ 2 × tol tall
+ */
+export interface DoubleTop {
+  top1: number; top2: number; x1: number; x2: number; neckX: number; height: number;
+  price(v: number): number;
+}
 
-  const isLong = position.side === 'long';
-  const x = (k: number) => (isLong ? candles[k].high : -candles[k].low);
-  const y = (k: number) => (isLong ? candles[k].low : -candles[k].high);
+export function findDoubleTopAt(
+  candles: readonly { high: number; low: number }[], top2: number, top: boolean, minGap: number, tol: number,
+): DoubleTop | null {
+  if (top2 < 0 || top2 >= candles.length || !(tol > 0)) return null;
+  const x = (k: number) => (top ? candles[k].high : -candles[k].low);
+  const y = (k: number) => (top ? candles[k].low : -candles[k].high);
 
-  // ── top 2: best extreme since entry ─────────────────────────────────────────
-  const entry = Math.max(0, index - (absoluteIndex - position.entryBarIndex));
-  let top2 = entry;
-  for (let k = entry + 1; k <= index; k++) if (x(k) > x(top2)) top2 = k;
-
-  // ── top 1: nearest matching swing extreme >= minGap bars earlier ─────────────
   let top1 = -1;
   for (let k = top2 - 1; k >= 0; k--) {
     if (x(k) > x(top2) + tol) break;
@@ -151,11 +157,31 @@ export function doubleTopReason(ctx: ExitHookContext): string | null {
   }
   if (top1 < 0) return null;
 
-  // ── neck + height ───────────────────────────────────────────────────────────
   let neck = Infinity;
   for (let k = top1 + 1; k < top2; k++) neck = Math.min(neck, y(k));
   const height = x(top2) - neck;
   if (!Number.isFinite(height) || height < 2 * tol) return null;
+  return { top1, top2, x1: x(top1), x2: x(top2), neckX: neck, height, price: v => (top ? v : -v) };
+}
+
+export function doubleTopReason(ctx: ExitHookContext): string | null {
+  const { candles, index, candle, position, absoluteIndex } = ctx;
+  if (position.entryBarIndex === null || ctx.atr <= 0) return null;
+  const { minGap, tolAtr, reversalFrac } = doubleTopSettings(ctx.config);
+  const tol = tolAtr * ctx.atr;
+
+  const isLong = position.side === 'long';
+  const x = (k: number) => (isLong ? candles[k].high : -candles[k].low);
+
+  // ── top 2: best extreme since entry ─────────────────────────────────────────
+  const entry = Math.max(0, index - (absoluteIndex - position.entryBarIndex));
+  let top2 = entry;
+  for (let k = entry + 1; k <= index; k++) if (x(k) > x(top2)) top2 = k;
+
+  // ── top 1, neck, height ─────────────────────────────────────────────────────
+  const dt = findDoubleTopAt(candles, top2, isLong, minGap, tol);
+  if (!dt) return null;
+  const { top1, neckX: neck, height } = dt;
 
   // ── strong reversal off top 2 ───────────────────────────────────────────────
   const closeX = isLong ? candle.close : -candle.close;
