@@ -328,6 +328,18 @@ All changes apply **immediately** — no button needed.
 
 ---
 
+## Auto-Backtest P&L Summary (Yearly / Monthly)
+
+After a backtest run, the Auto-Backtest panel shows a **Profit & Loss Summary (Yearly / Monthly)** section above *Entry Position Metrics*. It is open by default. Click the header to collapse it.
+
+- One row per year with trade count, win %, and P&L. Click a year to expand its months. **Expand all / Collapse all** toggles every year.
+- A **Total** row at the bottom sums the whole run.
+- Counts CLOSED positions only. Each trade is placed in the month and year of its **exit** time, in your local timezone.
+- When trading charges are ON, it adds **Gross** and **Charges** columns. The last column becomes **Net**, and win % is counted on net P&L.
+- Component: `components/PnLPeriodReport.tsx`, rendered in `AutoBacktestPanel.tsx`.
+
+---
+
 ## 6. Trade Execution (Backtesting)
 
 **Component:** `TradingPanel`  
@@ -1276,6 +1288,7 @@ A flip fill (one order that closes a position and opens the opposite one) is cha
 ### Where it shows (when ON)
 - **Trade Log** — first card becomes *Net P&L (after charges)* with `Gross − Charges`; a breakdown card shows turnover, order count, and each charge component; the positions table gains **Charges** (hover for breakdown) and **Net P&L** columns; win rate, PF, avg win/loss, and longs/shorts are computed on net P&L. CSV/JSON exports include the charges columns and summary.
 - **Auto-Backtest** — the Run panel shows `Gross · Charges · Net · Turnover (orders)` for closed trades of the current run, and *Entry Position Metrics* counts wins and P&L net of each trip's entry + exit charges.
+- **Auto-Backtest P&L Summary** — adds Gross and Charges columns; the Net column and win% use net P&L.
 
 ### Editing rates
 Open the drawer from the gear in the Trade Log header, the gear on the Auto-Backtest charges row, or **Session Settings → Trading Charges → Edit rates**. Rates are **global**: they are not stored in the session or the strategy config, so restoring an old snapshot or loading a saved config doesn't change them. They are saved to localStorage plus Firestore `appSettings/charges`. **Reset to defaults** restores the table above.

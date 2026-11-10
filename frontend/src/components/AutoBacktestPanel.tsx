@@ -6,6 +6,7 @@ import {
 } from 'lucide-react';
 import { useSessionStore } from '../stores/sessionStore';
 import { EntryMetricsDashboard } from './EntryMetricsDashboard';
+import { PnLPeriodReport } from './PnLPeriodReport';
 import { PromptDialog } from './PromptDialog';
 import { ConfirmDialog } from './ConfirmDialog';
 import {
@@ -193,6 +194,7 @@ export function AutoBacktestPanel({ onNavigate, hidden }: AutoBacktestPanelProps
   const [activeRegime, setActiveRegime] = useState<RegimeKey>('uptrend');
   const [activeStep, setActiveStep] = useState<WorkflowStep | null>('market');
   const [showMetrics, setShowMetrics] = useState(false);
+  const [showPnLReport, setShowPnLReport] = useState(true);
   const [showPreview, setShowPreview] = useState(false);
   const [showConfigs, setShowConfigs] = useState(false);
   const isWide = useMediaQuery('(min-width: 1024px)');
@@ -514,6 +516,27 @@ export function AutoBacktestPanel({ onNavigate, hidden }: AutoBacktestPanelProps
         config={config}
         onOpenSessionSettings={() => setIsSessionSettingsOpen(true)}
       />
+
+      {/* Yearly / monthly P&L summary — shown once the run has produced trades */}
+      {trades.length > 0 && (
+        <div className="mt-3 border border-emerald-100 rounded-lg overflow-hidden">
+          <button
+            onClick={() => setShowPnLReport(v => !v)}
+            className="w-full flex items-center justify-between px-3 py-2 bg-emerald-50 hover:bg-emerald-100 text-[11px] font-semibold text-emerald-700 transition-colors"
+          >
+            <span className="flex items-center gap-1.5">
+              <Calendar size={12} />
+              Profit &amp; Loss Summary (Yearly / Monthly)
+            </span>
+            <span className="text-[10px] text-emerald-400">{showPnLReport ? '▲' : '▼'}</span>
+          </button>
+          {showPnLReport && (
+            <div className="px-3 pb-3">
+              <PnLPeriodReport trades={trades} chargesConfig={showCharges ? chargesConfig : undefined} />
+            </div>
+          )}
+        </div>
+      )}
 
       {/* Entry Metrics Dashboard — shown when batch trades with journal data exist */}
       {trades.some(t => t.journal?.ltMarket) && (
