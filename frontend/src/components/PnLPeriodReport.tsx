@@ -1,10 +1,11 @@
 import { Fragment, useMemo, useState } from 'react';
 import { ChevronDown, ChevronRight } from 'lucide-react';
-import type { Trade } from '../types';
+import type { Candle, Trade } from '../types';
 import type { ChargesConfig } from '../utils/charges';
 import { computePositionsCharges } from '../utils/charges';
 import { groupTradesIntoPositions } from '../utils/tradeAnalysis';
 import { formatCurrency } from '../utils/formatters';
+import { buildSessionIndex, formatMarketDuration, marketDuration } from '../utils/tradingDays';
 
 const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
 
@@ -13,6 +14,9 @@ interface Bucket {
   wins: number;
   gross: number;
   charges: number;
+  maxMinutes: number;   // longest in-market holding time (weekends/holidays excluded)
+  maxApprox: boolean;   // longest hold partly fell outside the loaded candles
+  maxLabel: string;     // entry → exit of the longest hold (tooltip)
 }
 
 interface YearRow extends Bucket {
@@ -20,10 +24,20 @@ interface YearRow extends Bucket {
   months: Map<number, Bucket>;
 }
 
-const emptyBucket = (): Bucket => ({ trades: 0, wins: 0, gross: 0, charges: 0 });
+const emptyBucket = (): Bucket => ({ trades: 0, wins: 0, gross: 0, charges: 0, maxMinutes: -1, maxApprox: false, maxLabel: '' });
 
-function addTo(b: Bucket, gross: number, charges: number) {
+interface Hold { minutes: number; approx: boolean; label: string }
+
+const fmtTs = (ms: number) =>
+  new Date(ms).toLocaleString('en-IN', { day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit', hour12: false });
+
+function addTo(b: Bucket, gross: number, charges: number, hold: Hold) {
   b.trades += 1;
+  if (hold.minutes > b.maxMinutes) {
+    b.maxMinutes = hold.minutes;
+    b.maxApprox = hold.approx;
+    b.maxLabel = hold.label;
+  }
   b.gross += gross;
   b.charges += charges;
   if (gross - charges > 0) b.wins += 1;
@@ -34,9 +48,11 @@ const pnlTone = (v: number) => (v > 0 ? 'text-green-600' : v < 0 ? 'text-red-600
 /**
  * Year → month P&L summary of CLOSED positions, bucketed by exit time (local timezone).
  * When `chargesConfig` is passed, charges and net columns are shown and wins are counted on net.
+ * Max Hold = longest in-market holding time; weekends/holidays (days without candles) are excluded.
  */
-export function PnLPeriodReport({ trades, chargesConfig }: { trades: Trade[]; chargesConfig?: ChargesConfig }) {
+export function PnLPeriodReport({ trades, candles, chargesConfig }: { trades: Trade[]; candles: Candle[]; chargesConfig?: ChargesConfig }) {
   const [expanded, setExpanded] = useState<Set<number>>(new Set());
+  const sessionIndex = useMemo(() => buildSessionIndex(candles), [candles]);
 
   const { years, total } = useMemo(() => {
     const closed = groupTradesIntoPositions(trades).filter(p => p.status === 'CLOSED' && p.exitTime);
@@ -50,6 +66,8 @@ export function PnLPeriodReport({ trades, chargesConfig }: { trades: Trade[]; ch
       const y = d.getFullYear();
       const m = d.getMonth();
       const charges = byId?.get(p.id)?.total ?? 0;
+      const dur = marketDuration(sessionIndex, p.entryTime, ts);
+      const hold: Hold = { ...dur, label: `${fmtTs(p.entryTime)} → ${fmtTs(ts)}` };
 
       let row = yearMap.get(y);
       if (!row) {
@@ -61,12 +79,12 @@ export function PnLPeriodReport({ trades, chargesConfig }: { trades: Trade[]; ch
         mb = emptyBucket();
         row.months.set(m, mb);
       }
-      addTo(row, p.realizedPnL, charges);
-      addTo(mb, p.realizedPnL, charges);
-      addTo(total, p.realizedPnL, charges);
+      addTo(row, p.realizedPnL, charges, hold);
+      addTo(mb, p.realizedPnL, charges, hold);
+      addTo(total, p.realizedPnL, charges, hold);
     }
     return { years: [...yearMap.values()].sort((a, b) => a.year - b.year), total };
-  }, [trades, chargesConfig]);
+  }, [trades, chargesConfig, sessionIndex]);
 
   if (years.length === 0) {
     return <div className="text-[11px] text-gray-400 py-2">No closed trades yet.</div>;
@@ -87,6 +105,12 @@ export function PnLPeriodReport({ trades, chargesConfig }: { trades: Trade[]; ch
       <>
         <td className="px-2 py-1 text-right tabular-nums">{b.trades}</td>
         <td className="px-2 py-1 text-right tabular-nums">{b.trades ? ((b.wins / b.trades) * 100).toFixed(0) : 0}%</td>
+        <td
+          className="px-2 py-1 text-right tabular-nums whitespace-nowrap"
+          title={b.maxLabel ? `${b.maxLabel}${b.maxApprox ? ' (approx — outside loaded candles, holidays not excluded)' : ''}` : undefined}
+        >
+          {b.maxMinutes >= 0 ? `${b.maxApprox ? '~' : ''}${formatMarketDuration(b.maxMinutes, sessionIndex.sessionMinutes)}` : '—'}
+        </td>
         {showCharges && (
           <>
             <td className={`px-2 py-1 text-right tabular-nums ${pnlTone(b.gross)}`}>{formatCurrency(b.gross)}</td>
@@ -115,6 +139,7 @@ export function PnLPeriodReport({ trades, chargesConfig }: { trades: Trade[]; ch
               <th className="px-2 py-1 text-left font-medium">Period</th>
               <th className="px-2 py-1 text-right font-medium">Trades</th>
               <th className="px-2 py-1 text-right font-medium">Win%</th>
+              <th className="px-2 py-1 text-right font-medium" title="Longest in-market holding time. Weekends/holidays excluded; 1d = one full session.">Max Hold</th>
               {showCharges && (
                 <>
                   <th className="px-2 py-1 text-right font-medium">Gross</th>

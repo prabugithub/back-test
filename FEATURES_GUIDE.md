@@ -336,6 +336,11 @@ After a backtest run, the Auto-Backtest panel shows a **Profit & Loss Summary (Y
 - A **Total** row at the bottom sums the whole run.
 - Counts CLOSED positions only. Each trade is placed in the month and year of its **exit** time, in your local timezone.
 - When trading charges are ON, it adds **Gross** and **Charges** columns. The last column becomes **Net**, and win % is counted on net P&L.
+- **Max Hold** shows the longest holding time in each year, month, and the whole run. It counts only time the market was open, so weekends and holidays between entry and exit are skipped.
+  - A trade closed the same day shows hours, e.g. `3h 20m`.
+  - A trade held over several days shows full sessions as days, plus the entry-day and exit-day time as hours. For example, Mon 14:00 → Wed 10:00 shows `1d 2h 15m`. One day is one full session (6h 15m on NSE). Extra hours roll over into days.
+  - Open days and session hours come from the loaded candles: a date with no candles counts as a weekend or holiday. On daily or higher timeframes, each open day is treated as a 09:15–15:30 IST session.
+  - If a trade's dates fall outside the loaded candles, the value starts with `~`. For those days, Mon–Fri 09:15–15:30 is assumed and holidays can't be excluded. Hover the cell to see the trade's entry → exit.
 - Component: `components/PnLPeriodReport.tsx`, rendered in `AutoBacktestPanel.tsx`.
 
 ---

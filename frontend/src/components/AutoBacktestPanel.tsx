@@ -532,7 +532,7 @@ export function AutoBacktestPanel({ onNavigate, hidden }: AutoBacktestPanelProps
           </button>
           {showPnLReport && (
             <div className="px-3 pb-3">
-              <PnLPeriodReport trades={trades} chargesConfig={showCharges ? chargesConfig : undefined} />
+              <PnLPeriodReport trades={trades} candles={candles} chargesConfig={showCharges ? chargesConfig : undefined} />
             </div>
           )}
         </div>
