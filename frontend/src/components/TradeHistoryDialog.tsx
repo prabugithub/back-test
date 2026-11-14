@@ -7,6 +7,7 @@ import { PageNavTabs, type ActivePage } from './PageNavTabs';
 import { useChargesStore } from '../stores/chargesStore';
 import { computePositionsCharges, toNetPositions } from '../utils/charges';
 import { ChargesSettingsPanel } from './ChargesSettingsPanel';
+import { buildSessionIndex, formatMarketDuration, marketDuration } from '../utils/tradingDays';
 
 interface TradeHistoryDialogProps {
     isOpen: boolean;
@@ -41,6 +42,8 @@ export function TradeHistoryDialog({ isOpen, onNavigate }: TradeHistoryDialogPro
         [charges, positions, grossStats]
     );
     const colCount = showCharges ? 15 : 13;
+    // Hold = in-market time only (weekends/holidays = days without candles are skipped).
+    const sessionIndex = useMemo(() => buildSessionIndex(candles), [candles]);
 
     const handleExportCSV = () => {
         if (trades.length === 0) return;
@@ -357,12 +360,10 @@ export function TradeHistoryDialog({ isOpen, onNavigate }: TradeHistoryDialogPro
                                     <th className="px-4 py-3 text-right">Avg Exit</th>
                                     <th className="px-4 py-3 text-right">SL</th>
                                     <th className="px-4 py-3 text-right">Target</th>
-                                    <th className="px-4 py-3 text-center">Trend Rev</th>
-                                    <th className="px-4 py-3 text-right">PnL @ Rev</th>
                                     <th className="px-4 py-3 text-right">P&L</th>
                                     {showCharges && <th className="px-4 py-3 text-right">Charges</th>}
                                     {showCharges && <th className="px-4 py-3 text-right">Net P&L</th>}
-                                    <th className="px-4 py-3 text-right">Duration</th>
+                                    <th className="px-4 py-3 text-right" title="In-market holding time. Weekends/holidays excluded; 1d = one full session.">Hold</th>
                                     <th className="px-4 py-3 text-center w-8">View</th>
                                     <th className="px-4 py-3 text-center w-10"></th>
                                 </tr>
@@ -379,6 +380,7 @@ export function TradeHistoryDialog({ isOpen, onNavigate }: TradeHistoryDialogPro
                                         const isExpanded = expandedPosId === pos.id;
                                         const posCharges = charges?.byPositionId.get(pos.id);
                                         const netPnL = pos.realizedPnL - (posCharges?.total ?? 0);
+                                        const hold = pos.status === 'CLOSED' && pos.exitTime ? marketDuration(sessionIndex, pos.entryTime, pos.exitTime) : null;
                                         return (
                                             <>
                                                 <tr
@@ -423,16 +425,6 @@ export function TradeHistoryDialog({ isOpen, onNavigate }: TradeHistoryDialogPro
                                                     <td className="px-4 py-3 text-right font-mono text-gray-400">
                                                         {pos.target ? formatCurrency(pos.target) : '-'}
                                                     </td>
-                                                    <td className="px-4 py-3 text-center">
-                                                        {pos.trendReversed ? (
-                                                            <span className="px-1.5 py-0.5 rounded text-[10px] bg-orange-100 text-orange-700 font-bold uppercase">Rev</span>
-                                                        ) : (
-                                                            <span className="text-gray-300">-</span>
-                                                        )}
-                                                    </td>
-                                                    <td className={`px-4 py-3 text-right font-mono text-[10px] ${pos.trendReversedPnL !== undefined ? (pos.trendReversedPnL >= 0 ? 'text-green-600' : 'text-red-500') : 'text-gray-400'}`}>
-                                                        {pos.trendReversedPnL !== undefined ? formatCurrency(pos.trendReversedPnL) : '-'}
-                                                    </td>
                                                     <td className={`px-4 py-3 text-right font-bold font-mono ${pos.realizedPnL > 0 ? 'text-green-600' : pos.realizedPnL < 0 ? 'text-red-600' : 'text-gray-400'
                                                         }`}>
                                                         {formatCurrency(pos.realizedPnL)}
@@ -450,8 +442,11 @@ export function TradeHistoryDialog({ isOpen, onNavigate }: TradeHistoryDialogPro
                                                             {pos.status === 'OPEN' ? '-' : formatCurrency(netPnL)}
                                                         </td>
                                                     )}
-                                                    <td className="px-4 py-3 text-right text-gray-500">
-                                                        {pos.status === 'CLOSED' ? `${pos.durationMinutes?.toFixed(1)}m` : '-'}
+                                                    <td
+                                                        className="px-4 py-3 text-right text-gray-500 whitespace-nowrap"
+                                                        title={hold ? `Wall-clock ${pos.durationMinutes?.toFixed(1)}m${hold.approx ? ' — approx: outside loaded candles, holidays not excluded' : ''}` : undefined}
+                                                    >
+                                                        {hold ? `${hold.approx ? '~' : ''}${formatMarketDuration(hold.minutes, sessionIndex.sessionMinutes)}` : '-'}
                                                     </td>
                                                     <td className="px-4 py-3 text-center">
                                                         <button
@@ -492,8 +487,6 @@ export function TradeHistoryDialog({ isOpen, onNavigate }: TradeHistoryDialogPro
                                                                             <th className="px-3 py-2 text-left">Align (Sys/View)</th>
                                                                             <th className="px-3 py-2 text-left max-w-[100px]">Notes</th>
                                                                             <th className="px-3 py-2 text-center">Img</th>
-                                                                            <th className="px-3 py-2 text-center">Trend Rev</th>
-                                                                            <th className="px-3 py-2 text-right">PnL @ Rev</th>
                                                                             <th className="px-3 py-2 text-right">Realized P&L</th>
                                                                             <th className="px-3 py-2 text-center w-8">View</th>
                                                                             <th className="px-3 py-2 text-center w-10"></th>
@@ -573,14 +566,6 @@ export function TradeHistoryDialog({ isOpen, onNavigate }: TradeHistoryDialogPro
                                                                                             <LinkIcon size={14} />
                                                                                         </a>
                                                                                     ) : '-'}
-                                                                                </td>
-                                                                                <td className="px-3 py-2 text-center">
-                                                                                    {exec.trendReversed ? (
-                                                                                        <span className="px-1.5 py-0.5 rounded text-[9px] bg-orange-50 text-orange-600 font-bold uppercase">Rev</span>
-                                                                                    ) : '-'}
-                                                                                </td>
-                                                                                <td className={`px-3 py-2 text-right font-mono text-[9px] ${exec.trendReversedPnL !== undefined ? (exec.trendReversedPnL >= 0 ? 'text-green-600' : 'text-red-500') : 'text-gray-400'}`}>
-                                                                                    {exec.trendReversedPnL !== undefined ? formatCurrency(exec.trendReversedPnL) : '-'}
                                                                                 </td>
                                                                                 <td className="px-3 py-2 text-right font-mono text-gray-500 text-[10px]">
                                                                                     {exec.pnl ? formatCurrency(exec.pnl) : '-'}

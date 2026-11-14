@@ -921,6 +921,9 @@ Renders as a **full-page view** (`absolute inset-0 z-[105]`, same pattern as the
 | Qty | Quantity |
 | P&L | Realized profit/loss on close |
 | Journal | LLHH-Pivot and PivotPosition if recorded |
+| Hold | (Position row) Time the market was open while the position was held. Weekends and holidays are skipped. A same-day trade shows `3h 20m`, and a longer one shows full sessions as days, e.g. `1d 2h 15m`. It works the same way as **Max Hold** in the [Auto-Backtest P&L Summary](#auto-backtest-pl-summary-yearly--monthly). `~` means part of the trade falls outside the loaded candles. Hover a cell to see the total time from entry to exit, weekends and holidays included (in minutes). This replaces the old wall-clock Duration column. |
+
+The **Trend Rev** and **PnL @ Rev** columns are hidden in the position table and the expanded execution table. They are still included in CSV/JSON exports.
 
 ### Actions
 
