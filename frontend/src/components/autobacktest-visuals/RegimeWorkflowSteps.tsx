@@ -355,6 +355,80 @@ function structureGate(f: string | undefined): boolean {
   return f !== undefined && f !== 'any';
 }
 
+/**
+ * Extra hooks stacked on the primary (RegimeRules.entryHookExtraIds / exitHookExtraIds,
+ * combined in strategies/compose.ts). Lets a new condition live in its own file and be layered
+ * onto a working setup without touching it. An unknown id fails the whole stack closed, so it
+ * is flagged as loudly as an unknown primary.
+ */
+function StackedHooksEditor({ title, hint, primaryId, extraIds, options, onChange }: {
+  title: string;
+  hint: string;
+  primaryId: string;
+  extraIds: string[];
+  options: Array<{ id: string; label: string; description?: string }>;
+  onChange: (ids: string[]) => void;
+}) {
+  // Cleared to [] rather than undefined on purpose: saved configs are updated with
+  // setDoc(..., { merge: true }), which keeps a field the patch omits — an undefined (stripped)
+  // list would leave the old extras in Firestore. An array is replaced wholesale.
+  const set = onChange;
+  const taken = new Set([primaryId, ...extraIds]);
+  const firstFree = options.find(o => !taken.has(o.id));
+
+  return (
+    <div className="mt-2 pt-2 border-t border-dashed">
+      <div className="text-[10px] font-semibold text-gray-600">{title}</div>
+      <p className="text-[10px] text-gray-400 leading-snug mb-1">{hint}</p>
+      {extraIds.map((id, i) => {
+        const opt = options.find(o => o.id === id);
+        return (
+          <div key={`${id}-${i}`} className="mb-1">
+            <div className="flex gap-1">
+              <select
+                value={id}
+                onChange={e => set(extraIds.map((x, j) => (j === i ? e.target.value : x)))}
+                className="flex-1 px-2 py-1 text-xs border rounded-lg"
+              >
+                {!opt && <option value={id}>{id} (not registered)</option>}
+                {options
+                  .filter(o => o.id === id || !taken.has(o.id))
+                  .map(o => <option key={o.id} value={o.id}>{o.label}</option>)}
+              </select>
+              <button
+                type="button"
+                onClick={() => set(extraIds.filter((_, j) => j !== i))}
+                className="px-2 text-xs text-gray-500 border rounded-lg hover:text-red-600"
+                title="Remove from stack"
+              >
+                ✕
+              </button>
+            </div>
+            {opt?.description && (
+              <p className="mt-0.5 text-[10px] text-gray-500 leading-snug">{opt.description}</p>
+            )}
+            {!opt && (
+              <p className="mt-0.5 text-[10px] text-red-600 leading-snug">
+                No hook registered under <span className="font-mono">{id}</span>. The whole stack
+                is disabled (fails closed) until you remove or replace it.
+              </p>
+            )}
+          </div>
+        );
+      })}
+      {firstFree && (
+        <button
+          type="button"
+          onClick={() => set([...extraIds, firstFree.id])}
+          className="text-[10px] text-blue-600 hover:underline"
+        >
+          + Add hook
+        </button>
+      )}
+    </div>
+  );
+}
+
 function CustomEntryHookCard({ rules, up }: Pick<RegimeStepProps, 'rules' | 'up'>) {
   const mode = rules.entryHookMode ?? 'off';
   const hookId = rules.entryHookId ?? '';
@@ -404,6 +478,17 @@ function CustomEntryHookCard({ rules, up }: Pick<RegimeStepProps, 'rules' | 'up'
             <p className="mt-1.5 text-[10px] text-amber-600 leading-snug">
               No hook selected — this setting has no effect until you pick one.
             </p>
+          )}
+
+          {hookId !== '' && (
+            <StackedHooksEditor
+              title="Also must pass"
+              hint="Every hook here must also accept the entry (AND), checked after the primary. The primary's side / qty / SL / target win."
+              primaryId={hookId}
+              extraIds={rules.entryHookExtraIds ?? []}
+              options={ENTRY_HOOK_OPTIONS}
+              onChange={ids => up({ entryHookExtraIds: ids })}
+            />
           )}
 
           {/* THE most common reason a hook looks dead. Both structure filters run in the
@@ -1008,6 +1093,17 @@ function CustomExitHookCard({ rules, up }: Pick<RegimeStepProps, 'rules' | 'up'>
             <p className="mt-1.5 text-[10px] text-amber-600 leading-snug">
               No hook selected — this setting has no effect until you pick one.
             </p>
+          )}
+
+          {hookId !== '' && (
+            <StackedHooksEditor
+              title="Also check"
+              hint="Every hook runs each bar; the first that wants out closes the trade (OR). An exit beats a veto; with no exit, the tightest stop any hook asks for is kept."
+              primaryId={hookId}
+              extraIds={rules.exitHookExtraIds ?? []}
+              options={EXIT_HOOK_OPTIONS}
+              onChange={ids => up({ exitHookExtraIds: ids })}
+            />
           )}
 
           {/* Gate mode is meaningless without something to gate: with both built-in signal

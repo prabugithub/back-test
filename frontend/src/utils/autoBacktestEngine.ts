@@ -38,6 +38,7 @@ import {
 } from './exitHook';
 import { getEntryHook } from '../strategies';
 import { getExitHook } from '../strategies/exits';
+import { allOfEntry, anyOfExit } from '../strategies/compose';
 // Stop-loss primitives live in a LEAF module so `src/strategies/*` can compute the same
 // prospective stop this engine will book without importing the engine (which would close a
 // runtime cycle — the engine value-imports `getEntryHook` above). See utils/stopLoss.ts.
@@ -294,6 +295,11 @@ export interface RegimeRules {
   // price levels, not opinions. Fills at bar close (or a hook-named price inside the bar),
   // exitReason EXIT_HOOK.
   exitHookMode?: ExitHookMode;
+  // Extra exit hooks STACKED on exitHookId (strategies/compose.ts anyOfExit): every hook runs,
+  // the first that wants out closes the trade, an exit beats a veto. Lets a new exit condition
+  // live in its own file without touching a setup that already works. Ignored without a
+  // primary exitHookId. Optional, undefined/[] is the identity state.
+  exitHookExtraIds?: string[];
 
   // ── Leg-pattern rule engine (utils/legPattern) ──────────────────────────────
   // An ORDERED, POSITIONAL shape over the recent leg sequence — "three bull legs of
@@ -331,6 +337,11 @@ export interface RegimeRules {
   // EVERY H/L count reaches the hook, including the H3+/L3+ the built-in chain can never
   // enter on. That is the point of the feature; the hook does its own trigger filtering.
   entryHookMode?: EntryHookMode;
+  // Extra entry hooks STACKED on entryHookId (strategies/compose.ts allOfEntry): ALL must
+  // pass, in order, primary first; the primary's side/qty/SL/target overrides win. Lets a new
+  // condition live in its own file without touching a setup that already works. Ignored
+  // without a primary entryHookId. Optional, undefined/[] is the identity state.
+  entryHookExtraIds?: string[];
 }
 
 // ─── Global config ────────────────────────────────────────────────────────────
@@ -1047,9 +1058,33 @@ export interface ResolvedHook {
 export function resolveEntryHook(rules: RegimeRules): ResolvedHook | null {
   const mode = rules.entryHookMode ?? 'off';
   if (mode !== 'gate' && mode !== 'replace') return null;
-  const id = rules.entryHookId ?? '';
-  if (!id) return null; // a mode with no hook chosen is still the identity state
-  return { mode, id, hook: getEntryHook(id) ?? null };
+  const ids = entryHookStackIds(rules);
+  if (ids.length === 0) return null; // a mode with no hook chosen is still the identity state
+  // Every id in the stack must resolve: one unknown id fails the whole stack closed, the same
+  // as an unknown primary, rather than quietly trading on the hooks that did resolve.
+  const parts = ids.map(id => ({ id, hook: getEntryHook(id) }));
+  const hook = parts.every(p => p.hook)
+    ? allOfEntry(parts as { id: string; hook: EntryHook }[])
+    : null;
+  return { mode, id: ids.join('+'), hook };
+}
+
+/** Primary entry hook id followed by its stacked extras (deduped, blanks dropped). Empty when
+ *  no primary is chosen — extras never run on their own. */
+export function entryHookStackIds(rules: RegimeRules): string[] {
+  return hookStackIds(rules.entryHookId, rules.entryHookExtraIds);
+}
+
+/** Exit-side twin of entryHookStackIds. */
+export function exitHookStackIds(rules: RegimeRules): string[] {
+  return hookStackIds(rules.exitHookId, rules.exitHookExtraIds);
+}
+
+function hookStackIds(primary: string | undefined, extras: string[] | undefined): string[] {
+  if (!primary) return [];
+  const out = [primary];
+  for (const id of extras ?? []) if (id && !out.includes(id)) out.push(id);
+  return out;
 }
 
 /** True when this regime consults a hook at all — used to widen the allowed H/L set. */
@@ -2205,9 +2240,14 @@ export interface ResolvedExitHook {
 export function resolveExitHook(rules: RegimeRules): ResolvedExitHook | null {
   const mode = rules.exitHookMode ?? 'off';
   if (mode !== 'gate' && mode !== 'replace') return null;
-  const id = rules.exitHookId ?? '';
-  if (!id) return null; // a mode with no hook chosen is still the identity state
-  return { mode, id, hook: getExitHook(id) ?? null };
+  const ids = exitHookStackIds(rules);
+  if (ids.length === 0) return null; // a mode with no hook chosen is still the identity state
+  // One unknown id fails the whole stack closed — see resolveEntryHook.
+  const parts = ids.map(id => ({ id, hook: getExitHook(id) }));
+  const hook = parts.every(p => p.hook)
+    ? anyOfExit(parts as { id: string; hook: ExitHook }[])
+    : null;
+  return { mode, id: ids.join('+'), hook };
 }
 
 /** True when this regime consults an exit hook at all. */

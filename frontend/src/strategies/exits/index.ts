@@ -26,6 +26,9 @@
  *
  *      Either way the SL/TP touch check and the Pivot Trailing Stop keep running: those are
  *      price levels, not opinions, and a hook that wants the trail off should turn it off.
+ *   4. To ADD a condition to a setup that already works, don't edit its file: write the new
+ *      hook in its own file, register it, and stack it under the primary in the UI
+ *      ("Also check" — first hook that wants out wins; see ../compose.ts).
  *
  * ── The one gotcha ───────────────────────────────────────────────────────────
  *

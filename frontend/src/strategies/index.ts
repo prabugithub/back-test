@@ -19,6 +19,9 @@
  *                    and can still override side/qty/SL/target
  *        'replace' — the entire built-in chain is skipped; every H/L signal bar goes
  *                    straight to your hook
+ *   4. To ADD a condition to a setup that already works, don't edit its file: write the new
+ *      hook in its own file, register it, and stack it under the primary in the UI
+ *      ("Also must pass" — all must accept; see ./compose.ts).
  *
  * ── Why a registry and not a function on the config ──────────────────────────
  *

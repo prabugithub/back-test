@@ -1,4 +1,4 @@
-import type { RegimeKey, RegimeRules } from '../../utils/autoBacktestEngine';
+import { entryHookStackIds, exitHookStackIds, type RegimeKey, type RegimeRules } from '../../utils/autoBacktestEngine';
 import { Chip, type ChipTone } from './Chip';
 import { getEntryHookLabel } from '../../strategies';
 import { getExitHookLabel } from '../../strategies/exits';
@@ -114,7 +114,7 @@ export function StrategySummaryBar({ regime, rules, onJumpToStep }: StrategySumm
       </Chip>
       {hookOn && (
         <Chip tone="purple" onClick={jump('entry')}>
-          Hook: {getEntryHookLabel(hookId) ?? hookId} ({hookMode})
+          Hook: {entryHookStackIds(rules).map(id => getEntryHookLabel(id) ?? id).join(' + ')} ({hookMode})
         </Chip>
       )}
       {maLabel && !bypassed && (
@@ -137,7 +137,7 @@ export function StrategySummaryBar({ regime, rules, onJumpToStep }: StrategySumm
           mode it is rather than implying they are stacked. */}
       {exitHookOn && (
         <Chip tone="purple" onClick={jump('exit')}>
-          Exit hook: {getExitHookLabel(exitHookId) ?? exitHookId} ({exitHookMode})
+          Exit hook: {exitHookStackIds(rules).map(id => getExitHookLabel(id) ?? id).join(' + ')} ({exitHookMode})
         </Chip>
       )}
     </div>

@@ -724,6 +724,26 @@ Either way the SL/TP touch check and the Pivot Trailing Stop keep running — th
 
 **Tests:** `npm run backtest:exithook` (94 assertions, incl. the climax-profit long/short/losing/threshold cases; double top/bottom detection: mirrored long/short, min and max gap, height-relative level tolerance, an undercut second bottom, a lower second top inside the trade, weak reversal; and `ctx.swings()`: alternation, true-extreme anchoring, window bounds, degree 2 ⊂ degree 1, memoization) — `off` and a mode with no id both byte-identical to baseline; the window contract and causality guarantees; the position view's derived fields; `exitHookLookback` honoured and clamped; `ctx.state` accumulating within a run then resetting; every fail-closed path; stop moves reaching booked trades and exiting through the normal SL machinery; and each shipped hook running clean over a full backtest. `npm run backtest:exit-smoke` covers the gate/replace/veto semantics inside the engine.
 
+### Stacking hooks — add a condition without touching a working setup
+
+To add an entry or exit condition to a setup that already works, write it in a **new file**, register it, and **stack** it on the primary hook. Both the Custom Entry Hook and the Custom Exit Hook cards show a second section once a primary hook is picked: **Also must pass** on the entry card, **Also check** on the exit card. **+ Add hook** adds a row, ✕ removes it. The primary dropdown and its file stay exactly as they were.
+
+| | Entry stack (AND) | Exit stack (OR) |
+|---|---|---|
+| Who runs | The primary first, then each extra in order. It stops at the first one that declines. | **Every** hook runs every bar. |
+| Result | A trade only when **all** of them accept. | The **first** hook that wants out closes the trade. An exit beats a veto. |
+| Overrides | Side, qty, SL and target come from the **primary**. An extra only fills a field the primary left empty, so a guard returning `true` never changes the trade. | If nothing exits but some hook returns `{ exit: false }`, that is a veto (Gate mode). The **tightest** stop any hook asked for is kept, plus the first target. |
+| A hook throws | No trade on that bar (fail closed). | Only that hook is skipped. Its error is added to the exit's detail, and the other hooks still exit. |
+
+- **Mode** (Gate / Replace) applies to the whole stack.
+- **Unregistered id anywhere in the stack**: the whole stack fails closed, exactly like an unknown primary. That means no entries, or no signal exits. The row turns red, and `__hook.doctor()` names the id.
+- **Trade reasons** show the full stack, e.g. `[hook:strong-trend-h1+chop-guard]`.
+- **State**: each stacked hook gets its own `ctx.state` (a sub-object per id), so two hooks using the same key cannot clash. A hook used **alone** still gets the run's shared state, unchanged.
+- **Caveat for stateful extras**: on a bar an earlier entry hook declines, later ones are not called. An extra keeping a cooldown or a counter only sees bars that got that far, and its `true` does not mean a trade was booked. Put stateful logic in the primary.
+- **No extras = no change.** A config without extras resolves to the very same hook function as before. Extras are ignored while no primary is picked, survive a preset switch, and are saved with the configuration.
+- The older hand-combined exits (`leg-decay-climax`, `leg-decay-climax-reversal`) stay registered for saved configs. Leg Decay plus a stacked Climax Reversal behaves the same as `leg-decay-climax-reversal`.
+- Code: `frontend/src/strategies/compose.ts` (`allOfEntry`, `anyOfExit`), built by `resolveEntryHook` / `resolveExitHook`. Config: `RegimeRules.entryHookExtraIds?` / `exitHookExtraIds?`.
+
 ### Pivot Sequence History & Pivot Gap
 
 Two per-regime filters alongside the single most-recent Pivot Seq filter above, both configured in the **Pivot Sequence History (last 4)** section:

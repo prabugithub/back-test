@@ -21,7 +21,13 @@ import { useSessionStore } from '../stores/sessionStore';
 import { getEntryHook } from '../strategies';
 import { getExitHook } from '../strategies/exits';
 import { hookProbeStore } from '../strategies/debug';
-import { resolveEntryHook, resolveExitHook, type RegimeKey } from './autoBacktestEngine';
+import {
+  entryHookStackIds,
+  exitHookStackIds,
+  resolveEntryHook,
+  resolveExitHook,
+  type RegimeKey,
+} from './autoBacktestEngine';
 
 function line(ok: boolean | null, label: string, fix?: string): void {
   const mark = ok === null ? '•' : ok ? '✅' : '❌';
@@ -49,8 +55,12 @@ function doctor(): void {
     if (!resolved) continue;
     console.log(`  ── regime "${k}" · mode ${resolved.mode} · id "${resolved.id}"`);
     line(r.enabled, '  regime enabled', `Turn "${k}" Active in the Market step.`);
-    line(!!getEntryHook(resolved.id), `  hook "${resolved.id}" is registered`,
-      'Not in ENTRY_HOOKS — this regime takes NO trades. Check src/strategies/index.ts.');
+    // Stacked hooks resolve as one id joined with '+'; check each part, since a single
+    // unknown id fails the whole stack closed.
+    for (const id of entryHookStackIds(r)) {
+      line(!!getEntryHook(id), `  hook "${id}" is registered`,
+        'Not in ENTRY_HOOKS — this regime takes NO trades. Check src/strategies/index.ts.');
+    }
     line((r.htStructureFilter ?? 'any') === 'any', `  HT Structure is Any (${r.htStructureFilter})`,
       'Runs BEFORE the hook — signals outside this structure never reach your code.');
     line((r.ltStructureFilter ?? 'any') === 'any', `  LT Structure is Any (${r.ltStructureFilter ?? 'any'})`,
@@ -130,8 +140,10 @@ function exitSection(s: ReturnType<typeof useSessionStore.getState>): void {
     const r = s.autoBacktestConfig[k];
     const resolved = resolveExitHook(r)!;
     console.log(`  ── regime "${k}" · mode ${resolved.mode} · id "${resolved.id}"`);
-    line(!!getExitHook(resolved.id), `  hook "${resolved.id}" is registered`,
-      'Not in EXIT_HOOKS — this regime runs NO signal exits. Check src/strategies/exits/index.ts.');
+    for (const id of exitHookStackIds(r)) {
+      line(!!getExitHook(id), `  hook "${id}" is registered`,
+        'Not in EXIT_HOOKS — this regime runs NO signal exits. Check src/strategies/exits/index.ts.');
+    }
     if (resolved.mode === 'gate') {
       const builtIns = (r.exitOnReversal ?? false) || (r.exitOnOppSignal ?? false);
       line(builtIns, '  a built-in signal exit is on for Gate mode to gate',

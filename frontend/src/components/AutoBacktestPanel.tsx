@@ -313,6 +313,8 @@ export function AutoBacktestPanel({ onNavigate, hidden }: AutoBacktestPanelProps
         entryHookMode: config[k].entryHookMode,
         exitHookId: config[k].exitHookId,
         exitHookMode: config[k].exitHookMode,
+        entryHookExtraIds: config[k].entryHookExtraIds,
+        exitHookExtraIds: config[k].exitHookExtraIds,
       };
     }
     setAutoBacktestConfig(next);
