@@ -1072,11 +1072,7 @@ export function evaluateAutoSignals(
   // bookkeeping. Owned by the caller (batch simulator / store action) because this function
   // is per-bar and stateless. Omitted, each bar gets a fresh one: hooks still work, but
   // ctx.state no longer carries between bars.
-  hookRunState?: HookRunState,
-  // Sides held shut by an exit hook's entry block (utils/entryBlock.ts) — e.g. no longs after
-  // a short was booked on a double bottom, until a bar closes above its neckline. Owned by
-  // the run loop for the same reason as hookRunState. Omitted = nothing blocked.
-  blocked?: { long: boolean; short: boolean }
+  hookRunState?: HookRunState
 ): AutoSignal | null {
   if (currentIndex < 50 || candles.length < 51) return null;
 
@@ -1254,8 +1250,7 @@ export function evaluateAutoSignals(
         getEntryMetrics(hookEnv.legWindowFor(hookEnv.triggerFor(regimeRules))), pivots, currentIndex, candles, atr,
         pivotSeq, ltMarket, htMarket, regime, extras
       );
-      if (signal && (!tlSetup || tlSetup[signal.type === 'BUY' ? 'long' : 'short'])
-        && !(signal.type === 'BUY' ? blocked?.long : blocked?.short)) {
+      if (signal && (!tlSetup || tlSetup[signal.type === 'BUY' ? 'long' : 'short'])) {
         return stampTrendline(signal, candles, currentIndex, tlState, tlSetup);
       }
       continue; // 'replace' never falls through to the built-in chain
@@ -1285,12 +1280,12 @@ export function evaluateAutoSignals(
 
     const gate = resolvedHook?.mode === 'gate' ? resolvedHook : null;
 
-    if (regimeRules.direction !== 'SHORT_ONLY' && !blocked?.long && (!tlSetup || tlSetup.long)) {
+    if (regimeRules.direction !== 'SHORT_ONLY' && (!tlSetup || tlSetup.long)) {
       const signal = evalLong(regimeRules, currentCandle, currentPivot, currentAbMarker, pivots, ema21, ema60, atr, currentIndex, candles, pivotSeq, ltMarket, htMarket, regime, entryMetrics, legPatternCtx, gate, hookEnv, extras, tlSetup?.long ?? null);
       if (signal) return stampTrendline(signal, candles, currentIndex, tlState, tlSetup);
     }
 
-    if (regimeRules.direction !== 'LONG_ONLY' && !blocked?.short && (!tlSetup || tlSetup.short)) {
+    if (regimeRules.direction !== 'LONG_ONLY' && (!tlSetup || tlSetup.short)) {
       const signal = evalShort(regimeRules, currentCandle, currentPivot, currentAbMarker, pivots, ema21, ema60, atr, currentIndex, candles, pivotSeq, ltMarket, htMarket, regime, entryMetrics, legPatternCtx, gate, hookEnv, extras, tlSetup?.short ?? null);
       if (signal) return stampTrendline(signal, candles, currentIndex, tlState, tlSetup);
     }
@@ -2228,9 +2223,6 @@ export interface AutoExitDecision {
    *  are none. Takes effect from the NEXT bar — this runs after the touch check. */
   adjust: { stopLoss?: number; target?: number } | null;
   state: { exitWithTrendSeen: boolean; exitAgainstBars: number };
-  /** Entry block an exit hook asked for alongside its exit (see utils/entryBlock.ts). Only
-   *  ever set with an EXIT_HOOK exit; absent on every built-in path. */
-  blockEntry?: { side: 'long' | 'short'; level: number; reason: string } | null;
 }
 
 // Phase 2 — signal exits, evaluated on bar close (fill = candles[currentIndex].close, or a
@@ -2330,7 +2322,6 @@ export function evaluateAutoExitSignal(
         exit: { reason: 'EXIT_HOOK', detail: normalized.exit.detail, fillPrice: normalized.exit.fillPrice },
         adjust: normalized.adjust,
         state,
-        blockEntry: normalized.blockEntry,
       };
     }
     // An explicit `{ exit: false }` vetoes whatever the built-ins decided. A silent `false`

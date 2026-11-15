@@ -16,11 +16,10 @@
  *
  * The climax bar itself never exits — the scan starts one bar before the current one.
  *
- * Second rule, same guards: the double top / bottom reversal from climax.ts, unchanged —
- * including its entry block (no opposite-side entry until a bar closes beyond the neckline).
+ * Second rule, same guards: the double top / bottom reversal from climax.ts, unchanged.
  */
 import type { ExitHook, ExitHookContext, ExitHookResult } from '../../utils/exitHook';
-import { climaxReversalSettings, doubleTopExitDecision, isClimaxBar } from './climax';
+import { climaxReversalSettings, doubleTopReason, isClimaxBar } from './climax';
 import { legDecayExit } from './legDecay';
 
 function climaxReversalReason(ctx: ExitHookContext): string | null {
@@ -48,9 +47,8 @@ export const climaxReversalExit: ExitHook = ctx => {
   if (position.barsInTrade === null || position.barsInTrade < 1) return false;
   if (position.openPoints <= 0) return false;
 
-  const reason = climaxReversalReason(ctx);
-  if (reason) return { reason };
-  return doubleTopExitDecision(ctx) ?? false;
+  const reason = climaxReversalReason(ctx) ?? doubleTopReason(ctx);
+  return reason ? { reason } : false;
 };
 
 /** Climax Reversal first, then Leg Decay — a regime holds only one exit hook. */

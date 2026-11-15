@@ -56,8 +56,6 @@ export interface NormalizedExit {
   /** True when the hook explicitly vetoed a pending built-in exit (`{ exit: false }`).
    *  Distinct from a silent `false`, which lets the pending exit stand. */
   veto: boolean;
-  /** Entry block to set — only ever non-null alongside an exit. */
-  blockEntry: { side: 'long' | 'short'; level: number; reason: string } | null;
 }
 
 export interface RunExitHookArgs {
@@ -74,7 +72,7 @@ export interface RunExitHookArgs {
  */
 export function runExitHook(args: RunExitHookArgs): NormalizedExit {
   const { hook, ctx, logs, runState } = args;
-  const nothing: NormalizedExit = { exit: null, adjust: null, veto: false, blockEntry: null };
+  const nothing: NormalizedExit = { exit: null, adjust: null, veto: false };
 
   // Counted before the call, so a hook that throws on its very first bar still registers as
   // having been reached — otherwise "0 calls" would wrongly point at the configuration.
@@ -96,7 +94,7 @@ export function runExitHook(args: RunExitHookArgs): NormalizedExit {
 
   const bar = ctx.candle;
   if (result === true) {
-    return { exit: { fillPrice: bar.close, detail: detailFrom(undefined, logs) }, adjust: null, veto: false, blockEntry: null };
+    return { exit: { fillPrice: bar.close, detail: detailFrom(undefined, logs) }, adjust: null, veto: false };
   }
 
   const decision: ExitHookDecision = result;
@@ -139,42 +137,27 @@ export function runExitHook(args: RunExitHookArgs): NormalizedExit {
   // Defaults to TRUE, matching the entry hook's `take`. A hook that only meant to trail must
   // say `exit: false`; the registry descriptions and types.ts both call this out.
   if (decision.exit === false) {
-    return { exit: null, adjust: adjustOut, veto: true, blockEntry: null };
+    return { exit: null, adjust: adjustOut, veto: true };
   }
 
   let fillPrice = close;
   if (decision.price !== undefined) {
     if (!isPositiveFinite(decision.price)) {
       reject(runState, `price must be a positive number, got ${decision.price}`);
-      return { exit: null, adjust: adjustOut, veto: false, blockEntry: null };
+      return { exit: null, adjust: adjustOut, veto: false };
     }
     // A price the bar never traded through could not have filled.
     if (decision.price > bar.high || decision.price < bar.low) {
       reject(runState, `price ${decision.price} outside bar range [${bar.low}, ${bar.high}]`);
-      return { exit: null, adjust: adjustOut, veto: false, blockEntry: null };
+      return { exit: null, adjust: adjustOut, veto: false };
     }
     fillPrice = decision.price;
-  }
-
-  // ── Entry block ─────────────────────────────────────────────────────────────
-  // Only meaningful with an exit, so validated here, after every path that holds.
-  let blockEntry: NormalizedExit['blockEntry'] = null;
-  const b = decision.blockEntry;
-  if (b !== undefined) {
-    if (!b || (b.side !== 'long' && b.side !== 'short')) {
-      reject(runState, `blockEntry.side must be 'long' or 'short'`);
-    } else if (!isPositiveFinite(b.level)) {
-      reject(runState, `blockEntry.level must be a positive number, got ${b.level}`);
-    } else {
-      blockEntry = { side: b.side, level: b.level, reason: typeof b.reason === 'string' && b.reason ? b.reason : 'exit hook' };
-    }
   }
 
   return {
     exit: { fillPrice, detail: detailFrom(decision.reason, logs) },
     adjust: adjustOut,
     veto: false,
-    blockEntry,
   };
 }
 
