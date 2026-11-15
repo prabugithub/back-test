@@ -342,6 +342,40 @@ export function averageBarRanges(samples: BarRangeSample[]): {
     };
 }
 
+/**
+ * Size of the candle at `idx` relative to the mean of the `lookback` bars *before* it
+ * (the candle itself is excluded so it isn't compared against itself). Range = high-low,
+ * body = |close-open|. Ratios are undefined when no prior bars exist or the average is 0.
+ * `barsUsed` < lookback near the start of the dataset.
+ */
+export interface CandleSizeStats {
+    range: number;
+    body: number;
+    avgRange?: number;
+    avgBody?: number;
+    rangeX?: number;
+    bodyX?: number;
+    barsUsed: number;
+    lookback: number;
+}
+
+export function candleSizeVsAverage(candles: Candle[], idx: number, lookback: number): CandleSizeStats {
+    const c = candles[idx];
+    const range = c.high - c.low;
+    const body = Math.abs(c.close - c.open);
+    const prior = idx > 0 ? calculateBarRanges(candles, idx - 1, lookback) : [];
+    const barsUsed = prior.length;
+    const avgRange = averageBarRanges(prior).barRangeAvg;
+    let avgBody: number | undefined;
+    if (barsUsed > 0) {
+        let sum = 0;
+        for (let i = idx - barsUsed; i < idx; i++) sum += Math.abs(candles[i].close - candles[i].open);
+        avgBody = sum / barsUsed;
+    }
+    const ratio = (v: number, avg?: number) => (avg !== undefined && avg > 0 ? v / avg : undefined);
+    return { range, body, avgRange, avgBody, rangeX: ratio(range, avgRange), bodyX: ratio(body, avgBody), barsUsed, lookback };
+}
+
 export interface BarQualitySample {
     brr: number; // body-to-range ratio: |close-open| / (high-low) — high = trend bar, low = doji/spinning top
     clv: number; // close location value: (close-low) / (high-low) — near 1 = closed near high (bullish), near 0 = closed near low (bearish)

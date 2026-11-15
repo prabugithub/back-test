@@ -28,6 +28,7 @@ import { ScreenshotSaveDialog } from './ScreenshotSaveDialog';
 import type { Trade, LegSegment } from '../types';
 import { formatCurrency } from '../utils/formatters';
 import { exitReasonBadge, parseEntryReason } from '../utils/tradeAnalysis';
+import { candleSizeVsAverage, type CandleSizeStats } from '../utils/pivotAnalysis';
 import { X } from 'lucide-react';
 
 export interface ChartCallbacks {
@@ -84,7 +85,9 @@ export function AdvancedChart({
   const [pendingTextPoint, setPendingTextPoint] = useState<Point | null>(null);
   const [pendingCalloutPoints, setPendingCalloutPoints] = useState<{ p1: Point, p2: Point } | null>(null);
   const [isUploadingScreenshot, setIsUploadingScreenshot] = useState(false);
-  const [execPopup, setExecPopup] = useState<{ x: number; y: number; trades: Trade[] } | null>(null);
+  const [execPopup, setExecPopup] = useState<{ x: number; y: number; trades: Trade[]; candleStats?: CandleSizeStats } | null>(null);
+  // Window for the click popup's "candle size vs average" (Session Settings → Bar range lookback).
+  const barRangeLookback = useSessionStore((s) => s.autoBacktestConfig.barRangeLookback ?? 20);
   // A leg/pullback segment the user clicked in the Trade Record popup's Leg Sequence strip —
   // highlighted on the chart (canvas band over its candles) and expanded to its tracked values.
   const [selectedSegment, setSelectedSegment] = useState<LegSegment | null>(null);
@@ -758,15 +761,17 @@ export function AdvancedChart({
         return;
       }
       const clickedTrades = useSessionStore.getState().trades.filter((t) => t.timestamp === param.time);
-      if (clickedTrades.length === 0) {
+      const idx = visibleCandles.findIndex((c) => c.timestamp === param.time);
+      const candleStats = idx !== -1 ? candleSizeVsAverage(visibleCandles, idx, barRangeLookback) : undefined;
+      if (clickedTrades.length === 0 && !candleStats) {
         setExecPopup(null);
         return;
       }
-      setExecPopup({ x: param.point.x, y: param.point.y, trades: clickedTrades });
+      setExecPopup({ x: param.point.x, y: param.point.y, trades: clickedTrades, candleStats });
     };
     chart.subscribeClick(handleClick);
     return () => chart.unsubscribeClick(handleClick);
-  }, [chart, isSecondary, activeTool]);
+  }, [chart, isSecondary, activeTool, visibleCandles, barRangeLookback]);
 
   // Close the execution popup once playback moves — it refers to a specific candle click,
   // not a persistent state, so stepping/jumping should not leave it stranded on screen.
@@ -1511,21 +1516,43 @@ export function AdvancedChart({
         {execPopup && (
           <div
             ref={execPopupRef}
-            className="absolute bg-white border border-gray-200 rounded-lg shadow-xl text-xs w-[26rem] max-h-[28rem] overflow-y-auto"
+            className={`absolute bg-white border border-gray-200 rounded-lg shadow-xl text-xs overflow-y-auto ${execPopup.trades.length > 0 ? 'w-[26rem] max-h-[28rem]' : 'w-64'}`}
             style={{
-              left: Math.min(execPopup.x + 12, (chartContainerRef.current?.clientWidth ?? 800) - 440),
-              top: Math.min(execPopup.y + 12, (chartContainerRef.current?.clientHeight ?? 500) - 400),
+              left: Math.min(execPopup.x + 12, (chartContainerRef.current?.clientWidth ?? 800) - (execPopup.trades.length > 0 ? 440 : 272)),
+              top: Math.min(execPopup.y + 12, (chartContainerRef.current?.clientHeight ?? 500) - (execPopup.trades.length > 0 ? 400 : 120)),
               zIndex: 300,
             }}
           >
             <div className="flex items-center justify-between px-3 py-2 border-b bg-gray-50 sticky top-0">
               <span className="font-bold text-gray-700">
-                Trade Record{execPopup.trades.length > 1 ? `s (${execPopup.trades.length})` : ''}
+                {execPopup.trades.length === 0 ? 'Candle' : <>Trade Record{execPopup.trades.length > 1 ? `s (${execPopup.trades.length})` : ''}</>}
               </span>
               <button onClick={() => { setExecPopup(null); setSelectedSegment(null); }} className="text-gray-400 hover:text-gray-700">
                 <X size={14} />
               </button>
             </div>
+            {execPopup.candleStats && (() => {
+              const cs = execPopup.candleStats;
+              const f2 = (v?: number) => (v === undefined || !Number.isFinite(v) ? '—' : v.toFixed(2));
+              const xCls = (x?: number) => x === undefined ? 'text-gray-400' : x >= 1.5 ? 'font-bold text-blue-700' : x < 0.5 ? 'text-gray-500' : 'text-gray-800';
+              const row = (label: string, v: number, avg?: number, x?: number) => (
+                <div className="grid grid-cols-[3rem_1fr_1fr_3.5rem] gap-1 items-baseline">
+                  <span className="text-gray-500">{label}</span>
+                  <span className="font-mono text-gray-800">{f2(v)}</span>
+                  <span className="font-mono text-gray-500">avg {f2(avg)}</span>
+                  <span className={`font-mono text-right ${xCls(x)}`}>{x === undefined ? '—' : `${x.toFixed(2)}×`}</span>
+                </div>
+              );
+              return (
+                <div className="px-3 py-2 border-b space-y-0.5">
+                  <div className="text-[10px] uppercase tracking-wide text-gray-400 mb-1">
+                    Size vs last {cs.lookback} bars{cs.barsUsed < cs.lookback ? ` (only ${cs.barsUsed} available)` : ''}
+                  </div>
+                  {row('Range', cs.range, cs.avgRange, cs.rangeX)}
+                  {row('Body', cs.body, cs.avgBody, cs.bodyX)}
+                </div>
+              );
+            })()}
             <div className="divide-y divide-gray-100">
               {execPopup.trades.map((t) => (
                 <div key={t.id} className="p-3">
