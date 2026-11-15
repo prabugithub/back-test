@@ -422,10 +422,11 @@ export function SessionSettingsPanel({ config, onChange, isOpen, onClose, onOpen
                   className="w-12 px-1.5 py-1 text-xs border rounded text-center"
                 />
               </div>
-              {/* Double top/bottom rule of the same hook. Both tops must sit inside
-                  ctx.candles, so the gap must stay below Exit Hook Candles. */}
+              {/* Double top/bottom rule of the same hook (Climax Profit and Climax Reversal).
+                  Tops/bottoms are the engine's pivot swings, and both must sit inside
+                  ctx.candles, so Max Gap + the trade's length must stay below Exit Hook Candles. */}
               <div className="flex items-center justify-between gap-1">
-                <span className="text-[10px] text-gray-500" title="Climax Profit exit hook: fewest bars between the two tops (long) or two bottoms (short) of a double top / bottom">Double Top Gap</span>
+                <span className="text-[10px] text-gray-500" title="Climax exit hooks: fewest bars between the two tops (long) or two bottoms (short) of a double top / bottom">Double Top Gap</span>
                 <input
                   type="number" min={5} max={1000}
                   value={config.doubleTopMinGap ?? DEFAULT_CLIMAX_EXIT.doubleTopMinGap}
@@ -434,11 +435,20 @@ export function SessionSettingsPanel({ config, onChange, isOpen, onClose, onOpen
                 />
               </div>
               <div className="flex items-center justify-between gap-1">
-                <span className="text-[10px] text-gray-500" title="Climax Profit exit hook: how far apart the two tops / bottoms may be and still count as the same level, in multiples of ATR">Double Top Tol ATR</span>
+                <span className="text-[10px] text-gray-500" title="Climax exit hooks: most bars between the two tops / bottoms — how far back the first one is searched. Keep below Exit Hook Candles">Double Top Max Gap</span>
                 <input
-                  type="number" min={0.1} max={5} step={0.1}
-                  value={config.doubleTopTolAtr ?? DEFAULT_CLIMAX_EXIT.doubleTopTolAtr}
-                  onChange={e => onChange({ doubleTopTolAtr: Number(e.target.value) })}
+                  type="number" min={10} max={1000}
+                  value={config.doubleTopMaxGap ?? DEFAULT_CLIMAX_EXIT.doubleTopMaxGap}
+                  onChange={e => onChange({ doubleTopMaxGap: Number(e.target.value) })}
+                  className="w-12 px-1.5 py-1 text-xs border rounded text-center"
+                />
+              </div>
+              <div className="flex items-center justify-between gap-1">
+                <span className="text-[10px] text-gray-500" title="Climax exit hooks: how far apart the two tops / bottoms may be and still count as the same level, as a fraction of the pattern height (higher top to neckline). 0.2 = within 20% of the height, so a small undercut / shortfall still counts">Double Top Tol</span>
+                <input
+                  type="number" min={0.05} max={1} step={0.05}
+                  value={config.doubleTopTolFrac ?? DEFAULT_CLIMAX_EXIT.doubleTopTolFrac}
+                  onChange={e => onChange({ doubleTopTolFrac: Number(e.target.value) })}
                   className="w-12 px-1.5 py-1 text-xs border rounded text-center"
                 />
               </div>

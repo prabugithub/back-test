@@ -426,8 +426,9 @@ console.log('\n[9] climax profit exit');
 
 console.log('\n[10] double top / bottom exit');
 {
-  // Piecewise-linear close path through [bar, price] waypoints; every bar's range is its
-  // body ± 0.5, so no bar is anywhere near a 4x climax.
+  // Piecewise-linear path through [bar, price] waypoints plus a small 6-bar zigzag, so the
+  // engine's pivot detector fires and ctx.swings() has points to work with. Every bar's range
+  // is its body ± 0.5, so no bar is anywhere near a 4x climax.
   const fromWaypoints = (pts: [number, number][], mirror = false): Candle[] => {
     const base = Date.UTC(2026, 0, 5, 3, 45, 0) / 1000;
     const n = pts[pts.length - 1][0] + 1;
@@ -441,23 +442,24 @@ console.log('\n[10] double top / bottom exit');
     };
     const c: Candle[] = [];
     for (let i = 0; i < n; i++) {
-      const raw = at(i);
+      const raw = at(i) + 1.2 * Math.sin((2 * Math.PI * i) / 6);
       const close = mirror ? 300 - raw : raw;
       const open = i === 0 ? close : c[i - 1].close;
       c.push({ timestamp: base + i * 60, open, close, high: Math.max(open, close) + 0.5, low: Math.min(open, close) - 0.5, volume: 1000 });
     }
     return c;
   };
-  const ENTRY = 80;
-  const dtCfg = cfg({ exitHookMode: 'replace', exitHookId: 'climax-profit' });
-  const firstExit = (c: Candle[], qty: number, conf = dtCfg) => {
-    const p = { quantity: qty, averagePrice: c[ENTRY].close, entryBarIndex: ENTRY, entryRegime: 'uptrend' as const };
-    for (let i = ENTRY + 1; i < c.length; i++) {
+  const dtRules = { exitHookMode: 'replace', exitHookId: 'climax-profit' } as const;
+  const dtCfg = cfg(dtRules, { doubleTopMinGap: 50 });
+  const firstExit = (c: Candle[], qty: number, conf = dtCfg, entry = 80) => {
+    const p = { quantity: qty, averagePrice: c[entry].close, entryBarIndex: entry, entryRegime: 'uptrend' as const };
+    for (let i = entry + 1; i < c.length; i++) {
       const r = evaluateAutoExitSignal(c, i, p, conf);
       if (r.exit) return { bar: i, detail: r.exit.detail };
     }
     return null;
   };
+  const isDouble = (r: { detail: string } | null) => r !== null && r.detail.startsWith('double ');
 
   // Tops at bars ~40 and ~100 (60 apart), neck ~110 at bar 70, long entered at 80 on the
   // way up to the second top, then a steady fall back toward the neck.
@@ -471,19 +473,69 @@ console.log('\n[10] double top / bottom exit');
   assert(bottom?.bar === top?.bar, '…on the same bar as the long mirror');
 
   const closeTops: [number, number][] = [[0, 100], [70, 130], [85, 110], [100, 130], [125, 105]];
-  const close = firstExit(fromWaypoints(closeTops), 1);
-  assert(close === null || !close.detail.startsWith('double top'), 'tops 30 bars apart are not a double top (min gap 50)');
+  assert(!isDouble(firstExit(fromWaypoints(closeTops), 1)), 'tops 30 bars apart are not a double top (min gap 50)');
 
+  // 8 points apart on a ~20-point pattern = 40% of the height, over the 0.2 default.
   const mismatch: [number, number][] = [[0, 100], [40, 122], [70, 110], [100, 130], [125, 105]];
-  const mm = firstExit(fromWaypoints(mismatch), 1);
-  assert(mm === null || !mm.detail.startsWith('double top'), 'tops 8 points apart are not the same level');
+  assert(!isDouble(firstExit(fromWaypoints(mismatch), 1)), 'tops 40% of the pattern height apart are not the same level');
 
   const weak: [number, number][] = [[0, 100], [40, 130], [70, 110], [100, 130], [104, 127], [125, 127]];
   assert(firstExit(fromWaypoints(weak), 1) === null, 'a shallow pullback off the second top is not a strong reversal');
 
-  const gapCfg = cfg({ exitHookMode: 'replace', exitHookId: 'climax-profit' }, { doubleTopMinGap: 80 });
-  const gapped = firstExit(fromWaypoints(DT), 1, gapCfg);
-  assert(gapped === null || !gapped.detail.startsWith('double top'), 'Session Settings Double Top Gap is honoured');
+  const gapped = firstExit(fromWaypoints(DT), 1, cfg(dtRules, { doubleTopMinGap: 80 }));
+  assert(!isDouble(gapped), 'Session Settings Double Top Gap is honoured');
+
+  const capped = firstExit(fromWaypoints(DT), 1, cfg(dtRules, { doubleTopMinGap: 30, doubleTopMaxGap: 45 }));
+  assert(!isDouble(capped), 'Session Settings Double Top Max Gap is honoured (tops 60 apart, max 45)');
+
+  // Second bottom undercuts the first by ~3 points on a ~23-point pattern (~13%) — the NIFTY
+  // 2025-12-11 shape that the old ATR tolerance rejected.
+  const undercut: [number, number][] = [[0, 100], [40, 130], [70, 110], [100, 133], [125, 105]];
+  const uc = firstExit(fromWaypoints(undercut, true), -1);
+  assert(uc !== null && uc.detail.startsWith('double bottom:'), `a second bottom that undercuts the first a little still counts (${uc?.detail})`);
+
+  // Both tops inside the trade, the second ~3 points LOWER: the old "best extreme since entry"
+  // rule took the first top as top 2 and never saw this one.
+  const lower: [number, number][] = [[0, 100], [20, 112], [40, 133], [70, 110], [100, 130], [125, 105]];
+  const lo = firstExit(fromWaypoints(lower), 1, dtCfg, 20);
+  assert(lo !== null && lo.detail.startsWith('double top:'), `a lower second top inside the trade counts (${lo?.detail})`);
+}
+
+// ─── 11. ctx.swings() ───────────────────────────────────────────────────────────
+
+console.log('\n[11] ctx.swings()');
+{
+  // Slow 60-bar cycle (the major swings) with a fast 12-bar wiggle on top (the minor ones).
+  // The shared CANDLES wave drifts up, so every high beats the last and has no major swings.
+  const base = Date.UTC(2026, 0, 5, 3, 45, 0) / 1000;
+  const SW: Candle[] = [];
+  for (let i = 0; i < 800; i++) {
+    const close = 20000 + 30 * Math.sin((2 * Math.PI * i) / 60) + 6 * Math.sin((2 * Math.PI * i) / 12);
+    const open = i === 0 ? close : SW[i - 1].close;
+    SW.push({ timestamp: base + i * 60, open, close, high: Math.max(open, close) + 0.5, low: Math.min(open, close) - 0.5, volume: 1000 });
+  }
+  let seen: ExitHookContext | null = null;
+  registerExitHook('xsmoke-swings', {
+    label: 'swings',
+    hook: ctx => { if (ctx.absoluteIndex === 700) seen = ctx; return false; },
+  });
+  const conf = cfg({ exitHookMode: 'replace', exitHookId: 'xsmoke-swings' });
+  const p = { quantity: 1, averagePrice: SW[600].close, entryBarIndex: 600, entryRegime: 'uptrend' as const };
+  for (let i = 601; i <= 700; i++) evaluateAutoExitSignal(SW, i, p, conf);
+  const ctx = seen as ExitHookContext | null;
+  assert(ctx !== null, 'hook reached on bar 700');
+  if (ctx) {
+    const s1 = ctx.swings();
+    const s2 = ctx.swings(2);
+    assert(s1.length > 10, `degree 1 has swing points (${s1.length})`);
+    assert(s1.every((s, k) => k === 0 || s.type !== s1[k - 1].type), 'degree 1 alternates high / low');
+    assert(s1.every(s => s.price === (s.type === 'high' ? SW[s.barIndex].high : SW[s.barIndex].low)),
+      'each point sits on its bar\'s true high / low');
+    assert(s1.every(s => s.barIndex <= 700 && s.barIndex >= 700 - ctx.candles.length + 1), 'points lie inside the hook window, none past the current bar');
+    const ids = new Set(s1.map(s => `${s.type}@${s.barIndex}`));
+    assert(s2.length > 0 && s2.length < s1.length && s2.every(s => ids.has(`${s.type}@${s.barIndex}`)), `degree 2 is a subset of degree 1 (${s2.length})`);
+    assert(ctx.swings() === s1, 'memoized per degree');
+  }
 }
 
 console.log(`\n${passed} passed, ${failed} failed`);

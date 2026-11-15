@@ -5,19 +5,21 @@
 // the experimental AdvancedChart layer. Pure and side-effect free; never imports the engine.
 
 import type { Candle, LegSegment } from '../../types';
-import { DEFAULT_MIN_PIVOT_GAP_BARS, MIN_PIVOT_GAP_BARS_MAX, MIN_PIVOT_GAP_BARS_MIN, getAlBrooksRunUpTo } from '../indicators';
+import { DEFAULT_MIN_PIVOT_GAP_BARS, MIN_PIVOT_GAP_BARS_MAX, MIN_PIVOT_GAP_BARS_MIN, getAlBrooksRunUpTo, getPivotPointsUpTo } from '../indicators';
 import { buildLegSequence } from '../legSequence';
 import { resolveStructureParams, type StructureConfig } from './params';
 import { buildStructureTimeline } from './timeline';
+import { swingLevels } from './swingPoints';
 import {
   findTrendlineSetup, findTrendlinesAt, resolveTrendlineParams, trendStrength,
   type TrendlineConfig, type TrendlineSetup, type TrendlineSetupKind, type TrendlineState, type TrendStrength,
 } from './trendlines';
-import type { StructureSegment, StructureState } from './types';
+import type { StructureSegment, StructureState, SwingPoint } from './types';
 
 export * from './types';
 export { STRUCTURE_PARAM_DEFS, resolveStructureParams, type StructureConfig, type StructureParams } from './params';
 export { buildStructureTimeline } from './timeline';
+export { swingLevels, pivotsToSwings, reanchorSwings, raiseDegree } from './swingPoints';
 export {
   TRENDLINE_PARAM_DEFS, resolveTrendlineParams, trendlinePriceAt, findTrendlinesAt, trendStrength, findTrendlineSetup,
   type Trendline, type TrendlineState, type TrendlineConfig, type TrendlineParams,
@@ -44,6 +46,27 @@ export function getStructureTimeline(candles: Candle[], config: Partial<Structur
 export function getStructureAt(candles: Candle[], index: number, config: Partial<StructureConfig>): StructureState | null {
   if (index < 0 || index >= candles.length) return null;
   return getStructureTimeline(candles, config)[index] ?? null;
+}
+
+/** Highest swing degree ctx.swings() serves (same bound as Trendlines → Swing degree). */
+export const MAX_SWING_DEGREE = 4;
+
+/**
+ * Swing points as of bar `index` (look-ahead safe), built from the engine pivots that fired
+ * on bars [fromBar, index]. Degree 1 = every pivot swing, 2+ = major swings (swing of
+ * swings). Each point is re-anchored to the true high/low of its swing; bar indices are
+ * absolute. The newest point of a degree ≥ 2 waits until the next same-type swing confirms
+ * it. Oldest first.
+ */
+export function getSwingPointsAt(
+  candles: Candle[], index: number, fromBar: number, config: Partial<StructureConfig>, degree = 1,
+): SwingPoint[] {
+  if (index < 0 || index >= candles.length) return [];
+  const d = Math.min(MAX_SWING_DEGREE, Math.max(1, Math.floor(Number.isFinite(degree) ? degree : 1)));
+  const pivots = getPivotPointsUpTo(candles, index, gapOf(config));
+  let lo = 0;
+  while (lo < pivots.length && pivots[lo].barIndex < fromBar) lo++;
+  return swingLevels(candles, pivots.slice(lo), d)[d - 1];
 }
 
 /** Major pivot trendlines as of bar `index` (look-ahead safe). Null outside the series. */

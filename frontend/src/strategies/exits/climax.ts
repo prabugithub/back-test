@@ -19,9 +19,10 @@
  *
  * Second rule, same guards: a DOUBLE TOP that reverses strongly closes an in-profit long, a
  * DOUBLE BOTTOM closes an in-profit short. See `doubleTopReason` for the exact definition
- * (Session Settings → Double Top Gap / Tol ATR / Reversal).
+ * (Session Settings → Double Top Gap / Max Gap / Tol / Reversal).
  */
 import type { ExitHook, ExitHookContext, ExitHookResult } from '../../utils/exitHook';
+import type { SwingPoint } from '../../utils/marketStructure';
 import { legDecayExit } from './legDecay';
 
 /**
@@ -36,8 +37,11 @@ export const DEFAULT_CLIMAX_EXIT = {
   climaxExitMultiple: 4,
   /** Fewest bars between the two tops / bottoms of a double top / bottom. */
   doubleTopMinGap: 25,
-  /** How far apart the two tops / bottoms may be and still count as the same level, in ATR. */
-  doubleTopTolAtr: 0.5,
+  /** Most bars between them — how far back the first top / bottom is searched. */
+  doubleTopMaxGap: 200,
+  /** How far apart the two tops / bottoms may be and still count as the same level, as a
+   *  fraction of the pattern's height (higher top → neckline). */
+  doubleTopTolFrac: 0.2,
   /** Strong reversal: fraction of the way from the second top back to the neckline the
    *  close must have travelled (1 = a neckline break). */
   doubleTopReversalFrac: 0.5,
@@ -89,13 +93,16 @@ function settings(ctx: ExitHookContext): { lookback: number; multiple: number } 
 }
 
 export function doubleTopSettings(c: {
-  doubleTopMinGap?: number; doubleTopTolAtr?: number; doubleTopReversalFrac?: number;
-}): { minGap: number; tolAtr: number; reversalFrac: number } {
+  doubleTopMinGap?: number; doubleTopMaxGap?: number; doubleTopTolFrac?: number; doubleTopReversalFrac?: number;
+}): { minGap: number; maxGap: number; tolFrac: number; reversalFrac: number } {
   const d = DEFAULT_CLIMAX_EXIT;
   const pos = (v: number | undefined, def: number) => (Number.isFinite(v) && (v as number) > 0 ? (v as number) : def);
+  const minGap = Number.isFinite(c.doubleTopMinGap) ? Math.max(2, Math.floor(c.doubleTopMinGap as number)) : d.doubleTopMinGap;
+  const maxGap = Number.isFinite(c.doubleTopMaxGap) ? Math.floor(c.doubleTopMaxGap as number) : d.doubleTopMaxGap;
   return {
-    minGap: Number.isFinite(c.doubleTopMinGap) ? Math.max(2, Math.floor(c.doubleTopMinGap as number)) : d.doubleTopMinGap,
-    tolAtr: pos(c.doubleTopTolAtr, d.doubleTopTolAtr),
+    minGap,
+    maxGap: Math.max(minGap, maxGap),
+    tolFrac: pos(c.doubleTopTolFrac, d.doubleTopTolFrac),
     reversalFrac: pos(c.doubleTopReversalFrac, d.doubleTopReversalFrac),
   };
 }
@@ -111,89 +118,108 @@ function climaxReason(ctx: ExitHookContext): string | null {
 }
 
 /**
- * Double top against a long, double bottom against a short.
- *
- * Written once for the TOP case in a mirrored price space: `x` is the bar's extreme in the
- * trade's favour (high for a long, −low for a short) and `y` its other end (low / −high).
- * In that space a double bottom IS a double top, so one scan serves both sides.
- *
- *   • top 2  — the trade's best extreme since entry (so the second test happened in-trade)
- *   • top 1  — the nearest earlier swing extreme (beats both neighbours) at least
- *              `doubleTopMinGap` bars before top 2, within `doubleTopTolAtr` × ATR of it;
- *              the scan stops at any bar beyond top 2 + tolerance, so nothing in between
- *              may take out the level
- *   • neck   — the deepest opposite extreme between the two tops; the pattern must be at
- *              least two tolerances tall, or it is a flat range rather than two tests
- *   • strong — this bar closes against the trade (bear bar for a long) and has retraced at
- *              least `doubleTopReversalFrac` of the way from top 2 to the neck
- */
-/**
- * A double top (top = true) or double bottom (top = false) whose SECOND top is bar `top2`,
- * in the mirrored price space described on `doubleTopReason`: `x1` / `x2` / `neckX` are
- * highs and lows for a top, NEGATED lows and highs for a bottom. `price` converts back.
- *
- *   • top 1 — the nearest earlier swing extreme ≥ `minGap` bars before `top2`, within `tol`
- *             of it; the scan stops at any bar beyond top 2 + tol
- *   • neck  — deepest opposite extreme between them; the pattern must be ≥ 2 × tol tall
+ * A double top (top = true) or double bottom (top = false), in a mirrored price space: `x1` /
+ * `x2` / `neckX` are highs and lows for a top, NEGATED lows and highs for a bottom — in that
+ * space a double bottom IS a double top. `price` converts back. Bar indices are absolute.
  */
 export interface DoubleTop {
   top1: number; top2: number; x1: number; x2: number; neckX: number; height: number;
   price(v: number): number;
 }
 
-export function findDoubleTopAt(
-  candles: readonly { high: number; low: number }[], top2: number, top: boolean, minGap: number, tol: number,
+/**
+ * The double top / bottom whose SECOND top is the swing point `points[j]`, or null.
+ *
+ * `points` are re-anchored swing points (ctx.swings()), so every top sits on a bar's true
+ * high (low). Only points of the pattern's type are read.
+ *
+ *   • top 1  — the nearest earlier same-type swing point `minGap`..`maxGap` bars before top 2
+ *              that no bar between the two goes beyond, and within `tolFrac` × height of it
+ *              (height = higher top → neck). A second top that falls a little short of the
+ *              first, or undercuts it a little, both count
+ *   • neck   — the deepest opposite extreme strictly between the two tops
+ */
+export function findDoubleTop(
+  candles: readonly { high: number; low: number }[], points: readonly SwingPoint[], j: number,
+  top: boolean, minGap: number, maxGap: number, tolFrac: number,
 ): DoubleTop | null {
-  if (top2 < 0 || top2 >= candles.length || !(tol > 0)) return null;
+  const want = top ? 'high' : 'low';
+  if (j < 0 || j >= points.length || points[j].type !== want || !(tolFrac > 0)) return null;
   const x = (k: number) => (top ? candles[k].high : -candles[k].low);
   const y = (k: number) => (top ? candles[k].low : -candles[k].high);
 
-  let top1 = -1;
-  for (let k = top2 - 1; k >= 0; k--) {
-    if (x(k) > x(top2) + tol) break;
-    if (top2 - k < minGap || Math.abs(x(k) - x(top2)) > tol) continue;
-    const peak = (k === 0 || x(k) >= x(k - 1)) && x(k) >= x(k + 1);
-    if (peak) { top1 = k; break; }
-  }
-  if (top1 < 0) return null;
-
+  const top2 = points[j].barIndex;
+  const x2 = x(top2);
+  // Running extremes of the bars strictly between the candidate and top 2, widened as the
+  // scan walks back so each bar is read once.
+  let beyond = -Infinity;
   let neck = Infinity;
-  for (let k = top1 + 1; k < top2; k++) neck = Math.min(neck, y(k));
-  const height = x(top2) - neck;
-  if (!Number.isFinite(height) || height < 2 * tol) return null;
-  return { top1, top2, x1: x(top1), x2: x(top2), neckX: neck, height, price: v => (top ? v : -v) };
+  let cursor = top2 - 1;
+  for (let i = j - 1; i >= 0; i--) {
+    if (points[i].type !== want) continue;
+    const top1 = points[i].barIndex;
+    const gap = top2 - top1;
+    if (gap > maxGap) break;
+    for (; cursor > top1; cursor--) { beyond = Math.max(beyond, x(cursor)); neck = Math.min(neck, y(cursor)); }
+    if (gap < minGap) continue;
+    const x1 = x(top1);
+    const hi = Math.max(x1, x2);
+    if (beyond > hi) continue; // a bar between took out the level — not two tests of it
+    const height = hi - neck;
+    if (!(height > 0) || Math.abs(x1 - x2) > tolFrac * height) continue;
+    return { top1, top2, x1, x2, neckX: neck, height, price: v => (top ? v : -v) };
+  }
+  return null;
 }
 
+/**
+ * Double top against a long, double bottom against a short (see `findDoubleTop`).
+ *
+ *   • top 2  — an in-trade swing point (at or after the entry bar) that no later bar has gone
+ *              beyond. Tried newest first, so a higher low printed after the real second
+ *              bottom does not hide it
+ *   • strong — this bar closes against the trade (bear bar for a long) and has retraced at
+ *              least `doubleTopReversalFrac` of the way from top 2 to the neck
+ *
+ * Swings come from the engine's pivots (ctx.swings(1)), re-anchored to the true extreme, so
+ * no ATR is involved: the level tolerance scales with the pattern itself.
+ */
 export function doubleTopReason(ctx: ExitHookContext): string | null {
-  const { candles, index, candle, position, absoluteIndex } = ctx;
-  if (position.entryBarIndex === null || ctx.atr <= 0) return null;
-  const { minGap, tolAtr, reversalFrac } = doubleTopSettings(ctx.config);
-  const tol = tolAtr * ctx.atr;
+  const { fullCandles: candles, absoluteIndex: now, candle, position } = ctx;
+  if (position.entryBarIndex === null) return null;
+  const { minGap, maxGap, tolFrac, reversalFrac } = doubleTopSettings(ctx.config);
 
   const isLong = position.side === 'long';
+  const want = isLong ? 'high' : 'low';
   const x = (k: number) => (isLong ? candles[k].high : -candles[k].low);
-
-  // ── top 2: best extreme since entry ─────────────────────────────────────────
-  const entry = Math.max(0, index - (absoluteIndex - position.entryBarIndex));
-  let top2 = entry;
-  for (let k = entry + 1; k <= index; k++) if (x(k) > x(top2)) top2 = k;
-
-  // ── top 1, neck, height ─────────────────────────────────────────────────────
-  const dt = findDoubleTopAt(candles, top2, isLong, minGap, tol);
-  if (!dt) return null;
-  const { top1, neckX: neck, height } = dt;
-
-  // ── strong reversal off top 2 ───────────────────────────────────────────────
   const closeX = isLong ? candle.close : -candle.close;
   const openX = isLong ? candle.open : -candle.open;
   if (closeX >= openX) return null;
-  const retrace = (x(top2) - closeX) / height;
-  if (retrace < reversalFrac) return null;
 
-  const level = (v: number) => (isLong ? v : -v).toFixed(2);
-  const name = isLong ? 'double top' : 'double bottom';
-  return `${name}: ${level(x(top1))} / ${level(x(top2))} (${top2 - top1} bars apart), ` +
-    `reversed ${(retrace * 100).toFixed(0)}% to neck ${level(neck)}, booked ${position.openPoints.toFixed(2)} pts`;
+  const points = ctx.swings(1);
+  // Most extreme x of the bars after each candidate, built newest-first alongside the scan.
+  let after = -Infinity;
+  let cursor = now;
+  for (let j = points.length - 1; j >= 0; j--) {
+    const p = points[j];
+    if (p.barIndex < position.entryBarIndex) break;
+    if (p.type !== want) continue;
+    for (; cursor > p.barIndex; cursor--) after = Math.max(after, x(cursor));
+    if (after > x(p.barIndex)) continue; // broken since, or a newer extreme is still forming
+
+    const dt = findDoubleTop(candles, points, j, isLong, minGap, maxGap, tolFrac);
+    if (!dt) continue;
+    const swing = dt.x2 - dt.neckX;
+    if (!(swing > 0)) continue;
+    const retrace = (dt.x2 - closeX) / swing;
+    if (retrace < reversalFrac) continue;
+
+    const level = (v: number) => dt.price(v).toFixed(2);
+    const name = isLong ? 'double top' : 'double bottom';
+    return `${name}: ${level(dt.x1)} / ${level(dt.x2)} (${dt.top2 - dt.top1} bars apart), ` +
+      `reversed ${(retrace * 100).toFixed(0)}% to neck ${level(dt.neckX)}, booked ${position.openPoints.toFixed(2)} pts`;
+  }
+  return null;
 }
 
 export const climaxProfitExit: ExitHook = ctx => {

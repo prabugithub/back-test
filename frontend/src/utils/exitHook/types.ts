@@ -32,7 +32,7 @@
 import type { Candle, LegSegment } from '../../types';
 import type { PivotPoint } from '../indicators';
 import type { LegWindow as LegPatternWindow } from '../legPattern';
-import type { StructureState, TrendlineState } from '../marketStructure';
+import type { StructureState, SwingPoint, TrendlineState } from '../marketStructure';
 import type {
   AutoBacktestConfig,
   EntryMetricsSnapshot,
@@ -199,6 +199,15 @@ export interface ExitHookContext {
    * = (close − priceNow) ÷ median swing. Look-ahead safe; null only outside the series.
    */
   trendlines(): TrendlineState | null;
+  /**
+   * Swing points at this bar (utils/marketStructure/swingPoints), built from the engine pivots
+   * inside this context's candle window. `degree` 1 (default) = every pivot swing, 2+ = major
+   * swings (swing of swings, max 4). Alternating high/low, oldest first, each re-anchored to
+   * the TRUE high/low of its swing (a pivot's own price is its signal bar's low/high).
+   * `barIndex` is ABSOLUTE — index into `fullCandles`, not `candles`. The newest point of a
+   * degree ≥ 2 waits until the next same-type swing confirms it. Look-ahead safe; memoized.
+   */
+  swings(degree?: number): SwingPoint[];
 
   /** The managing regime's rules. Read-only — mutating this corrupts every later bar. */
   rules: Readonly<RegimeRules>;

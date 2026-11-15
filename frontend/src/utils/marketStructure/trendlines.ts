@@ -15,6 +15,7 @@ import type { Candle } from '../../types';
 import type { AutoBacktestConfig } from '../autoBacktestEngine';
 import { getPivotPointsUpTo } from '../indicators';
 import { buildSwings, median } from './swings';
+import { pivotsToSwings, raiseDegree, reanchorSwings } from './swingPoints';
 import type { SwingPoint } from './types';
 
 export interface TrendlineParams {
@@ -107,83 +108,19 @@ export function trendlinePriceAt(line: Pick<Trendline, 'slope' | 'intercept'>, b
   return line.intercept + line.slope * bar;
 }
 
-/** One degree up: keep a high (low) only if it is above (below) the previous same-type point
- *  and at least as high (low) as the next one — a swing of swings. Needing the NEXT point
- *  makes it confirmed by data already on the chart, so it stays look-ahead safe; the newest
- *  point of each type waits until the following one prints. Re-alternated with mergePoint. */
-function raiseDegree(points: readonly SwingPoint[]): SwingPoint[] {
-  const keep = new Set<SwingPoint>();
-  for (const type of ['high', 'low'] as const) {
-    const same = points.filter(p => p.type === type);
-    for (let i = 1; i + 1 < same.length; i++) {
-      const [a, p, b] = [same[i - 1], same[i], same[i + 1]];
-      if (type === 'high' ? p.price > a.price && p.price >= b.price : p.price < a.price && p.price <= b.price) keep.add(p);
-    }
-  }
-  const out: SwingPoint[] = [];
-  for (const p of points) if (keep.has(p)) pushMerged(out, p);
-  return out;
-}
-
-/** In-place mergePoint without a cap — consecutive same-type points keep the more extreme. */
-function pushMerged(out: SwingPoint[], sp: SwingPoint): void {
-  const last = out[out.length - 1];
-  if (!last || last.type !== sp.type) out.push(sp);
-  else if (sp.type === 'high' ? sp.price > last.price : sp.price < last.price) out[out.length - 1] = sp;
-}
-
 /** Swing points per degree (index 0 = degree 1), each cut to the last `windowPivots`, and
- *  re-anchored to the true extreme of each swing. A pivot's price is its signal bar's
- *  low/high, which can sit a bar or two after the real turn; the extreme between the
- *  previous opposite point and the pivot's own bar is fully known by then. Each degree keeps
+ *  re-anchored to the true extreme of each swing (see swingPoints.ts). Each degree keeps
  *  roughly a third of the points, so the base is scaled by 3^(degree−1) to still yield
  *  ~windowPivots points at the top degree. */
 function windowLevels(candles: Candle[], index: number, minGapBars: number, windowPivots: number, degree: number): SwingPoint[][] {
   const baseCap = windowPivots * 3 ** (degree - 1) + 1;
   const pivots = getPivotPointsUpTo(candles, index, minGapBars);
   // Merging only ever shrinks the sequence, so twice the cap in raw pivots is plenty.
-  let raw: SwingPoint[] = [];
-  for (const pv of pivots.slice(-2 * baseCap)) {
-    pushMerged(raw, {
-      type: pv.type === 'bearish' ? 'high' : 'low',
-      price: pv.price, barIndex: pv.barIndex, time: pv.time, label: pv.trendLabel,
-    });
-  }
+  let raw = pivotsToSwings(pivots.slice(-2 * baseCap));
   if (raw.length > baseCap) raw = raw.slice(raw.length - baseCap);
 
-  // Most extreme high (low) over bars [from, to], starting from `init`.
-  const ext = (high: boolean, from: number, to: number, init: { price: number; bar: number }) => {
-    let { price, bar } = init;
-    for (let x = from; x <= to; x++) {
-      const v = high ? candles[x].high : candles[x].low;
-      if (high ? v > price : v < price) { price = v; bar = x; }
-    }
-    return { price, bar };
-  };
-  const at = (p: SwingPoint, e: { price: number; bar: number }): SwingPoint =>
-    ({ ...p, price: e.price, barIndex: e.bar, time: candles[e.bar].timestamp });
-
-  // Zigzag repair. Each point is searched from the previous point's RE-ANCHORED bar, and the
-  // previous point moves forward when price went further its way before this swing's extreme.
-  // The pivot detector can skip a turn — e.g. a gap-down low followed by a rally fires the
-  // next HIGH pivot with no low in between — and that low is often the major one.
-  let prev = raw[0];
-  const out: SwingPoint[] = [];
-  for (let k = 1; k < raw.length; k++) {
-    const p = raw[k];
-    const high = p.type === 'high';
-    let cur = ext(high, prev.barIndex + 1, p.barIndex, { price: p.price, bar: p.barIndex });
-    const further = ext(!high, prev.barIndex + 1, cur.bar - 1, { price: prev.price, bar: prev.barIndex });
-    if (further.bar !== prev.barIndex) {
-      prev = at(prev, further);
-      if (out.length) out[out.length - 1] = prev;
-      cur = ext(high, prev.barIndex + 1, p.barIndex, { price: p.price, bar: p.barIndex });
-    }
-    prev = at(p, cur);
-    out.push(prev);
-  }
   const cut = (pts: SwingPoint[]) => (pts.length > windowPivots ? pts.slice(pts.length - windowPivots) : pts);
-  const levels = [out];
+  const levels = [reanchorSwings(candles, raw)];
   for (let d = 1; d < degree; d++) levels.push(raiseDegree(levels[d - 1]));
   return levels.map(cut);
 }

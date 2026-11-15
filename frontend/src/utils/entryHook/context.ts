@@ -11,7 +11,7 @@ import type { Candle, LegSegment } from '../../types';
 import type { PivotPoint } from '../indicators';
 import { getAlBrooksRunUpTo } from '../indicators';
 import { buildLegSequence } from '../legSequence';
-import { getStructureAt, getTrendlinesAt, structureLegs, type StructureState } from '../marketStructure';
+import { getStructureAt, getSwingPointsAt, getTrendlinesAt, structureLegs, type StructureState, type SwingPoint } from '../marketStructure';
 import { buildLegWindow, type LegWindow as LegPatternWindow } from '../legPattern';
 import type {
   AutoBacktestConfig,
@@ -101,6 +101,7 @@ export function buildEntryHookContext(args: BuildHookContextArgs): EntryHookCont
 
   let structureLegsCache: LegSegment[] | null = null;
   const legFeatureCache = new Map<string, LegPatternWindow>();
+  const swingsCache = new Map<number, SwingPoint[]>();
 
   return {
     candles: window,
@@ -170,6 +171,16 @@ export function buildEntryHookContext(args: BuildHookContextArgs): EntryHookCont
 
     trendlines() {
       return getTrendlinesAt(candles, currentIndex, config);
+    },
+
+    swings(degree = 1) {
+      let cached = swingsCache.get(degree);
+      if (!cached) {
+        // Same window as ctx.candles (Session Settings → Entry Hook Candles).
+        cached = getSwingPointsAt(candles, currentIndex, start, config, degree);
+        swingsCache.set(degree, cached);
+      }
+      return cached;
     },
 
     rules: args.rules,
