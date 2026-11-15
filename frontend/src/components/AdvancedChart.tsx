@@ -13,9 +13,10 @@ import type { DrawingTool } from './ChartToolbar';
 import type { Indicator } from './ChartToolbar';
 import { calculateSMA, calculateEMA, calculatePivotPoints, calculateAlBrooks } from '../utils/indicators';
 import { resolveMinPivotGapBars } from '../utils/autoBacktestEngine';
-import { getStructureSegments, getTrendlinesAt } from '../utils/marketStructure';
+import { getStructureSegments, getSwingPointsAt, getTrendlinesAt, resolveTrendlineParams } from '../utils/marketStructure';
 import { drawMarketStructure } from './chart/drawMarketStructure';
 import { drawTrendlines } from './chart/drawTrendlines';
+import { drawMajorSwings } from './chart/drawMajorSwings';
 import { resampleCandles } from '../utils/resampler';
 import { useChartDrawings } from '../hooks/useChartDrawings';
 import type { Point } from '../hooks/useChartDrawings';
@@ -173,6 +174,16 @@ export function AdvancedChart({
     if (!activeIndicators.includes('trendlines') || structureSource.length === 0) return null;
     const end = structureSource === candles ? currentIndex : structureSource.length - 1;
     return getTrendlinesAt(structureSource, end, autoBacktestConfig);
+  }, [activeIndicators, structureSource, candles, currentIndex, autoBacktestConfig]);
+
+  // Major swing points as of the last shown bar, at Session Settings → Trendlines → Swing
+  // degree — the same points ctx.swings(degree) gives hooks. Look-ahead safe: the newest
+  // point of each type waits until the next same-type swing confirms it.
+  const memoizedMajorSwings = useMemo(() => {
+    if (!activeIndicators.includes('majorSwings') || structureSource.length === 0) return [];
+    const end = structureSource === candles ? currentIndex : structureSource.length - 1;
+    const degree = resolveTrendlineParams(autoBacktestConfig).degree;
+    return getSwingPointsAt(structureSource, end, 0, autoBacktestConfig, degree);
   }, [activeIndicators, structureSource, candles, currentIndex, autoBacktestConfig]);
 
   const memoizedAlBrooks = useMemo(() => {
@@ -382,7 +393,12 @@ export function AdvancedChart({
     if (memoizedTrendlines) {
       drawTrendlines(ctx, chart, series, structureSource, memoizedTrendlines);
     }
-  }, [chart, series, visibleCandles, activeIndicators, showMarkers, showPivotRR, memoizedPivots, isSecondary, secondaryTimeframe, chartId, highlightTimestamp, selectedSegment, memoizedStructure, memoizedTrendlines, structureSource]);
+
+    // 7. Major swing points (Indicators → Major Swings).
+    if (memoizedMajorSwings.length > 0) {
+      drawMajorSwings(ctx, chart, series, structureSource, memoizedMajorSwings);
+    }
+  }, [chart, series, visibleCandles, activeIndicators, showMarkers, showPivotRR, memoizedPivots, isSecondary, secondaryTimeframe, chartId, highlightTimestamp, selectedSegment, memoizedStructure, memoizedTrendlines, memoizedMajorSwings, structureSource]);
 
   const {
     clearDrawings,

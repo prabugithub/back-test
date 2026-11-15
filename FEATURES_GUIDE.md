@@ -171,6 +171,11 @@ Toggle it under Indicators → **Trendlines (pivot)**. It draws the major trendl
 - `degree` 1 = every swing; 2–4 = **major** swings (swing of swings). A degree-2+ point waits until the next same-type swing confirms it.
 - `barIndex` is absolute (an index into `ctx.fullCandles`). The result is look-ahead safe and memoized per degree.
 
+**Major Swings chart layer** (Indicators → **Major Swings**): draws those swing points on the chart as of the current replay bar, at the **Swing degree** set in Session Settings → Trendlines (pivot) (default 2 = major swings).
+- A dashed purple zigzag joins the points.
+- Each point gets a ring and a label: **HH / LH** in red for highs, **HL / LL** in green for lows, compared with the previous major point of the same type. The labels sit further out than the pivot-point markers so both can be on at once.
+- Look-ahead safe: the newest high and low appear only once the next same-type swing confirms them. Read-only canvas, no store writes.
+
 **Trend strength** (toolbar badge `TL: ▲ 0.45 · 3t · par` while the Trendlines layer is on):
 - **Direction:** read from the with-trend line, meaning rising support (up), falling resistance (down) or neither (flat). A line is flat when it moves less than its own tolerance across its span.
 - **Steepness** (`slopeNorm`): net progress per swing cycle (one up and one down swing), in median swings. About 0.3–0.5 is a steady trend; 1+ is very steep, often climactic.

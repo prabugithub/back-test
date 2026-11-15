@@ -24,7 +24,7 @@ import { analyzeMarketStructure } from '../utils/pivotAnalysis';
 import { resolveMinPivotGapBars } from '../utils/autoBacktestEngine';
 import { describeStructure, getStructureAt, getTrendStrengthAt } from '../utils/marketStructure';
 import { LayoutGrid } from 'lucide-react';import { type DrawingTool } from '../types';
-export type Indicator = 'none' | 'sma21' | 'sma60' | 'ema21' | 'ema60' | 'pivotPoints' | 'alBrooks' | 'marketStructure' | 'trendlines';
+export type Indicator = 'none' | 'sma21' | 'sma60' | 'ema21' | 'ema60' | 'pivotPoints' | 'alBrooks' | 'marketStructure' | 'trendlines' | 'majorSwings';
 
 interface ChartToolbarProps {
   activeTool: DrawingTool;
@@ -125,6 +125,7 @@ export function ChartToolbar({
     { id: 'alBrooks', label: 'Al Brooks H/L', color: '#00BCD4' },
     { id: 'marketStructure', label: 'Market Structure (exp.)', color: '#2563EB' },
     { id: 'trendlines', label: 'Trendlines (pivot)', color: '#DC2626' },
+    { id: 'majorSwings', label: 'Major Swings', color: '#7C3AED' },
   ];
 
   return (
