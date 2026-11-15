@@ -42,6 +42,7 @@ import { deepPullbackContinuation, takeEverySignal } from './example';
 import { higherHighShallowPullback } from './higherHighShallowPullback';
 import { srGuard } from './srGuard';
 import { chopGuard } from './chopGuard';
+import { doubleTopGuard } from './doubleTopGuard';
 import { strongTrendH1 } from './strongTrendH1';
 
 export const ENTRY_HOOKS: Record<string, EntryHookEntry> = {
@@ -64,6 +65,11 @@ export const ENTRY_HOOKS: Record<string, EntryHookEntry> = {
     label: 'Chop Guard (ER + EMA21 position)',
     description: 'Gate mode filter, both sides. Skips entries in chop: blocks when the efficiency ratio (Session Settings ER lookback) is below Chop Min ER (default 0.2), or the close is not at least Chop Min EMA ATR (default 0.4) ATRs beyond EMA21 on the trade side.',
     hook: chopGuard,
+  },
+  'double-top-guard': {
+    label: 'Double Top / Bottom Guard (neckline)',
+    description: 'Gate mode filter, both sides. After a strong reversal off a double bottom, blocks longs until a bar closes above its neckline; after a double top, blocks shorts until a close below it. Same pattern and Session Settings (Double Top Gap / Max Gap / Tol / Reversal) as the Climax exits.',
+    hook: doubleTopGuard,
   },
   'deep-pullback': {
     label: 'Deep Pullback Continuation',
