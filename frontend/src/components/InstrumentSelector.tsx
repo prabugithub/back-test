@@ -17,6 +17,8 @@ const LOCAL_TIMEFRAMES = [
   { value: '1D', label: '1 Day' },
 ];
 
+const DEFAULT_DATASET_ID = 'NIFTY_50_15minute';
+
 export function InstrumentSelector() {
   const [dataSource, setDataSource] = useState<'api' | 'local' | 'live'>('local');
   const [securityId, setSecurityId] = useState('2885'); // RELIANCE on Angel One
@@ -30,7 +32,10 @@ export function InstrumentSelector() {
   const [error, setError] = useState<string | null>(null);
   const [useDateBasedLoading, setUseDateBasedLoading] = useState(false);
   const [selectedYear, setSelectedYear] = useState<string>(''); // '' = custom range
-  const [localDatasetId, setLocalDatasetId] = useState<string>(LEGACY_DATASET_ID);
+  // Default to the native 15-minute NIFTY 50 file (no resampling); fall back to the legacy 5m file if absent.
+  const [localDatasetId, setLocalDatasetId] = useState<string>(
+    () => LOCAL_DATASETS.some(d => d.id === DEFAULT_DATASET_ID) ? DEFAULT_DATASET_ID : LEGACY_DATASET_ID,
+  );
 
   const localDataset = getLocalDataset(localDatasetId);
   const localBaseMinutes = localDataset.baseMinutes ?? 1;

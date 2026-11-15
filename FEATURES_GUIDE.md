@@ -52,7 +52,7 @@ Load historical candlestick data to backtest against.
 
 The **Local** source lists every JSON file in `frontend/src/assets/market-data/` in an **Instrument** dropdown. The files are discovered at build time via `import.meta.glob` in `utils/localMarketData.ts`, so you add an instrument by dropping in a file. No code change is needed. Each file is its own lazily-loaded chunk and is fetched only when selected.
 
-- **Naming:** `<NAME>_<N>minute.json` → label `NAME` (underscores → spaces), native bar size `N` minutes. `nifty5min_data.json` is the legacy Nifty 50 5-minute file and stays the default. Other names are allowed; their bar size is detected from the data.
+- **Naming:** `<NAME>_<N>minute.json` → label `NAME` (underscores → spaces), native bar size `N` minutes. `NIFTY_50_15minute.json` (NIFTY 50, 15 Minutes) is the initial selection on the load screen. `nifty5min_data.json` is the legacy Nifty 50 5-minute file: it is used as the fallback when the 15-minute file is missing, and for sessions saved before datasets could be chosen. Other names are allowed; their bar size is detected from the data.
 - **Formats:** columnar `{t,o,h,l,c,v}` (legacy, epoch already shifted +5:30) or rows `[{date:"YYYY-MM-DD HH:mm:ss", open, high, low, close, volume}]` with IST wall-clock dates. Both become true UTC epoch seconds, independent of the browser timezone.
 - **Timeframes:** only timeframes ≥ the file's native bars are offered (no 5m for a 15m file). If a reload asks for a finer one, it moves up to the native timeframe with a warning.
 - **Excluded:** `nifty50.json` (1-minute, ~100 MB) is excluded from the glob to keep builds small.
