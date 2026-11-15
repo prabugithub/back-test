@@ -18,10 +18,15 @@
  * move is spent or turning.
  *
  * Second rule, same guards: a DOUBLE TOP that reverses strongly closes an in-profit long, a
- * DOUBLE BOTTOM closes an in-profit short. See `doubleTopReason` for the exact definition
+ * DOUBLE BOTTOM closes an in-profit short. See `doubleTopMatch` for the exact definition
  * (Session Settings → Double Top Gap / Max Gap / Tol / Reversal).
+ *
+ * Entry block: an exit on the double top / bottom rule also holds the OPPOSITE side shut —
+ * after a short is booked on a double bottom no long is taken until a bar CLOSES above the
+ * neckline; after a long is booked on a double top no short until a bar closes below it.
+ * Same-side entries stay allowed. The climax-bar rule sets no block.
  */
-import type { ExitHook, ExitHookContext, ExitHookResult } from '../../utils/exitHook';
+import type { ExitHook, ExitHookContext, ExitHookDecision, ExitHookResult } from '../../utils/exitHook';
 import type { SwingPoint } from '../../utils/marketStructure';
 import { legDecayExit } from './legDecay';
 
@@ -184,7 +189,7 @@ export function findDoubleTop(
  * Swings come from the engine's pivots (ctx.swings(1)), re-anchored to the true extreme, so
  * no ATR is involved: the level tolerance scales with the pattern itself.
  */
-export function doubleTopReason(ctx: ExitHookContext): string | null {
+export function doubleTopMatch(ctx: ExitHookContext): { reason: string; neck: number } | null {
   const { fullCandles: candles, absoluteIndex: now, candle, position } = ctx;
   if (position.entryBarIndex === null) return null;
   const { minGap, maxGap, tolFrac, reversalFrac } = doubleTopSettings(ctx.config);
@@ -216,10 +221,30 @@ export function doubleTopReason(ctx: ExitHookContext): string | null {
 
     const level = (v: number) => dt.price(v).toFixed(2);
     const name = isLong ? 'double top' : 'double bottom';
-    return `${name}: ${level(dt.x1)} / ${level(dt.x2)} (${dt.top2 - dt.top1} bars apart), ` +
+    const reason = `${name}: ${level(dt.x1)} / ${level(dt.x2)} (${dt.top2 - dt.top1} bars apart), ` +
       `reversed ${(retrace * 100).toFixed(0)}% to neck ${level(dt.neckX)}, booked ${position.openPoints.toFixed(2)} pts`;
+    return { reason, neck: dt.price(dt.neckX) };
   }
   return null;
+}
+
+/**
+ * The double top / bottom exit as a hook decision: closes the trade and blocks the opposite
+ * side until a bar closes beyond the neckline (a long booked on a double top blocks shorts
+ * until close < neck; a short booked on a double bottom blocks longs until close > neck).
+ */
+export function doubleTopExitDecision(ctx: ExitHookContext): ExitHookDecision | null {
+  const m = doubleTopMatch(ctx);
+  if (!m) return null;
+  const isLong = ctx.position.side === 'long';
+  return {
+    reason: m.reason,
+    blockEntry: {
+      side: isLong ? 'short' : 'long',
+      level: m.neck,
+      reason: isLong ? 'double top neck' : 'double bottom neck',
+    },
+  };
 }
 
 export const climaxProfitExit: ExitHook = ctx => {
@@ -227,8 +252,9 @@ export const climaxProfitExit: ExitHook = ctx => {
   if (position.barsInTrade === null || position.barsInTrade < 1) return false;
   if (position.openPoints <= 0) return false;
 
-  const reason = climaxReason(ctx) ?? doubleTopReason(ctx);
-  return reason ? { reason } : false;
+  const reason = climaxReason(ctx);
+  if (reason) return { reason };
+  return doubleTopExitDecision(ctx) ?? false;
 };
 
 /** Climax profit exit first, then Leg Decay — so adding the climax rule does not cost the

@@ -10,6 +10,10 @@ import {
 import { runBatchSimulation, type BatchSimResult } from '../utils/batchBacktestSimulator';
 import { createHookRunState, type HookRunState } from '../utils/entryHook';
 import { createExitHookRunState, type ExitHookRunState } from '../utils/exitHook';
+import {
+  blockedSides, createEntryBlockState, describeEntryBlocks, releaseEntryBlocks, setEntryBlock,
+  type EntryBlockState,
+} from '../utils/entryBlock';
 import type { Candle } from '../types';
 import { useNotificationStore } from './notificationStore';
 import type { ExitReason, OpenPosition, Trade, TradeJournal } from '../types';
@@ -71,6 +75,19 @@ function exitHookStateFor(candles: Candle[]): ExitHookRunState {
   if (!s) {
     s = createExitHookRunState();
     _exitHookStates.set(candles, s);
+  }
+  return s;
+}
+
+// Entry blocks an exit hook set (utils/entryBlock.ts) — e.g. no longs after a double-bottom
+// exit until a close above the neckline. Keyed on the candle array like the hook states, so a
+// reload starts with nothing blocked.
+const _entryBlocks = new WeakMap<Candle[], EntryBlockState>();
+function entryBlocksFor(candles: Candle[]): EntryBlockState {
+  let s = _entryBlocks.get(candles);
+  if (!s) {
+    s = createEntryBlockState();
+    _entryBlocks.set(candles, s);
   }
   return s;
 }
@@ -427,7 +444,7 @@ export function createAutoBacktestActions(set: StoreSet, get: StoreGet) {
         if (slTpOnly) continue;
 
         // ── 3. Price-action exit signals (REVERSAL → OPP_SIGNAL → EXIT_HOOK) ────
-        const { exit, adjust, state: exitState } = evaluateAutoExitSignal(
+        const { exit, adjust, state: exitState, blockEntry } = evaluateAutoExitSignal(
           state.candles, index, current, config, exitHookStateFor(state.candles)
         );
         // Persist the per-bar reversal state even when no exit fires, or the
@@ -460,6 +477,10 @@ export function createAutoBacktestActions(set: StoreSet, get: StoreGet) {
             : exit.reason === 'TRENDLINE_BREAK' ? 'Trendline-Break Exit' : 'Exit Hook';
           useNotificationStore.getState().notify(`${label}: ${exit.detail}`, 'warning');
           get().closeIndependentPosition(id, exit.reason, exit.fillPrice ?? close, exit.detail);
+          if (blockEntry) {
+            setEntryBlock(entryBlocksFor(state.candles), blockEntry.side,
+              { level: blockEntry.level, reason: blockEntry.reason, setAt: index });
+          }
           continue;
         }
 
@@ -474,6 +495,12 @@ export function createAutoBacktestActions(set: StoreSet, get: StoreGet) {
       // Hard guards — never run in live mode
       if (state.isLiveMode) return;
       if (!state.autoBacktestConfig.enabled) return;
+
+      // Release entry blocks before every early return below, so a neckline break on a bar
+      // that cannot enter anyway (position open, cap, outside hours) still lifts the block.
+      const entryBlocks = entryBlocksFor(state.candles);
+      const bar = state.candles[index];
+      if (bar) releaseEntryBlocks(entryBlocks, bar);
 
       const multi = isMultiTradeMode(state);
 
@@ -497,9 +524,13 @@ export function createAutoBacktestActions(set: StoreSet, get: StoreGet) {
         return;
       }
 
-      const signal = evaluateAutoSignals(candles, index, autoBacktestConfig, hookStateFor(candles));
+      const signal = evaluateAutoSignals(
+        candles, index, autoBacktestConfig, hookStateFor(candles), blockedSides(entryBlocks)
+      );
 
       if (!signal) {
+        const blockedMsg = describeEntryBlocks(entryBlocks);
+        if (blockedMsg && get().lastAutoSignalReason !== blockedMsg) set({ lastAutoSignalReason: blockedMsg });
         return;
       }
 
@@ -594,7 +625,7 @@ export function createAutoBacktestActions(set: StoreSet, get: StoreGet) {
       const position = state.position;
       if (!position || position.quantity === 0 || !position.autoEntry) return;
 
-      const { exit, adjust, state: exitState } = evaluateAutoExitSignal(
+      const { exit, adjust, state: exitState, blockEntry } = evaluateAutoExitSignal(
         state.candles, index, position, state.autoBacktestConfig,
         exitHookStateFor(state.candles)
       );
@@ -625,6 +656,10 @@ export function createAutoBacktestActions(set: StoreSet, get: StoreGet) {
         }
       }
       if (!exit) return;
+      if (blockEntry) {
+        setEntryBlock(entryBlocksFor(state.candles), blockEntry.side,
+          { level: blockEntry.level, reason: blockEntry.reason, setAt: index });
+      }
 
       const isLong = position.quantity > 0;
       const label = exit.reason === 'REVERSAL' ? 'Reversal Exit'

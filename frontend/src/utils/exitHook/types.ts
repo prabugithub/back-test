@@ -251,6 +251,10 @@ export interface ExitHookDecision {
   /** Move the target to this absolute price. Same timing as `sl`. Must stay on the winning
    *  side of the current close. */
   target?: number;
+  /** Only with an exit: refuse new auto entries on `side` until a later bar CLOSES beyond
+   *  `level` (above it for 'long', below it for 'short'). Replaces any earlier block on that
+   *  side. Dropped when the trade does not exit this bar. See utils/entryBlock.ts. */
+  blockEntry?: { side: 'long' | 'short'; level: number; reason?: string };
 }
 
 /**

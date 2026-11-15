@@ -6,6 +6,7 @@ import { describeSlTpExit } from './tradeAnalysis';
 import { type AutoBacktestConfig, type AutoSignal, type RegimeKey, MULTI_TRADE_DEFAULT_CAP, evaluateAutoSignals, evaluateTrailStop, evaluateAutoExitSignal, resolveTradeQuantity, resolveEntryHook, resolveExitHook } from './autoBacktestEngine';
 import { createHookRunState } from './entryHook';
 import { createExitHookRunState } from './exitHook';
+import { blockedSides, createEntryBlockState, releaseEntryBlocks, setEntryBlock } from './entryBlock';
 import { buildNetPositionMirror } from './netPosition';
 import { calculateMAPosition, calculateBarQuality, averageBarQuality, averageBarQualityIQR, calculateEMASlope, calculateEMAInteraction } from './pivotAnalysis';
 import { buildLegSequence } from './legSequence';
@@ -104,6 +105,9 @@ export function runBatchSimulation(
   // Separate scratch/bookkeeping for the exit hook. Also one per RUN, and shared across every
   // open trade — a hook keeping per-trade counters keys them by ctx.position.id.
   const exitHookRunState = createExitHookRunState();
+  // Sides an exit hook held shut (e.g. no longs after a double-bottom exit until a close above
+  // the neckline). One per RUN, shared by every trade; released bar by bar below.
+  const entryBlocks = createEntryBlockState();
 
   function enterPosition(candle: Candle, signal: AutoSignal, qty: number, candleIndex: number) {
     // signal.entryPrice IS candle.close for every built-in path — the engine sets it from
@@ -296,7 +300,7 @@ export function runBatchSimulation(
   // Mutates `pos` (trail + reversal state) and returns the exit it decided on.
   function evaluateBarForPosition(
     pos: SimPosition, i: number, candle: Candle
-  ): { reason: ExitReason; fillPrice?: number; detail?: string } | null {
+  ): { reason: ExitReason; fillPrice?: number; detail?: string; blockEntry?: { side: 'long' | 'short'; level: number; reason: string } | null } | null {
     // ── 0. Pivot trailing stop — ratchet the SL before the touch check below
     //      tests it (uses only pivots confirmed through bar i-1; ratchet only).
     const trail = evaluateTrailStop(candles, i, pos, config);
@@ -339,7 +343,7 @@ export function runBatchSimulation(
     // Evaluated on bar close, after the SL/TP touch check, before square-off.
     // The reversal state must be persisted even when no exit fires, or the
     // confirm-bars counter would reset every bar.
-    const { exit, adjust, state } = evaluateAutoExitSignal(candles, i, pos, config, exitHookRunState);
+    const { exit, adjust, state, blockEntry } = evaluateAutoExitSignal(candles, i, pos, config, exitHookRunState);
     pos.exitWithTrendSeen = state.exitWithTrendSeen;
     pos.exitAgainstBars = state.exitAgainstBars;
     // Stop/target moves from a custom exit hook, applied whether or not the trade closes.
@@ -354,7 +358,7 @@ export function runBatchSimulation(
     }
     // fillPrice is the bar close for the built-in reasons and may be a hook-named price
     // inside the bar; runExitHook has already refused anything outside its high/low.
-    if (exit) return { reason: exit.reason, fillPrice: exit.fillPrice ?? candle.close, detail: exit.detail };
+    if (exit) return { reason: exit.reason, fillPrice: exit.fillPrice ?? candle.close, detail: exit.detail, blockEntry };
 
     // ── 3. Auto square-off ──────────────────────────────────────────────────
     if (config.autoSquareOff && candleTimeMinutes(candle.timestamp) >= parseHHMM(config.squareOffTime)) {
@@ -385,7 +389,15 @@ export function runBatchSimulation(
           )
         : undefined);
       exitPosition(pos, candle, decision.reason, decision.fillPrice, detail);
+      if (decision.blockEntry) {
+        const { side, level, reason } = decision.blockEntry;
+        setEntryBlock(entryBlocks, side, { level, reason, setAt: i });
+      }
     }
+
+    // Release before any of the entry guards below, so a neckline break on a bar that could
+    // not enter anyway (position open, outside hours) still lifts the block.
+    releaseEntryBlocks(entryBlocks, candle);
 
     // ── 4. Signal check ─────────────────────────────────────────────────────
     if (!config.enabled) continue;
@@ -401,7 +413,7 @@ export function runBatchSimulation(
       candleMin > parseHHMM(config.tradeEndTime)
     ) continue;
 
-    const signal = evaluateAutoSignals(candles, i, config, hookRunState);
+    const signal = evaluateAutoSignals(candles, i, config, hookRunState, blockedSides(entryBlocks));
     if (!signal) continue;
 
     // Sizing lives in resolveTradeQuantity, shared with the store path so the two can't
