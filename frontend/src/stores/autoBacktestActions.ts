@@ -16,6 +16,7 @@ import type { ExitReason, OpenPosition, Trade, TradeJournal } from '../types';
 import { calculateMAPosition } from '../utils/pivotAnalysis';
 import { buildEntryInstrumentation } from '../utils/entryInstrumentation';
 import { buildNetPositionMirror } from '../utils/netPosition';
+import { describeSlTpExit } from '../utils/tradeAnalysis';
 import {
   saveAutoBacktestConfigAs as saveAutoBacktestConfigAsRemote,
   updateAutoBacktestConfig as updateAutoBacktestConfigRemote,
@@ -303,7 +304,7 @@ export function createAutoBacktestActions(set: StoreSet, get: StoreGet) {
       syncNetPositionMirror({ openPositions: [...state.openPositions, openPosition] });
     },
 
-    closeIndependentPosition: (id: string, reason: ExitReason, fillPrice?: number) => {
+    closeIndependentPosition: (id: string, reason: ExitReason, fillPrice?: number, detail?: string) => {
       const state = get();
       const pos = state.openPositions.find(p => p.id === id);
       if (!pos) return;
@@ -327,6 +328,7 @@ export function createAutoBacktestActions(set: StoreSet, get: StoreGet) {
         stopLoss: pos.stopLoss,
         target: pos.target,
         exitReason: reason,
+        exitDetail: detail,
         slHit: reason === 'SL',
         tpHit: reason === 'TP',
         hitFirst: reason === 'SL' || reason === 'TP' ? reason : undefined,
@@ -415,7 +417,11 @@ export function createAutoBacktestActions(set: StoreSet, get: StoreGet) {
             `${hit.reason} Hit at ${hit.price.toFixed(2)}. Auto Exiting.`,
             hit.reason === 'TP' ? 'success' : 'warning'
           );
-          get().closeIndependentPosition(id, hit.reason, hit.price);
+          const level = hit.reason === 'SL' ? sl : tp;
+          get().closeIndependentPosition(
+            id, hit.reason, hit.price,
+            describeSlTpExit(hit.reason as 'SL' | 'TP', isLong, level, hit.price, candle, fillMode, current.slTrailed),
+          );
           continue;
         }
         if (slTpOnly) continue;
@@ -453,12 +459,12 @@ export function createAutoBacktestActions(set: StoreSet, get: StoreGet) {
             : exit.reason === 'OPP_SIGNAL' ? 'Opposite-Signal Exit'
             : exit.reason === 'TRENDLINE_BREAK' ? 'Trendline-Break Exit' : 'Exit Hook';
           useNotificationStore.getState().notify(`${label}: ${exit.detail}`, 'warning');
-          get().closeIndependentPosition(id, exit.reason, exit.fillPrice ?? close);
+          get().closeIndependentPosition(id, exit.reason, exit.fillPrice ?? close, exit.detail);
           continue;
         }
 
         // ── 4. Auto square-off ──────────────────────────────────────────────────
-        if (squareOffDue) get().closeIndependentPosition(id, 'TIME_OVER', close);
+        if (squareOffDue) get().closeIndependentPosition(id, 'TIME_OVER', close, `Auto square-off at ${config.squareOffTime} IST`);
       }
     },
 
@@ -633,7 +639,11 @@ export function createAutoBacktestActions(set: StoreSet, get: StoreGet) {
         // Undefined fills at the current candle's close; a custom exit hook may name a
         // price inside the bar instead (runExitHook refuses one outside its high/low).
         exit.fillPrice,
-        exit.reason
+        exit.reason,
+        undefined,
+        undefined,
+        undefined,
+        exit.detail
       );
     },
 
@@ -753,7 +763,11 @@ export function createAutoBacktestActions(set: StoreSet, get: StoreGet) {
         undefined,
         undefined,
         undefined,
-        'TIME_OVER'
+        'TIME_OVER',
+        undefined,
+        undefined,
+        undefined,
+        `Auto square-off at ${state.autoBacktestConfig.squareOffTime} IST`
       );
     },
 

@@ -370,6 +370,11 @@ export interface AutoBacktestConfig {
   //          planned risk when a bar gaps through the level intrabar)
   slTpFillMode?: 'exact' | 'close';
 
+  // Chart trade popup (display only — never read by the engine). Optional so configs
+  // saved before these existed need no migration; read as `?? true` / `?? false`.
+  showTradeConditions?: boolean; // entry/exit condition blocks — default true
+  showLegInfo?: boolean;         // Leg Sequence chips + segment band — default false
+
   // Bar overlap instrumentation — raw regime metric recorded on trade entries
   barOverlapLookback: number; // bars looked back for the bar-overlap average (default 8)
 
@@ -648,6 +653,8 @@ export const defaultAutoBacktestConfig: AutoBacktestConfig = {
   autoSquareOff: true,
   squareOffTime: '15:10',
   slTpFillMode: 'exact',
+  showTradeConditions: true,
+  showLegInfo: false,
   barOverlapLookback: 8,
   barRangeLookback: 20,
   efficiencyRatioLookback: 10,

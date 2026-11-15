@@ -26,7 +26,7 @@ import { useNotificationStore } from '../stores/notificationStore';
 import { ScreenshotSaveDialog } from './ScreenshotSaveDialog';
 import type { Trade, LegSegment } from '../types';
 import { formatCurrency } from '../utils/formatters';
-import { exitReasonBadge } from '../utils/tradeAnalysis';
+import { exitReasonBadge, parseEntryReason } from '../utils/tradeAnalysis';
 import { X } from 'lucide-react';
 
 export interface ChartCallbacks {
@@ -87,6 +87,11 @@ export function AdvancedChart({
   // A leg/pullback segment the user clicked in the Trade Record popup's Leg Sequence strip —
   // highlighted on the chart (canvas band over its candles) and expanded to its tracked values.
   const [selectedSegment, setSelectedSegment] = useState<LegSegment | null>(null);
+  // Chart trade popup display settings (Session Settings → Chart Trade Popup).
+  const showTradeConditions = useSessionStore((s) => s.autoBacktestConfig.showTradeConditions ?? true);
+  const showLegInfo = useSessionStore((s) => s.autoBacktestConfig.showLegInfo ?? false);
+  // Hiding leg info must also drop the highlighted segment band it drives on the canvas.
+  useEffect(() => { if (!showLegInfo) setSelectedSegment(null); }, [showLegInfo]);
 
   const candles = useSessionStore((s) => s.candles);
   const currentIndex = useSessionStore((s) => s.currentIndex);
@@ -1512,18 +1517,73 @@ export function AdvancedChart({
                     <span className={`font-bold ${t.type === 'BUY' ? 'text-green-600' : 'text-red-600'}`}>
                       {t.type}{t.optionType ? ` ${t.optionType}` : ''} @ {formatCurrency(t.price)}
                     </span>
-                    {t.exitReason && t.exitReason !== 'MANUAL' && (
+                    {!showTradeConditions && t.exitReason && t.exitReason !== 'MANUAL' && (
                       <span className={`px-1.5 py-0.5 rounded text-[9px] font-bold ${exitReasonBadge(t.exitReason).cls}`}>
                         {exitReasonBadge(t.exitReason).label}
                       </span>
                     )}
                   </div>
+                  {showTradeConditions && (() => {
+                    // An exit fill carries pnl; an entry fill doesn't. A flip fill is both.
+                    const isExit = t.pnl !== undefined;
+                    const entrySign = t.journal?.entrySign;
+                    const isEntry = !isExit || !!entrySign;
+                    const f2 = (v?: number) => (v === undefined || !Number.isFinite(v) ? '—' : v.toFixed(2));
+                    const risk = t.stopLoss !== undefined ? Math.abs(t.price - t.stopLoss) : undefined;
+                    const reward = t.target !== undefined ? Math.abs(t.target - t.price) : undefined;
+                    const rr = risk && reward !== undefined ? reward / risk : undefined;
+                    return (
+                      <>
+                        {isEntry && (
+                          <div className="mb-2 rounded border border-blue-200 bg-blue-50/50 p-2">
+                            <div className="text-[9px] font-semibold text-blue-500 uppercase tracking-wider mb-1">Entry Conditions</div>
+                            {entrySign ? (
+                              <div className="grid grid-cols-[auto_1fr] gap-x-2 gap-y-0.5 text-[10px]">
+                                {parseEntryReason(entrySign).map((row, i) => (
+                                  <div key={i} className="contents">
+                                    <span className="text-gray-400">{row.label}</span>
+                                    <span className="text-gray-700 font-medium break-words">{row.value}</span>
+                                  </div>
+                                ))}
+                              </div>
+                            ) : (
+                              <div className="text-[10px] text-gray-500 italic">Manual entry</div>
+                            )}
+                            <div className="mt-1 pt-1 border-t border-blue-100 text-[10px] text-gray-600 flex flex-wrap gap-x-3">
+                              <span>SL <b>{f2(t.stopLoss)}</b></span>
+                              <span>TP <b>{f2(t.target)}</b></span>
+                              <span>RR <b>{rr === undefined ? '—' : rr.toFixed(2)}</b></span>
+                              <span>Qty <b>{t.quantity}</b></span>
+                            </div>
+                          </div>
+                        )}
+                        {isExit && (
+                          <div className="mb-2 rounded border border-amber-200 bg-amber-50/50 p-2">
+                            <div className="flex items-center justify-between mb-1">
+                              <span className="text-[9px] font-semibold text-amber-600 uppercase tracking-wider">Exit Condition</span>
+                              <span className={`px-1.5 py-0.5 rounded text-[9px] font-bold ${exitReasonBadge(t.exitReason ?? 'MANUAL').cls}`}>
+                                {exitReasonBadge(t.exitReason ?? 'MANUAL').label}
+                              </span>
+                            </div>
+                            <div className="text-[10px] text-gray-700 font-medium break-words">
+                              {t.exitDetail ?? (t.exitReason === 'MANUAL' || !t.exitReason ? 'Manual exit' : '—')}
+                            </div>
+                            <div className="mt-1 pt-1 border-t border-amber-100 text-[10px] text-gray-600 flex flex-wrap gap-x-3">
+                              <span>Fill <b>{f2(t.price)}</b></span>
+                              <span>P&amp;L <b className={(t.pnl ?? 0) >= 0 ? 'text-green-600' : 'text-red-600'}>{formatCurrency(t.pnl ?? 0)}</b></span>
+                              {t.slTrailed && <span className="text-gray-500">SL trailed</span>}
+                            </div>
+                          </div>
+                        )}
+                      </>
+                    );
+                  })()}
                   {/* Recent-price-action context: the last N Al Brooks impulse legs + the
                       pullbacks between them (newest→oldest, left→right — leftmost is closest
                       to entry). Leg = solid chip, pullback = dashed; green = bull move, red =
                       bear move. Click a chip to highlight its candles on the chart and expand
                       its tracked values. */}
-                  {t.legSequenceAtEntry && t.legSequenceAtEntry.length > 0 && (
+                  {showLegInfo && t.legSequenceAtEntry && t.legSequenceAtEntry.length > 0 && (
                     <div className="mb-2">
                       <div className="text-[9px] font-semibold text-gray-400 uppercase tracking-wider mb-1">
                         Leg Sequence ({t.legSequenceAtEntry.length}) · click a segment to locate it on the chart
@@ -1640,9 +1700,12 @@ export function AdvancedChart({
                   {/* Raw object dump — full trade record (journal + every *AtEntry instrumentation
                       field, including legSequenceAtEntry's per-leg brr/clv/uwr/lwr) so values can be
                       eyeballed directly, the same way you'd inspect an object in the console. */}
-                  <pre className="bg-gray-50 border border-gray-100 rounded p-2 text-[10px] leading-snug text-gray-700 whitespace-pre-wrap break-words">
-                    {JSON.stringify(t, null, 2)}
-                  </pre>
+                  <details className="text-[10px]">
+                    <summary className="cursor-pointer text-gray-400 hover:text-gray-600 select-none">Raw record</summary>
+                    <pre className="mt-1 bg-gray-50 border border-gray-100 rounded p-2 text-[10px] leading-snug text-gray-700 whitespace-pre-wrap break-words">
+                      {JSON.stringify(t, null, 2)}
+                    </pre>
+                  </details>
                 </div>
               ))}
             </div>

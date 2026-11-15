@@ -4,7 +4,7 @@
 // they access these actions via get() at runtime.
 
 import { saveTradeSession } from '../utils/tradeStorage';
-import { groupTradesIntoPositions, calculatePerformanceStats, recalculateTradesPnL } from '../utils/tradeAnalysis';
+import { groupTradesIntoPositions, calculatePerformanceStats, recalculateTradesPnL, describeSlTpExit } from '../utils/tradeAnalysis';
 import {
   saveSession, loadSession, restoreBackup, saveSnapshot,
   listSnapshots, listHistory, deleteSnapshot, updateCurrentSessionDrawings,
@@ -214,6 +214,17 @@ export function createSharedActions(set: StoreSet, get: StoreGet) {
         nextSlDialogShown !== position.slDialogShown ||
         nextTpDialogShown !== position.tpDialogShown;
 
+      // Exit condition text for the chart popup (Trade.exitDetail).
+      const firedKind: 'SL' | 'TP' | null = autoExitSL || dialogToTrigger === 'SL' ? 'SL'
+        : autoExitTP || dialogToTrigger === 'TP' ? 'TP' : null;
+      const exitDetail = firedKind
+        ? describeSlTpExit(
+            firedKind, isLong, firedKind === 'SL' ? sl : tp, fillPriceForTrigger,
+            { high: effectiveHigh, low: effectiveLow, close: effectiveClose },
+            fillMode, position.slTrailed,
+          )
+        : undefined;
+
       if (hasChanged || dialogToTrigger || autoExitTP || autoExitSL) {
         const updatedPosition = {
           ...position,
@@ -229,13 +240,13 @@ export function createSharedActions(set: StoreSet, get: StoreGet) {
           useNotificationStore
             .getState()
             .notify(`Stop Loss Hit at ${fillPriceForTrigger.toFixed(2)}. Auto Exiting.`, 'warning');
-          get().executeTrade(isLong ? 'SELL' : 'BUY', Math.abs(position.quantity), undefined, undefined, fillPriceForTrigger, 'SL');
+          get().executeTrade(isLong ? 'SELL' : 'BUY', Math.abs(position.quantity), undefined, undefined, fillPriceForTrigger, 'SL', undefined, undefined, undefined, exitDetail);
         } else if (autoExitTP) {
           set({ position: updatedPosition });
           useNotificationStore
             .getState()
             .notify(`Target Hit at ${tp.toFixed(2)}. Auto Exiting based on Risk settings.`, 'success');
-          get().executeTrade(isLong ? 'SELL' : 'BUY', Math.abs(position.quantity), undefined, undefined, fillPriceForTrigger, 'TP');
+          get().executeTrade(isLong ? 'SELL' : 'BUY', Math.abs(position.quantity), undefined, undefined, fillPriceForTrigger, 'TP', undefined, undefined, undefined, exitDetail);
         } else if (dialogToTrigger) {
           set({
             isPlaying: false,
@@ -243,6 +254,7 @@ export function createSharedActions(set: StoreSet, get: StoreGet) {
               type: dialogToTrigger,
               price: fillPriceForTrigger,
               spotPrice: close,
+              detail: exitDetail,
             },
             position: updatedPosition,
           });
@@ -263,7 +275,9 @@ export function createSharedActions(set: StoreSet, get: StoreGet) {
       entryMetricsOverride?: EntryMetricsSnapshot,
       // Present only when the auto engine opened this trade — stamps the position
       // so the exit engine (runAutoTrailStop/runAutoExitCheck) manages it.
-      autoMeta?: { auto: true; regime: RegimeKey; barIndex: number }
+      autoMeta?: { auto: true; regime: RegimeKey; barIndex: number },
+      // Human-readable exit condition, stamped on reducing fills only (Trade.exitDetail).
+      exitDetail?: string
     ) => {
       const { candles, currentIndex, trades, position, instrument, sessionConfig, isLiveMode, livePrice, autoBacktestConfig } = get();
       const currentCandle = candles[currentIndex];
@@ -402,6 +416,7 @@ export function createSharedActions(set: StoreSet, get: StoreGet) {
         stopLoss: tradeStopLoss,
         target: tradeTarget,
         exitReason,
+        exitDetail: isReducing ? exitDetail : undefined,
         slHit: position?.slHit || exitReason === 'SL',
         tpHit: position?.tpHit || exitReason === 'TP',
         slDialogShown: position?.slDialogShown || exitReason === 'SL',

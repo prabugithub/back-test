@@ -2,6 +2,7 @@
 
 import type { Candle, Trade, BacktestPosition, OpenPosition, ExitReason } from '../types';
 import type { TradeJournal } from '../types';
+import { describeSlTpExit } from './tradeAnalysis';
 import { type AutoBacktestConfig, type AutoSignal, type RegimeKey, MULTI_TRADE_DEFAULT_CAP, evaluateAutoSignals, evaluateTrailStop, evaluateAutoExitSignal, resolveTradeQuantity, resolveEntryHook, resolveExitHook } from './autoBacktestEngine';
 import { createHookRunState } from './entryHook';
 import { createExitHookRunState } from './exitHook';
@@ -259,7 +260,7 @@ export function runBatchSimulation(
     }
   }
 
-  function exitPosition(pos: SimPosition, candle: Candle, reason: ExitReason, fillPrice?: number) {
+  function exitPosition(pos: SimPosition, candle: Candle, reason: ExitReason, fillPrice?: number, detail?: string) {
     const exitPrice = fillPrice ?? candle.close;
     const isLong = pos.quantity > 0;
     const qty = Math.abs(pos.quantity);
@@ -279,6 +280,7 @@ export function runBatchSimulation(
       stopLoss: pos.stopLoss,
       target: pos.target,
       exitReason: reason,
+      exitDetail: detail,
       slHit: reason === 'SL',
       tpHit: reason === 'TP',
       slTrailed: pos.slTrailed || undefined,
@@ -294,7 +296,7 @@ export function runBatchSimulation(
   // Mutates `pos` (trail + reversal state) and returns the exit it decided on.
   function evaluateBarForPosition(
     pos: SimPosition, i: number, candle: Candle
-  ): { reason: ExitReason; fillPrice?: number } | null {
+  ): { reason: ExitReason; fillPrice?: number; detail?: string } | null {
     // ── 0. Pivot trailing stop — ratchet the SL before the touch check below
     //      tests it (uses only pivots confirmed through bar i-1; ratchet only).
     const trail = evaluateTrailStop(candles, i, pos, config);
@@ -352,11 +354,11 @@ export function runBatchSimulation(
     }
     // fillPrice is the bar close for the built-in reasons and may be a hook-named price
     // inside the bar; runExitHook has already refused anything outside its high/low.
-    if (exit) return { reason: exit.reason, fillPrice: exit.fillPrice ?? candle.close };
+    if (exit) return { reason: exit.reason, fillPrice: exit.fillPrice ?? candle.close, detail: exit.detail };
 
     // ── 3. Auto square-off ──────────────────────────────────────────────────
     if (config.autoSquareOff && candleTimeMinutes(candle.timestamp) >= parseHHMM(config.squareOffTime)) {
-      return { reason: 'TIME_OVER' };
+      return { reason: 'TIME_OVER', detail: `Auto square-off at ${config.squareOffTime} IST` };
     }
     return null;
   }
@@ -371,7 +373,18 @@ export function runBatchSimulation(
     // Snapshot the array first — exitPosition mutates it as we go.
     for (const pos of [...openPositions]) {
       const decision = evaluateBarForPosition(pos, i, candle);
-      if (decision) exitPosition(pos, candle, decision.reason, decision.fillPrice);
+      if (!decision) continue;
+      // SL/TP returns happen before any level moves on this bar, so pos.stopLoss /
+      // pos.target are still the levels that were touched.
+      const detail = decision.detail ?? (decision.reason === 'SL' || decision.reason === 'TP'
+        ? describeSlTpExit(
+            decision.reason, pos.quantity > 0,
+            (decision.reason === 'SL' ? pos.stopLoss : pos.target) ?? 0,
+            decision.fillPrice ?? candle.close, candle,
+            config.slTpFillMode ?? 'exact', pos.slTrailed,
+          )
+        : undefined);
+      exitPosition(pos, candle, decision.reason, decision.fillPrice, detail);
     }
 
     // ── 4. Signal check ─────────────────────────────────────────────────────

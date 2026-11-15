@@ -208,7 +208,10 @@ export function createBacktestActions(set: StoreSet, get: StoreGet) {
           undefined,
           pendingExitRequest.price,
           pendingExitRequest.type,
-          journal
+          journal,
+          undefined,
+          undefined,
+          pendingExitRequest.detail
         );
         set({ pendingExitRequest: null });
       } else {

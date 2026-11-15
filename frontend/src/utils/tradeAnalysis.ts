@@ -43,6 +43,61 @@ export function exitReasonBadge(reason: ExitReason): { cls: string; label: strin
   }
 }
 
+// Human-readable condition for an SL/TP exit (Trade.exitDetail). Shared by the single-position
+// (checkSLTPHits), multi-trade (runMultiPositionCycle) and batch simulator paths so the chart
+// popup reads the same regardless of which path booked the exit.
+export function describeSlTpExit(
+  kind: 'SL' | 'TP',
+  isLong: boolean,
+  level: number,
+  fillPrice: number,
+  bar: { high: number; low: number; close: number },
+  fillMode: 'exact' | 'close',
+  slTrailed?: boolean,
+): string {
+  const f = (v: number) => v.toFixed(2);
+  let text: string;
+  if (fillMode === 'close') {
+    // Long SL / short TP fire on close at-or-below the level; the other two at-or-above.
+    const below = (kind === 'SL') === isLong;
+    text = `close ${f(bar.close)} ${below ? '≤' : '≥'} ${kind} ${f(level)}`;
+  } else {
+    // Long SL / short TP are touched by the bar low; the other two by the bar high.
+    const useLow = (kind === 'SL') === isLong;
+    text = `${kind} ${f(level)} touched (bar ${useLow ? 'L' : 'H'} ${f(useLow ? bar.low : bar.high)})`;
+    if (Math.abs(fillPrice - level) > 1e-9) text += ` · gap fill @ ${f(fillPrice)}`;
+  }
+  if (kind === 'SL' && slTrailed) text += ' · trailed SL';
+  return text;
+}
+
+// Split the auto-engine entry reason (journal.entrySign) into labelled rows for display.
+// Built-in format: `Long [Regime] <trigger> | <pivotSeq> | LT:<mkt> | HT:<mkt>`, optionally
+// followed by ` [hook:<id>] | <log ; log>` (hookReason). A hook may replace the head with its
+// own text — anything that doesn't match a known shape is shown as-is under "Detail".
+export function parseEntryReason(reason: string): { label: string; value: string }[] {
+  const rows: { label: string; value: string }[] = [];
+  const hookAt = reason.indexOf(' [hook:');
+  const head = hookAt >= 0 ? reason.slice(0, hookAt) : reason;
+  head.split(' | ').forEach((part, i) => {
+    const p = part.trim();
+    if (!p) return;
+    if (p.startsWith('LT:')) rows.push({ label: 'LT market', value: p.slice(3) });
+    else if (p.startsWith('HT:')) rows.push({ label: 'HT market', value: p.slice(3) });
+    else if (i === 0) rows.push({ label: 'Trigger', value: p });
+    else if (i === 1) rows.push({ label: 'Pivots', value: p });
+    else rows.push({ label: 'Detail', value: p });
+  });
+  if (hookAt >= 0) {
+    const rest = reason.slice(hookAt + ' [hook:'.length);
+    const close = rest.indexOf(']');
+    rows.push({ label: 'Entry hook', value: close >= 0 ? rest.slice(0, close) : rest });
+    const tail = close >= 0 ? rest.slice(close + 1).replace(/^\s*\|\s*/, '').trim() : '';
+    if (tail) rows.push({ label: 'Hook log', value: tail });
+  }
+  return rows;
+}
+
 export interface TradePerformanceSummary {
     totalTrades: number;
     winningTrades: number;

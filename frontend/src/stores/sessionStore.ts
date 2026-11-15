@@ -55,7 +55,7 @@ export interface SessionStore {
   isPlaying: boolean;
   speed: number;
   isLoading: boolean;
-  pendingExitRequest: { type: 'SL' | 'TP' | 'TIME_OVER'; price: number; spotPrice: number } | null;
+  pendingExitRequest: { type: 'SL' | 'TP' | 'TIME_OVER'; price: number; spotPrice: number; detail?: string } | null;
   pendingTradeRequest: { type: 'BUY' | 'SELL'; quantity: number; stopLoss?: number; target?: number } | null;
 
   // ── Risk settings ────────────────────────────────────────────────────────────
@@ -157,7 +157,7 @@ export interface SessionStore {
   scrollToTime: (timestamp: number | null) => void;
   highlightCandle: (timestamp: number | null) => void;
   checkSLTPHits: (index: number, currentPrice?: number) => void;
-  executeTrade: (type: 'BUY' | 'SELL', quantity: number, stopLoss?: number, target?: number, priceOverride?: number, exitReason?: ExitReason, journal?: TradeJournal, entryMetricsOverride?: EntryMetricsSnapshot, autoMeta?: { auto: true; regime: RegimeKey; barIndex: number }) => void;
+  executeTrade: (type: 'BUY' | 'SELL', quantity: number, stopLoss?: number, target?: number, priceOverride?: number, exitReason?: ExitReason, journal?: TradeJournal, entryMetricsOverride?: EntryMetricsSnapshot, autoMeta?: { auto: true; regime: RegimeKey; barIndex: number }, exitDetail?: string) => void;
   checkTrendReversal: (index: number, currentPrice?: number) => void;
   deleteTrade: (tradeId: string) => void;
   deleteTrades: (tradeIds: string[]) => void;
@@ -202,7 +202,7 @@ export interface SessionStore {
   // ── Actions (multi-trade mode — "Skip if open" unchecked) ────────────────────
   // Each open trade is managed on its own; `position` is only a derived mirror.
   openIndependentPosition: (signal: AutoSignal, quantity: number, index: number, journal?: TradeJournal) => void;
-  closeIndependentPosition: (id: string, reason: ExitReason, fillPrice?: number) => void;
+  closeIndependentPosition: (id: string, reason: ExitReason, fillPrice?: number, detail?: string) => void;
   // Per-bar lifecycle for every open trade: trail → SL/TP → signal exits → square-off.
   // `slTpOnly` mirrors what jump()/setCurrentIndex() do on the single-position path.
   runMultiPositionCycle: (index: number, opts?: { slTpOnly?: boolean }) => void;

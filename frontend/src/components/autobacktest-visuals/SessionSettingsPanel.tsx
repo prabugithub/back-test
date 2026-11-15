@@ -222,6 +222,29 @@ export function SessionSettingsPanel({ config, onChange, isOpen, onClose, onOpen
             </select>
           </CardShell>
 
+          <CardShell title="Chart Trade Popup">
+            <label className="flex items-center gap-1.5 cursor-pointer select-none mb-1.5"
+              title="Clicking a trade bar shows why it entered (trigger, pivots, LT/HT, hook) and why it exited (SL/TP touch, reversal, hook, square-off)">
+              <input
+                type="checkbox"
+                checked={config.showTradeConditions ?? true}
+                onChange={e => onChange({ showTradeConditions: e.target.checked })}
+                className="w-3.5 h-3.5"
+              />
+              <span className="text-xs text-gray-600 font-medium">Show entry/exit conditions</span>
+            </label>
+            <label className="flex items-center gap-1.5 cursor-pointer select-none"
+              title="Leg Sequence chips for the trade (click a chip to highlight its candles on the chart)">
+              <input
+                type="checkbox"
+                checked={config.showLegInfo ?? false}
+                onChange={e => onChange({ showLegInfo: e.target.checked })}
+                className="w-3.5 h-3.5"
+              />
+              <span className="text-xs text-gray-600 font-medium">Show leg information</span>
+            </label>
+          </CardShell>
+
           <CardShell title="Trading Charges">
             <label className="flex items-center gap-1.5 cursor-pointer select-none mb-1.5">
               <input

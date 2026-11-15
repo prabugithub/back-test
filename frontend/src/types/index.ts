@@ -107,6 +107,9 @@ export interface Trade {
   stopLoss?: number;
   target?: number;
   exitReason?: ExitReason;
+  // Human-readable condition that fired the exit (e.g. "SL 123.45 touched (bar L 123.10)",
+  // "LT:Bear against for 2 bar(s)"). Exit fills only; absent on older trades.
+  exitDetail?: string;
   slTrailed?: boolean; // SL had been ratcheted by the pivot trail before this exit
   slHit?: boolean;
   tpHit?: boolean;
