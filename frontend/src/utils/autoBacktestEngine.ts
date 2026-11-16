@@ -456,6 +456,11 @@ export interface AutoBacktestConfig {
   // Chop Guard entry hook (strategies/chopGuard.ts). Defaults in DEFAULT_CHOP_GUARD there.
   chopMinEfficiency?: number; // efficiency ratio below which an entry is chop and blocked (default 0.2)
   chopMinEmaAtr?: number;     // close must be ≥ this many ATR beyond EMA21 on the trade side (default 0.4)
+  // Retrace Guard entry hook (strategies/retraceGuard.ts). Defaults in DEFAULT_RETRACE_GUARD there.
+  retraceGuardMinLegPct?: number; // leg into a swing low/high, % of its start price, that makes it major (default 1.3)
+  retraceGuardFrac?: number;      // fraction of that leg the bounce must close beyond to block the fade (default 0.5)
+  retraceGuardBullBars?: number;  // decent bounce-direction bars required in a row since the major swing (default 3)
+  retraceGuardBodyMult?: number;  // body ÷ mean body of the previous barRangeLookback bars for a decent bar (default 1.0)
 
   // Strong-trend-day windows read by the Strong-Trend H1 entry hook (strategies/strongTrendH1.ts).
   // Optional — undefined falls back to DEFAULT_TREND_DAY_WINDOWS (in that file), so saved configs need no migration.

@@ -46,6 +46,7 @@ import { higherHighShallowPullback } from './higherHighShallowPullback';
 import { srGuard } from './srGuard';
 import { chopGuard } from './chopGuard';
 import { doubleTopGuard } from './doubleTopGuard';
+import { retraceGuard } from './retraceGuard';
 import { strongTrendH1 } from './strongTrendH1';
 
 export const ENTRY_HOOKS: Record<string, EntryHookEntry> = {
@@ -73,6 +74,11 @@ export const ENTRY_HOOKS: Record<string, EntryHookEntry> = {
     label: 'Double Top / Bottom Guard (neckline)',
     description: 'Gate mode filter, both sides. After a strong reversal off a double bottom, blocks longs until a bar closes above its neckline; after a double top, blocks shorts until a close below it. Same pattern and Session Settings (Double Top Gap / Max Gap / Tol / Reversal) as the Climax exits.',
     hook: doubleTopGuard,
+  },
+  'retrace-guard': {
+    label: 'Retrace Guard (50% off major low/high)',
+    description: 'Gate mode filter, both sides. After a ≥50% bounce off an unbroken major swing low (leg ≥ Major Leg %) with 3 decent bull bars in a row, blocks shorts until a close below that low; mirror for longs off a major high. Session Settings: Major Leg % / Retrace Frac / Retrace Bars / Retrace Body ×.',
+    hook: retraceGuard,
   },
   'deep-pullback': {
     label: 'Deep Pullback Continuation',

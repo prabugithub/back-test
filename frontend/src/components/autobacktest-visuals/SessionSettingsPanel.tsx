@@ -4,6 +4,21 @@ import { MULTI_TRADE_DEFAULT_CAP, DEFAULT_LOT_SIZE, type AutoBacktestConfig } fr
 import { DEFAULT_TREND_DAY_WINDOWS } from '../../strategies/strongTrendH1';
 import { DEFAULT_CLIMAX_EXIT } from '../../strategies/exits/climax';
 import { DEFAULT_CHOP_GUARD } from '../../strategies/chopGuard';
+import { DEFAULT_RETRACE_GUARD } from '../../strategies/retraceGuard';
+
+/** Retrace Guard entry hook. Bar body baseline uses Bar Range Lookback. */
+const RETRACE_GUARD_INPUTS: Array<{
+  key: keyof typeof DEFAULT_RETRACE_GUARD; label: string; title: string; min: number; max: number; step: number;
+}> = [
+  { key: 'retraceGuardMinLegPct', label: 'Major Leg %', min: 0, max: 20, step: 0.1,
+    title: 'Retrace Guard entry hook: a swing low (high) is major when the leg into it is at least this % of the leg start price' },
+  { key: 'retraceGuardFrac', label: 'Retrace Frac', min: 0.1, max: 1.5, step: 0.05,
+    title: 'Retrace Guard entry hook: a close this fraction of the leg back off the major low (high) arms the guard. 0.5 = 50% retrace' },
+  { key: 'retraceGuardBullBars', label: 'Retrace Bars', min: 1, max: 10, step: 1,
+    title: 'Retrace Guard entry hook: decent bull bars (bear bars off a major high) required in a row since the major swing' },
+  { key: 'retraceGuardBodyMult', label: 'Retrace Body ×', min: 0, max: 5, step: 0.1,
+    title: 'Retrace Guard entry hook: a bar is decent when its body is at least this many times the mean body of the previous Bar Range Lookback bars' },
+];
 
 /** Chop Guard entry hook. ER uses the Efficiency Ratio lookback; EMA distance is in ATR. */
 const CHOP_GUARD_INPUTS: Array<{
@@ -486,6 +501,18 @@ export function SessionSettingsPanel({ config, onChange, isOpen, onClose, onOpen
                   <input
                     type="number" min={min} max={max} step={step}
                     value={config[key] ?? DEFAULT_CHOP_GUARD[key]}
+                    onChange={e => onChange({ [key]: Number(e.target.value) })}
+                    className="w-12 px-1.5 py-1 text-xs border rounded text-center"
+                  />
+                </div>
+              ))}
+              {/* Retrace Guard entry hook — major-swing bounce veto. */}
+              {RETRACE_GUARD_INPUTS.map(({ key, label, title, min, max, step }) => (
+                <div key={key} className="flex items-center justify-between gap-1">
+                  <span className="text-[10px] text-gray-500" title={title}>{label}</span>
+                  <input
+                    type="number" min={min} max={max} step={step}
+                    value={config[key] ?? DEFAULT_RETRACE_GUARD[key]}
                     onChange={e => onChange({ [key]: Number(e.target.value) })}
                     className="w-12 px-1.5 py-1 text-xs border rounded text-center"
                   />
