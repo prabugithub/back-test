@@ -457,8 +457,9 @@ export interface AutoBacktestConfig {
   chopMinEfficiency?: number; // efficiency ratio below which an entry is chop and blocked (default 0.2)
   chopMinEmaAtr?: number;     // close must be ≥ this many ATR beyond EMA21 on the trade side (default 0.4)
   // Retrace Guard entry hook (strategies/retraceGuard.ts). Defaults in DEFAULT_RETRACE_GUARD there.
-  retraceGuardMinLegPct?: number; // leg into a swing low/high, % of its start price, that makes it major (default 1.3)
-  retraceGuardFrac?: number;      // fraction of that leg the bounce must close beyond to block the fade (default 0.5)
+  retraceGuardMinLegPct?: number; // leg into a swing low/high, % of its start price, that makes it major (default 1.6)
+  retraceGuardFrac?: number;      // fraction of that leg the bounce must close beyond to arm; bottom of the blocking zone (default 0.5)
+  retraceGuardMaxFrac?: number;   // top of the blocking zone — a trigger closing beyond this fraction of the leg is allowed (default 1.25)
   retraceGuardBullBars?: number;  // decent bounce-direction bars required in a row since the major swing (default 3)
   retraceGuardBodyMult?: number;  // body ÷ mean body of the previous barRangeLookback bars for a decent bar (default 1.0)
 

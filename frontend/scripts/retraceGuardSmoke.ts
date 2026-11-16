@@ -37,7 +37,7 @@ const P: SwingPoint[] = [
   { type: 'high', price: 1020, barIndex: 40, time: 0 },
   { type: 'low', price: 990, barIndex: 50, time: 0 },
 ];
-const strong: Array<[number, number]> = [[990.5, 993.5], [993.5, 997], [997, 1001], [1001, 1006], [1006, 1004.5]];
+const strong: Array<[number, number]> = [[990.5, 993.5], [993.5, 997], [997, 1001], [1001, 1006], [1006, 1005.5]];
 
 console.log('\n1. retraceGuardRead — short triggers off a major low');
 {
@@ -55,7 +55,16 @@ console.log('\n1. retraceGuardRead — short triggers off a major low');
   assert(!retraceGuardRead(C, P, C.length - 1, false, S, LB).blocked, '≥50% but bull bars not consecutive → allowed');
 
   const E = fixture([...strong, [1004.5, 1000], [1000, 996], [996, 993]]);
-  assert(retraceGuardRead(E, P, E.length - 1, false, S, LB).blocked, 'fades back under 50% without breaking the low → still blocked');
+  const ev = retraceGuardRead(E, P, E.length - 1, false, S, LB);
+  assert(!ev.blocked && /bounce failed/.test(ev.reason), 'fades back under 50% without breaking the low → allowed (continuation short)');
+  const E2 = fixture([...strong, [1005.5, 1003], [1003, 1006]]);
+  assert(retraceGuardRead(E2, P, E2.length - 1, false, S, LB).blocked, 'dips under 50% then closes back inside the zone → blocked again');
+
+  // Beyond the zone: 1.25 × 30 above 990 = 1027.5.
+  const G = fixture([...strong, [1005.5, 1012], [1012, 1020], [1020, 1028], [1028, 1027.8]]);
+  const gv = retraceGuardRead(G, P, G.length - 1, false, S, LB);
+  assert(!gv.blocked && /stale/.test(gv.reason), `close beyond Retrace Max (125%) → allowed (${gv.reason})`);
+  assert(retraceGuardRead(G, P, G.length - 1, false, retraceGuardSettings({ retraceGuardMaxFrac: 2 }), LB).blocked, 'Retrace Max 2 → same bar blocked');
 
   const D = fixture([...strong, [1004.5, 1000], [1000, 993], [993, 989]]);
   const dv = retraceGuardRead(D, P, D.length - 1, false, S, LB);
@@ -66,12 +75,12 @@ console.log('\n1. retraceGuardRead — short triggers off a major low');
   const small: SwingPoint[] = [P[0], { type: 'high', price: 1002, barIndex: 40, time: 0 }, P[2]];
   const sv = retraceGuardRead(A, small, now, false, S, LB);
   assert(!sv.blocked && sv.major === null, `leg 1.2% < 1.3% → not a major low (${sv.reason})`);
-  assert(retraceGuardRead(A, small, now, false, retraceGuardSettings({ retraceGuardMinLegPct: 1 }), LB).blocked,
+  assert(retraceGuardRead(A, small, now, false, retraceGuardSettings({ retraceGuardMinLegPct: 1, retraceGuardMaxFrac: 2 }), LB).blocked,
     'Major Leg % 1 → the same low counts');
 
   // A newer small HL (leg < 1.3%) during the bounce does not replace the major low.
   const withHl: SwingPoint[] = [...P, { type: 'high', price: 1001.5, barIndex: 53, time: 0 }, { type: 'low', price: 996.5, barIndex: 54, time: 0 }];
-  const F = fixture([[990.5, 993.5], [993.5, 997], [997, 1001], [1001, 997], [997, 1006], [1006, 1004.5]]);
+  const F = fixture([[990.5, 993.5], [993.5, 997], [997, 1001], [1001, 997], [997, 1006], [1006, 1005.5]]);
   assert(retraceGuardRead(F, withHl, F.length - 1, false, S, LB).major === 990, 'small HL during the bounce does not replace the major low');
 
   // Leg start walks back through lower highs: 1030 → 1020 → low 990 = leg from 1030.
@@ -84,6 +93,7 @@ console.log('\n1. retraceGuardRead — short triggers off a major low');
   const bodyStrict = retraceGuardSettings({ retraceGuardBodyMult: 10 });
   assert(!retraceGuardRead(A, P, now, false, bodyStrict, LB).blocked, 'Retrace Body × 10 → no bar is decent → allowed');
   assert(!retraceGuardRead(A, P, now, false, retraceGuardSettings({ retraceGuardFrac: 0.6 }), LB).blocked, 'Retrace Frac 0.6 (1008) not reached → allowed');
+  assert(S.retraceGuardMinLegPct === 1.6 && S.retraceGuardMaxFrac === 1.25, 'defaults: Major Leg 1.6%, Retrace Max 1.25');
 }
 
 console.log('\n2. long mirror, no lookahead, settings');
@@ -118,10 +128,10 @@ console.log('\n3. NIFTY 50 15m — SELL 13497.5 at 2020-12-15 12:30');
     const from = Math.max(0, idx - (cfg.entryHookLookback ?? 1200) + 1);
     const sw = getSwingPointsAt(C, idx, from, cfg, 1);
     const v = retraceGuardRead(C, sw, idx, false, retraceGuardSettings(cfg), cfg.barRangeLookback ?? 20);
-    console.log(`   default 1.3%: ${v.reason}`);
-    assert(v.blocked, 'the 12:30 short is blocked at the default Major Leg %');
-    // The chart's circled low 13403.25 (2020-12-11 14:15) has a 13578.5 → 13403.25 leg = 1.29%,
-    // just under the default; the 13447.4 LL of 2020-12-15 is a 0.86% leg — a pullback, not major.
+    console.log(`   default 1.6%: ${v.reason}`);
+    assert(!v.blocked, 'default Major Leg 1.6%: the circled low is not major, the older one is stale → allowed');
+    // The chart's circled low 13403.25 (2020-12-11 14:15) has a 13578.5 → 13403.25 leg = 1.29%;
+    // the 13447.4 LL of 2020-12-15 is a 0.86% leg — a pullback, not major. Close 13497.5 = 54%.
     const w = retraceGuardRead(C, sw, idx, false, retraceGuardSettings({ retraceGuardMinLegPct: 1.25 }), cfg.barRangeLookback ?? 20);
     console.log(`   1.25%:        ${w.reason}`);
     assert(w.blocked && w.major === 13403.25, 'at 1.25% the major low is the circled 13403.25 and the short is blocked');
