@@ -69,7 +69,7 @@ Identifies a potential upward trend reversal.
     - 2-Back is Bearish
     - (Previous Low < 2-Back Low) OR (2-Back Low < 3-Back Low) OR (Current Low < Previous Low)
 3.  **Confirmation:**
-    - 2-Back is Bearish AND ((Previous Low < 2-Back Low) OR (2-Back Low < 3-Back Low) OR (Current Low < Previous Low))
+    - 2-Back is Bearish AND Previous is Bullish AND ((Previous Low < 2-Back Low) OR (2-Back Low < 3-Back Low) OR (Current Low < Previous Low))
 
 **Logic:**
 - A signal is valid if `(Condition 1 OR Condition 2) AND Condition 3` is met.
@@ -94,7 +94,7 @@ Identifies a potential downward trend reversal.
     - 2-Back is Bullish
     - (Previous High > 2-Back High) OR (2-Back High > 3-Back High) OR (Current High > Previous High)
 3.  **Confirmation:**
-    - 2-Back is Bullish AND ((Previous High > 2-Back High) OR (2-Back High > 3-Back High) OR (Current High > Previous High))
+    - 2-Back is Bullish AND Previous is Bearish AND ((Previous High > 2-Back High) OR (2-Back High > 3-Back High) OR (Current High > Previous High))
 
 **Logic:**
 - A signal is valid if `(Condition 1 OR Condition 2) AND Condition 3` is met.
@@ -104,6 +104,10 @@ Identifies a potential downward trend reversal.
 **Stop Loss Calculation:**
 - `MaxHigh = Max(Current High, Previous High)`
 - `SL Distance = abs(Current Close - MaxHigh) + 2` (padding)
+
+### Why Confirmation requires the previous bar's colour
+
+Both pivot types need a two-bar turn: `bull → bear → bear` for bearish and `bear → bull → bull` for bullish. Without the previous-bar check, **Simple Break** could fire on the *first* opposite bar, such as bull, bull, then a red bar that breaks the low. That bar only starts the turn. The next bar of the same colour often makes the real extreme, so the pivot landed one bar early, at the wrong price and with the wrong HH/LH label. For example, on NIFTY 15m, 21-Dec-2018 09:30 came after a green 09:15, and the real top was 09:45. With Min Pivot Gap = 1, both bars printed: "LH" on 09:30 and "HH" on 09:45.
 
 ### Min Pivot Gap (same-type separation)
 

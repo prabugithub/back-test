@@ -121,8 +121,10 @@ Auto-marks reversal pivots on the chart.
 
 | Label | Condition |
 |-------|-----------|
-| Bullish pivot | `close > prev_high` AND `close > open` |
-| Bearish pivot | `close < prev_low` AND `close < open` |
+| Bullish pivot | `close > prev_high` AND `close > open`, after a **bear → bull** turn (2-back red, previous green) |
+| Bearish pivot | `close < prev_low` AND `close < open`, after a **bull → bear** turn (2-back green, previous red) |
+
+A pivot is marked on the **second** bar of the new colour. The first bar of the turn never qualifies. For example, after a green 09:15 bar the red 09:30 bar is not a pivot, and the pivot prints on the next red bar (09:45). Full rules are in `INDICATORS_LOGIC.md` §3.
 
 Each pivot marker shows:
 - Entry price

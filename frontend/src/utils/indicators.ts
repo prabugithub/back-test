@@ -225,9 +225,13 @@ export function calculatePivotPoints(
       low_condition_bull &&                // Two back closes below three back's low
       !isPreviousBullPivot;
 
-    // Condition 3: Two back is bearish and breaks below three back's low
+    // Condition 3: Two back is bearish, previous is the first bullish bar off it (bear → bull
+    // → bull), and the low condition holds. Requiring prev bullish stops the Simple Break
+    // branch from firing on the FIRST green bar after a red one (bear → bear → bull-break):
+    // that bar is only the start of the turn, and the real pivot is the next green bar.
     const condition3_bull =
       prev2.close < prev2.open &&
+      prev.close > prev.open &&
       low_condition_bull;
 
     // Combined bullish signal
@@ -281,9 +285,13 @@ export function calculatePivotPoints(
       high_condition_bear &&               // Two back closes above three back's high
       !isPreviousBearPivot;
 
-    // Condition 3: Two back is bullish and breaks above three back's high
+    // Condition 3: Two back is bullish, previous is the first bearish bar off it (bull → bear
+    // → bear), and the high condition holds. Requiring prev bearish stops the Simple Break
+    // branch from firing on the FIRST red bar after a green one (bull → bull → bear-break),
+    // e.g. NIFTY 15m 21-Dec-2018 09:30 after a bullish 09:15 — the real pivot is 09:45.
     const condition3_bear =
       prev2.close > prev2.open &&
+      prev.close < prev.open &&
       high_condition_bear;
 
     // Combined bearish signal
