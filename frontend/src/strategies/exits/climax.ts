@@ -81,7 +81,7 @@ export function climaxReversalSettings(c: {
   };
 }
 
-function settings(ctx: ExitHookContext): { lookback: number; multiple: number } {
+export function climaxExitSettings(ctx: ExitHookContext): { lookback: number; multiple: number } {
   const c = ctx.config;
   const d = DEFAULT_CLIMAX_EXIT;
   const lb = c.climaxExitLookback;
@@ -110,7 +110,7 @@ export function doubleTopSettings(c: {
 /** Climax rule: the current bar's range against the mean of the bars before it. */
 function climaxReason(ctx: ExitHookContext): string | null {
   const { candles, index, position } = ctx;
-  const { lookback, multiple } = settings(ctx);
+  const { lookback, multiple } = climaxExitSettings(ctx);
   // Needs a full baseline window before the current bar; a short history is not evidence.
   const ratio = isClimaxBar(candles, index, lookback, multiple);
   if (ratio === null) return null;
