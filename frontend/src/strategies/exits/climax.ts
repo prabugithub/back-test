@@ -38,7 +38,7 @@ export const DEFAULT_CLIMAX_EXIT = {
   /** Fewest bars between the two tops / bottoms of a double top / bottom. */
   doubleTopMinGap: 25,
   /** Most bars between them — how far back the first top / bottom is searched. */
-  doubleTopMaxGap: 200,
+  doubleTopMaxGap: 500,
   /** How far apart the two tops / bottoms may be and still count as the same level, as a
    *  fraction of the pattern's height (higher top → neckline). */
   doubleTopTolFrac: 0.2,
