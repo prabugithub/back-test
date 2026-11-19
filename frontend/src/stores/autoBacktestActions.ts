@@ -280,6 +280,8 @@ export function createAutoBacktestActions(set: StoreSet, get: StoreGet) {
         withTrendSeen: isInitialWith,
         journal,
         ...fields,
+        entryRegime: signal.regime,
+        ...(signal.hookId ? { entryHookId: signal.hookId } : {}),
         interval: state.sessionConfig?.interval || '5',
       };
 
@@ -546,7 +548,7 @@ export function createAutoBacktestActions(set: StoreSet, get: StoreGet) {
         signal.entryMetrics,
         // Stamps the position as auto-entered so the exit engine
         // (runAutoTrailStop/runAutoExitCheck) manages it.
-        { auto: true, regime: signal.regime, barIndex: index }
+        { auto: true, regime: signal.regime, barIndex: index, hookId: signal.hookId }
       );
     },
 

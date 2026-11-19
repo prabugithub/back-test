@@ -347,9 +347,43 @@ All changes apply **immediately** — no button needed.
 
 ---
 
+## Auto-Backtest Strategy Report
+
+The **Strategy Report** section of the Auto-Backtest panel replaces *Entry Position Metrics*. It shows how each part of the current configuration performed. It appears after any run that produced trades. Click the header to open it. It is owned by `components/strategy-report/StrategyReport.tsx`, and the maths is in `utils/strategyReport.ts`.
+
+- **Filter bar.** Slicers for Regime rule-set, Direction, Entry hook stack, Exit rule, Result and Year.
+  - Each slicer lists only the values left by the other filters.
+- **Breadcrumb.** The drill path: `All trades › Regime: Uptrend › Exit rule: double top`.
+  - Click a crumb to step back to it. Click × to drop one filter.
+  - Every section below shows only the filtered trades.
+- **KPI strip.** Trades (W/L), Net P&L (Gross when charges are hidden), win rate with its 95% confidence interval, profit factor, expectancy (₹ and R per trade), average win / loss with the payoff ratio, max drawdown and the longest losing streak.
+- **Configured components.** This list is built from the active config. There is one block per enabled regime, with its direction, entry mode, SL method and RR.
+  - **Entry:**
+    - The primary entry hook and its mode, or *Built-in chain*.
+    - Each stacked guard, e.g. DB/DT Guard or Chop Guard, with its Session Settings parameters and **how many trigger bars it blocked** in the last run. Block counts are kept only for a run made in this browser session.
+  - **Exit — what closed the trades:**
+    - Every rule the configured exit hooks can fire, with its parameters. For example, Climax Profit lists *climax*, *double top* and *double bottom*.
+    - The built-ins that are switched on: TP, SL (initial), SL (trailed), Reversal, Opposite signal, Trendline break and Square-off.
+    - Each rule has its trades, win% with confidence band, net P&L, average, average R, PF and share of P&L.
+    - A configured rule that never fired shows **0 hits**.
+    - Anything that closed trades but is not in the current config is listed as *Observed* or *Not in current config*.
+  - Rows with fewer than 20 trades get a **low n** badge.
+  - Click any row to drill into it.
+- **Breakdown.** Pick any dimension: exit rule, regime, direction, entry trigger (H1/H2/L1…), entry stack, month, year, weekday, entry hour, bars held, R-multiple bucket, LT/HT market or exit reason.
+  - Add an optional second dimension to get a heatmap. Each cell shows average P&L as colour, plus win% and count.
+  - Click a row or cell to drill in.
+- **Distribution.** A histogram of R-multiples in 0.5R bins, and the equity curve of the filtered trades.
+- **Trades.** The list of filtered trades (drill-through). It can be sorted by entry time, bars held, R or P&L.
+  - Click a trade to pan the chart to its entry candle and switch to the chart page. Playback is not moved.
+- **Attribution:**
+  - New trades carry `entryRegime` and `entryHookId`. For older trades, both are read from the entry reason text.
+  - The exit rule is the prefix of the exit hook's detail, e.g. `climax:` or `double top:`.
+  - SL exits are split into initial and trailed.
+  - R = P&L ÷ (|entry − initial SL| × qty). R is blank when the trade had no stop.
+
 ## Auto-Backtest P&L Summary (Yearly / Monthly)
 
-After a backtest run, the Auto-Backtest panel shows a **Profit & Loss Summary (Yearly / Monthly)** section above *Entry Position Metrics*. It is open by default. Click the header to collapse it.
+After a backtest run, the Auto-Backtest panel shows a **Profit & Loss Summary (Yearly / Monthly)** section above the *Strategy Report*. It is open by default. Click the header to collapse it.
 
 - One row per year with trade count, win %, and P&L. Click a year to expand its months. **Expand all / Collapse all** toggles every year.
 - A **Total** row at the bottom sums the whole run.
@@ -1337,7 +1371,7 @@ A flip fill (one order that closes a position and opens the opposite one) is cha
 
 ### Where it shows (when ON)
 - **Trade Log** — first card becomes *Net P&L (after charges)* with `Gross − Charges`; a breakdown card shows turnover, order count, and each charge component; the positions table gains **Charges** (hover for breakdown) and **Net P&L** columns; win rate, PF, avg win/loss, and longs/shorts are computed on net P&L. CSV/JSON exports include the charges columns and summary.
-- **Auto-Backtest** — the Run panel shows `Gross · Charges · Net · Turnover (orders)` for closed trades of the current run, and *Entry Position Metrics* counts wins and P&L net of each trip's entry + exit charges.
+- **Auto-Backtest** — the Run panel shows `Gross · Charges · Net · Turnover (orders)` for closed trades of the current run, and the *Strategy Report* counts wins, P&L and R net of each position's charges.
 - **Auto-Backtest P&L Summary** — adds Gross and Charges columns; the Net column and win% use net P&L.
 
 ### Editing rates

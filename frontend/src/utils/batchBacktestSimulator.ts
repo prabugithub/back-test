@@ -3,6 +3,7 @@
 import type { Candle, Trade, BacktestPosition, OpenPosition, ExitReason } from '../types';
 import type { TradeJournal } from '../types';
 import { describeSlTpExit } from './tradeAnalysis';
+import { DECLINES_STATE_KEY } from '../strategies/compose';
 import { type AutoBacktestConfig, type AutoSignal, type RegimeKey, MULTI_TRADE_DEFAULT_CAP, evaluateAutoSignals, evaluateTrailStop, evaluateAutoExitSignal, resolveTradeQuantity, resolveEntryHook, resolveExitHook } from './autoBacktestEngine';
 import { createHookRunState } from './entryHook';
 import { createExitHookRunState } from './exitHook';
@@ -54,6 +55,10 @@ export interface BatchSimResult {
     error?: string;        // first trapped exception
     rejectedCount: number;
     rejectReason?: string; // first validation failure
+    // Trigger bars each hook in a STACKED entry (primary + "Also must pass" guards) declined,
+    // keyed '<regime>:<hookId>' — compose.ts DECLINES_STATE_KEY. Absent when
+    // no stack declined anything. In-memory only (never persisted with the session).
+    declines?: Record<string, number>;
   };
   // Custom EXIT hook diagnostics, same shape and the same reasoning. Reported separately
   // from the entry hook's because the two fail for different reasons: an entry hook at 0
@@ -189,6 +194,10 @@ export function runBatchSimulation(
       journal,
       interval,
     };
+    if (!isReducing) {
+      trade.entryRegime = signal.regime;
+      if (signal.hookId) trade.entryHookId = signal.hookId;
+    }
 
     // Entry-condition instrumentation only makes sense for the leg that opens/adds
     // exposure, not for a pure reduce against an existing position (matches the
@@ -444,6 +453,7 @@ export function runBatchSimulation(
           error: hookRunState.error,
           rejectedCount: hookRunState.rejectedCount,
           rejectReason: hookRunState.rejectReason,
+          declines: hookRunState.state[DECLINES_STATE_KEY] as Record<string, number> | undefined,
         }
       : undefined,
     // Same gate on the exit side: CONFIGURED, not "ran". An exit hook that was never called

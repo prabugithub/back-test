@@ -157,7 +157,7 @@ export interface SessionStore {
   scrollToTime: (timestamp: number | null) => void;
   highlightCandle: (timestamp: number | null) => void;
   checkSLTPHits: (index: number, currentPrice?: number) => void;
-  executeTrade: (type: 'BUY' | 'SELL', quantity: number, stopLoss?: number, target?: number, priceOverride?: number, exitReason?: ExitReason, journal?: TradeJournal, entryMetricsOverride?: EntryMetricsSnapshot, autoMeta?: { auto: true; regime: RegimeKey; barIndex: number }, exitDetail?: string) => void;
+  executeTrade: (type: 'BUY' | 'SELL', quantity: number, stopLoss?: number, target?: number, priceOverride?: number, exitReason?: ExitReason, journal?: TradeJournal, entryMetricsOverride?: EntryMetricsSnapshot, autoMeta?: { auto: true; regime: RegimeKey; barIndex: number; hookId?: string }, exitDetail?: string) => void;
   checkTrendReversal: (index: number, currentPrice?: number) => void;
   deleteTrade: (tradeId: string) => void;
   deleteTrades: (tradeIds: string[]) => void;

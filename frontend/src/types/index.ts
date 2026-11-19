@@ -158,6 +158,12 @@ export interface Trade {
   // only in 'full' detail mode and are stripped before Firestore persistence (averages
   // retained). See LegSegment.
   legSequenceAtEntry?: LegSegment[];
+  // Auto-engine attribution, entry fills only: which regime rule-set opened the trade and
+  // which entry-hook stack produced/approved it ('primary+guard+…', AutoSignal.hookId).
+  // Absent on manual trades and on trades booked before these were stamped — the Strategy
+  // Report falls back to parsing journal.entrySign for those.
+  entryRegime?: 'uptrend' | 'downtrend' | 'range' | 'reversal';
+  entryHookId?: string;
   interval?: string;
   liveOptionToken?: string;
   optionType?: 'CE' | 'PE';

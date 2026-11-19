@@ -1,8 +1,6 @@
 import { useState } from 'react';
-import type { Trade } from '../types';
 import type { GroupedPosition } from '../utils/tradeAnalysis';
 import { getRegimeKey, REGIME_LABELS, type RegimeKey } from '../utils/autoBacktestEngine';
-import { computeExecutionCharges, type ChargesConfig } from '../utils/charges';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -75,39 +73,6 @@ const EXIT_LABEL: Record<string, string> = {
 };
 
 // ─── Data helpers ─────────────────────────────────────────────────────────────
-
-// With chargesConfig, each trip's pnl/won are NET of the entry + exit fill charges.
-function pairTrades(trades: Trade[], chargesConfig?: ChargesConfig): RoundTrip[] {
-  const result: RoundTrip[] = [];
-  let pending: Trade | null = null;
-  for (const t of trades) {
-    if (t.journal && t.pnl === undefined) {
-      pending = t;
-    } else if (t.pnl !== undefined && pending) {
-      const regimeKey = getRegimeKey(pending.journal!.ltMarket || '');
-      const pnl = chargesConfig
-        ? t.pnl - computeExecutionCharges(pending, chargesConfig).total - computeExecutionCharges(t, chargesConfig).total
-        : t.pnl;
-      result.push({
-        entryPos: pending.journal!.entryPosition || '—',
-        ltMarket: pending.journal!.ltMarket || '—',
-        htMarket: pending.journal!.htMarket || '—',
-        ltRegime: REGIME_LABELS[regimeKey],
-        llhhPivot: pending.journal!.llhhPivot || '—',
-        direction: pending.type === 'BUY' ? 'Long' : 'Short',
-        pnl,
-        won: pnl > 0,
-        exitReason: t.exitReason || '—',
-        entryPrice: pending.price,
-        sl: pending.stopLoss ?? 0,
-        tp: pending.target ?? 0,
-        atrDepth: pending.atrDepthAtEntry ?? 0,
-      });
-      pending = null;
-    }
-  }
-  return result;
-}
 
 function groupBy<K extends string>(trips: RoundTrip[], key: (t: RoundTrip) => K): Map<K, GroupStats> {
   const map = new Map<K, GroupStats>();
@@ -672,11 +637,6 @@ function DashboardCore({ trips, compact = false }: { trips: RoundTrip[]; compact
 }
 
 // ─── Public exports ───────────────────────────────────────────────────────────
-
-export function EntryMetricsDashboard({ trades, chargesConfig }: { trades: Trade[]; chargesConfig?: ChargesConfig }) {
-  const trips = pairTrades(trades, chargesConfig);
-  return <DashboardCore trips={trips} compact />;
-}
 
 export function EntryMetricsDashboardFromPositions({ positions }: { positions: GroupedPosition[] }) {
   const trips = positionsToRoundTrips(positions);

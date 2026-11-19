@@ -36,6 +36,22 @@ export interface HookPart<H> {
 }
 
 const STACK_STATE_KEY = '__stack';
+/** Run-state key holding how many trigger bars each stacked entry hook declined —
+ *  `{ ['<regime>:<hookId>']: count }`, regime = the rule-set asking (ctx.regime). Read by
+ *  the batch simulator into hookDiagnostics.declines (the
+ *  Strategy Report's "blocked" column). Only stacks of 2+ count; a lone hook is untouched. */
+export const DECLINES_STATE_KEY = '__declines';
+
+function countDecline(ctx: EntryHookContext, id: string): void {
+  const state = ctx.state;
+  let bag = state[DECLINES_STATE_KEY] as Record<string, number> | undefined;
+  if (!bag) {
+    bag = {};
+    state[DECLINES_STATE_KEY] = bag;
+  }
+  const key = `${ctx.regime}:${id}`;
+  bag[key] = (bag[key] ?? 0) + 1;
+}
 
 function childState(state: Record<string, unknown>, id: string): Record<string, unknown> {
   let bag = state[STACK_STATE_KEY] as Record<string, Record<string, unknown>> | undefined;
@@ -64,13 +80,19 @@ export function allOfEntry(parts: HookPart<EntryHook>[]): EntryHook {
     let merged: EntryHookDecision | null = null;
     for (const { id, hook } of parts) {
       const r = hook(childCtx(ctx, id));
-      if (r === false || r === null || r === undefined) return false;
+      if (r === false || r === null || r === undefined) {
+        countDecline(ctx, id);
+        return false;
+      }
       if (r === true) {
         merged ??= {};
         continue;
       }
       if (typeof r !== 'object') return r; // let runEntryHook reject it with its own message
-      if (r.take === false) return false;
+      if (r.take === false) {
+        countDecline(ctx, id);
+        return false;
+      }
       merged ??= {};
       for (const [k, v] of Object.entries(r) as [keyof EntryHookDecision, unknown][]) {
         if (k === 'take' || v === undefined) continue;

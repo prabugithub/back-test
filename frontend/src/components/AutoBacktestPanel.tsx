@@ -5,7 +5,7 @@ import {
   Settings2, Compass, LogIn, ShieldCheck, LogOut, ShieldAlert, Download, Upload, Calendar, X, Waves, Receipt,
 } from 'lucide-react';
 import { useSessionStore } from '../stores/sessionStore';
-import { EntryMetricsDashboard } from './EntryMetricsDashboard';
+import { StrategyReport } from './strategy-report/StrategyReport';
 import { PnLPeriodReport } from './PnLPeriodReport';
 import { PromptDialog } from './PromptDialog';
 import { ConfirmDialog } from './ConfirmDialog';
@@ -180,6 +180,9 @@ export function AutoBacktestPanel({ onNavigate, hidden }: AutoBacktestPanelProps
   const trades = useSessionStore(s => s.trades);
   const sessionConfig = useSessionStore(s => s.sessionConfig);
   const reloadCandlesWithRange = useSessionStore(s => s.reloadCandlesWithRange);
+  const lastHookDiagnostics = useSessionStore(s => s.lastHookDiagnostics);
+  const scrollToTime = useSessionStore(s => s.scrollToTime);
+  const highlightCandle = useSessionStore(s => s.highlightCandle);
 
   const savedConfigs = useSessionStore(s => s.savedAutoBacktestConfigs);
   const activeConfigId = useSessionStore(s => s.activeAutoBacktestConfigId);
@@ -216,6 +219,16 @@ export function AutoBacktestPanel({ onNavigate, hidden }: AutoBacktestPanelProps
     const gross = closed.reduce((sum, p) => sum + p.realizedPnL, 0);
     return { gross, totals, net: gross - totals.total };
   }, [showCharges, trades, chargesConfig]);
+  // Strategy Report drill-through: pan the chart to the trade's entry candle (closest at or
+  // before, as TradeHistoryDialog does) without moving playback, then switch to the chart.
+  const jumpToTrade = (tsSec: number) => {
+    let idx = -1;
+    for (let i = 0; i < candles.length && candles[i].timestamp <= tsSec; i++) idx = i;
+    if (idx === -1) return;
+    scrollToTime(candles[idx].timestamp);
+    highlightCandle(candles[idx].timestamp);
+    onNavigate('chart');
+  };
   const [hoveredFilterKey, setHoveredFilterKey] = useState<PreviewFilterKey | null>(null);
 
   // Date range control — lets the date span be changed without leaving this page
@@ -540,8 +553,8 @@ export function AutoBacktestPanel({ onNavigate, hidden }: AutoBacktestPanelProps
         </div>
       )}
 
-      {/* Entry Metrics Dashboard — shown when batch trades with journal data exist */}
-      {trades.some(t => t.journal?.ltMarket) && (
+      {/* Strategy Report — config-driven attribution of the run's closed trades */}
+      {trades.length > 0 && (
         <div className="mt-3 border border-indigo-100 rounded-lg overflow-hidden">
           <button
             onClick={() => setShowMetrics(v => !v)}
@@ -549,13 +562,19 @@ export function AutoBacktestPanel({ onNavigate, hidden }: AutoBacktestPanelProps
           >
             <span className="flex items-center gap-1.5">
               <BarChart2 size={12} />
-              Entry Position Metrics
+              Strategy Report
             </span>
             <span className="text-[10px] text-indigo-400">{showMetrics ? '▲' : '▼'}</span>
           </button>
           {showMetrics && (
             <div className="px-3 pb-3">
-              <EntryMetricsDashboard trades={trades} chargesConfig={showCharges ? chargesConfig : undefined} />
+              <StrategyReport
+                trades={trades}
+                config={config}
+                chargesConfig={showCharges ? chargesConfig : undefined}
+                declines={lastHookDiagnostics?.declines}
+                onJump={jumpToTrade}
+              />
             </div>
           )}
         </div>

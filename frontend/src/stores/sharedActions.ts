@@ -275,7 +275,7 @@ export function createSharedActions(set: StoreSet, get: StoreGet) {
       entryMetricsOverride?: EntryMetricsSnapshot,
       // Present only when the auto engine opened this trade — stamps the position
       // so the exit engine (runAutoTrailStop/runAutoExitCheck) manages it.
-      autoMeta?: { auto: true; regime: RegimeKey; barIndex: number },
+      autoMeta?: { auto: true; regime: RegimeKey; barIndex: number; hookId?: string },
       // Human-readable exit condition, stamped on reducing fills only (Trade.exitDetail).
       exitDetail?: string
     ) => {
@@ -429,6 +429,8 @@ export function createSharedActions(set: StoreSet, get: StoreGet) {
         journal: journal || undefined,
         // Every `*AtEntry` field — present only on non-reducing fills.
         ...(instrumentation?.fields ?? {}),
+        // Auto-engine attribution (entry fills only) — read by the Strategy Report.
+        ...(autoMeta && !isReducing ? { entryRegime: autoMeta.regime, ...(autoMeta.hookId ? { entryHookId: autoMeta.hookId } : {}) } : {}),
         interval: sessionConfig?.interval || '5',
       };
 
