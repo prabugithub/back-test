@@ -4,6 +4,7 @@ import { Info, X, Check, Link as LinkIcon } from 'lucide-react';
 import type { TradeJournal } from '../types';
 import { analyzePivotForTrade, analyzeManualEntry } from '../utils/pivotAnalysis';
 import { calculateAlBrooks } from '../utils/indicators';
+import { resolveMinPivotGapBars } from '../utils/autoBacktestEngine';
 
 export function TradeJournalDialog() {
     const pendingTradeRequest = useSessionStore((s) => s.pendingTradeRequest);
@@ -16,6 +17,7 @@ export function TradeJournalDialog() {
 
     const candles = useSessionStore((s) => s.candles);
     const currentIndex = useSessionStore((s) => s.currentIndex);
+    const minPivotGapBars = useSessionStore((s) => resolveMinPivotGapBars(s.autoBacktestConfig));
 
     const [journal, setJournal] = useState<TradeJournal>({
         ltMarket: 'Trend',
@@ -46,7 +48,7 @@ export function TradeJournalDialog() {
             let autoEntrySign: string = 'None';
             if (!isExitTrade && candles.length > 0 && currentIndex >= 0) {
                 // 1. Pivot & Market Analysis
-                const pivotAnalysis = analyzePivotForTrade(candles, currentIndex, pendingTradeRequest.type);
+                const pivotAnalysis = analyzePivotForTrade(candles, currentIndex, pendingTradeRequest.type, minPivotGapBars);
 
                 // If it's a pivot analysis (found a pivot at this candle)
                 if (pivotAnalysis.entryPosition) {
@@ -56,7 +58,7 @@ export function TradeJournalDialog() {
                     autoHtMarket = pivotAnalysis.htMarket;
                 } else {
                     // Manual entry analysis (no pivot at current candle)
-                    const manualAnalysis = analyzeManualEntry(candles, currentIndex, pendingTradeRequest.type);
+                    const manualAnalysis = analyzeManualEntry(candles, currentIndex, pendingTradeRequest.type, minPivotGapBars);
                     autoEntryPosition = manualAnalysis.entryPosition;
                     autoLlhhPivot = manualAnalysis.llhhPivot;
                     autoLtMarket = manualAnalysis.ltMarket;
@@ -120,7 +122,7 @@ export function TradeJournalDialog() {
             });
             setExitReason('MANUAL');
         }
-    }, [pendingTradeRequest, isExitTrade, candles, currentIndex]);
+    }, [pendingTradeRequest, isExitTrade, candles, currentIndex, minPivotGapBars]);
 
     if (!pendingTradeRequest) return null;
 

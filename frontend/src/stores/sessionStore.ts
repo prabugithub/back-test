@@ -7,6 +7,8 @@ import { createLiveActions } from './liveActions';
 import { createSharedActions } from './sharedActions';
 import { createAutoBacktestActions } from './autoBacktestActions';
 import { type AutoBacktestConfig, type AutoSignal, type EntryMetricsSnapshot, type RegimeKey, defaultAutoBacktestConfig } from '../utils/autoBacktestEngine';
+import { getHookDebugMode } from '../utils/hookDebugMode';
+import type { BatchSimResult } from '../utils/batchBacktestSimulator';
 
 export interface SessionConfig {
   securityId: string;
@@ -16,6 +18,8 @@ export interface SessionConfig {
   fromDate: string;
   toDate: string;
   dataSource: 'api' | 'local' | 'live';
+  /** Local dataset id (file name in assets/market-data, no extension). Absent = legacy Nifty 5m file. */
+  localDatasetId?: string;
 }
 
 // Shared set/get types imported by all action modules — avoids `set as any` casts.
@@ -51,7 +55,7 @@ export interface SessionStore {
   isPlaying: boolean;
   speed: number;
   isLoading: boolean;
-  pendingExitRequest: { type: 'SL' | 'TP' | 'TIME_OVER'; price: number; spotPrice: number } | null;
+  pendingExitRequest: { type: 'SL' | 'TP' | 'TIME_OVER'; price: number; spotPrice: number; detail?: string } | null;
   pendingTradeRequest: { type: 'BUY' | 'SELL'; quantity: number; stopLoss?: number; target?: number } | null;
 
   // ── Risk settings ────────────────────────────────────────────────────────────
@@ -91,6 +95,19 @@ export interface SessionStore {
   lastAutoSignalReason: string;
   isBatchBacktestRunning: boolean;
   batchBacktestProgress: number; // 0–100
+  // Run the batch backtest on the MAIN THREAD instead of the Web Worker, so breakpoints
+  // inside a custom entry hook actually pause. UI-only and machine-local (localStorage via
+  // utils/hookDebugMode) — deliberately NOT part of autoBacktestConfig or uiSettings, both
+  // of which persist to Firestore and would carry a debugging preference into a saved or
+  // shared strategy. Mirrored into the store purely so the toggle re-renders.
+  hookDebugMode: boolean;
+  // Diagnostics from the most recent batch run that had a hook configured — call count,
+  // errors, rejections. Kept in the store (not just notified) so __hook.doctor() can report
+  // it after the toast has gone. null until a hooked run completes.
+  lastHookDiagnostics: BatchSimResult['hookDiagnostics'] | null;
+  // The same, for the custom EXIT hook. Separate field because the two hooks are configured
+  // independently and a run can have one without the other.
+  lastExitHookDiagnostics: BatchSimResult['exitHookDiagnostics'] | null;
 
   // ── Saved auto-backtest configurations (named, persisted setups) ────────────
   savedAutoBacktestConfigs: SavedAutoBacktestConfig[];
@@ -140,7 +157,7 @@ export interface SessionStore {
   scrollToTime: (timestamp: number | null) => void;
   highlightCandle: (timestamp: number | null) => void;
   checkSLTPHits: (index: number, currentPrice?: number) => void;
-  executeTrade: (type: 'BUY' | 'SELL', quantity: number, stopLoss?: number, target?: number, priceOverride?: number, exitReason?: ExitReason, journal?: TradeJournal, entryMetricsOverride?: EntryMetricsSnapshot, autoMeta?: { auto: true; regime: RegimeKey; barIndex: number }) => void;
+  executeTrade: (type: 'BUY' | 'SELL', quantity: number, stopLoss?: number, target?: number, priceOverride?: number, exitReason?: ExitReason, journal?: TradeJournal, entryMetricsOverride?: EntryMetricsSnapshot, autoMeta?: { auto: true; regime: RegimeKey; barIndex: number; hookId?: string }, exitDetail?: string) => void;
   checkTrendReversal: (index: number, currentPrice?: number) => void;
   deleteTrade: (tradeId: string) => void;
   deleteTrades: (tradeIds: string[]) => void;
@@ -161,6 +178,7 @@ export interface SessionStore {
   getRealizedPnL: () => number;
   toggleMarkers: (chartId?: 'primary' | 'secondary') => void;
   setTradeQuantity: (qty: number) => void;
+  setHookDebugMode: (on: boolean) => void;
   setRiskPerTrade: (risk: number) => void;
   setManualLevels: (levels: { sl: number; target: number; entry?: number } | null) => void;
   updatePositionTarget: (newTarget: number) => Promise<void>;
@@ -184,7 +202,7 @@ export interface SessionStore {
   // ── Actions (multi-trade mode — "Skip if open" unchecked) ────────────────────
   // Each open trade is managed on its own; `position` is only a derived mirror.
   openIndependentPosition: (signal: AutoSignal, quantity: number, index: number, journal?: TradeJournal) => void;
-  closeIndependentPosition: (id: string, reason: ExitReason, fillPrice?: number) => void;
+  closeIndependentPosition: (id: string, reason: ExitReason, fillPrice?: number, detail?: string) => void;
   // Per-bar lifecycle for every open trade: trail → SL/TP → signal exits → square-off.
   // `slTpOnly` mirrors what jump()/setCurrentIndex() do on the single-position path.
   runMultiPositionCycle: (index: number, opts?: { slTpOnly?: boolean }) => void;
@@ -195,6 +213,8 @@ export interface SessionStore {
   updateActiveAutoBacktestConfig: () => Promise<void>;
   applySavedAutoBacktestConfig: (id: string) => void;
   deleteSavedAutoBacktestConfig: (id: string) => Promise<void>;
+  /** Apply a config read from a local JSON file. Detaches from any active saved config. */
+  importAutoBacktestConfig: (raw: unknown, sourceName: string) => boolean;
 }
 
 export const useSessionStore = create<SessionStore>((set, get) => ({
@@ -231,8 +251,8 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
   highlightTimestamp: null,
   activeChartId: 'primary',
   sharedActiveTool: 'none',
-  primaryIndicators: ['ema21', 'alBrooks'],
-  secondaryIndicators: ['ema21', 'alBrooks'],
+  primaryIndicators: ['ema21', 'pivotPoints'],
+  secondaryIndicators: ['ema21', 'pivotPoints'],
   drawings: [],
   secondaryDrawings: [],
   isLivePriceUpdate: false,
@@ -243,6 +263,9 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
   lastAutoSignalReason: '',
   isBatchBacktestRunning: false,
   batchBacktestProgress: 0,
+  hookDebugMode: getHookDebugMode(),
+  lastHookDiagnostics: null,
+  lastExitHookDiagnostics: null,
 
   // ── Saved auto-backtest configurations initial state ─────────────────────────
   savedAutoBacktestConfigs: [],

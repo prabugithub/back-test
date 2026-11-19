@@ -2,6 +2,9 @@
 @import "tailwindcss/preflight" layer(base);
 @import "tailwindcss/utilities" layer(utilities);
 
+/* Short viewports (laptops at high zoom) — tighten fixed chrome so content keeps its height */
+@custom-variant short (@media (max-height: 760px));
+
 @theme {
   /* Color palette */
   --color-primary: #3b82f6;

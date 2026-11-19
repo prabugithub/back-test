@@ -12,6 +12,11 @@ import { useLiveStore } from '../stores/liveStore';
 import type { DrawingTool } from './ChartToolbar';
 import type { Indicator } from './ChartToolbar';
 import { calculateSMA, calculateEMA, calculatePivotPoints, calculateAlBrooks } from '../utils/indicators';
+import { resolveMinPivotGapBars } from '../utils/autoBacktestEngine';
+import { getStructureSegments, getSwingPointsAt, getTrendlinesAt, resolveTrendlineParams } from '../utils/marketStructure';
+import { drawMarketStructure } from './chart/drawMarketStructure';
+import { drawTrendlines } from './chart/drawTrendlines';
+import { drawMajorSwings } from './chart/drawMajorSwings';
 import { resampleCandles } from '../utils/resampler';
 import { useChartDrawings } from '../hooks/useChartDrawings';
 import type { Point } from '../hooks/useChartDrawings';
@@ -22,7 +27,8 @@ import { useNotificationStore } from '../stores/notificationStore';
 import { ScreenshotSaveDialog } from './ScreenshotSaveDialog';
 import type { Trade, LegSegment } from '../types';
 import { formatCurrency } from '../utils/formatters';
-import { exitReasonBadge } from '../utils/tradeAnalysis';
+import { exitReasonBadge, parseEntryReason } from '../utils/tradeAnalysis';
+import { candleSizeVsAverage, type CandleSizeStats } from '../utils/pivotAnalysis';
 import { X } from 'lucide-react';
 
 export interface ChartCallbacks {
@@ -61,6 +67,8 @@ export function AdvancedChart({
   const primaryIndicators = useSessionStore((s) => s.primaryIndicators) as Indicator[];
   const secondaryIndicators = useSessionStore((s) => s.secondaryIndicators) as Indicator[];
   const showSecondaryChart = useSessionStore((s) => s.showSecondaryChart);
+  const minPivotGapBars = useSessionStore((s) => resolveMinPivotGapBars(s.autoBacktestConfig));
+  const autoBacktestConfig = useSessionStore((s) => s.autoBacktestConfig);
 
   // The chart is "active" if it's currently selected (or in single-chart mode, always active)
   const isActiveChart = !showSecondaryChart || activeChartId === chartId;
@@ -77,10 +85,17 @@ export function AdvancedChart({
   const [pendingTextPoint, setPendingTextPoint] = useState<Point | null>(null);
   const [pendingCalloutPoints, setPendingCalloutPoints] = useState<{ p1: Point, p2: Point } | null>(null);
   const [isUploadingScreenshot, setIsUploadingScreenshot] = useState(false);
-  const [execPopup, setExecPopup] = useState<{ x: number; y: number; trades: Trade[] } | null>(null);
+  const [execPopup, setExecPopup] = useState<{ x: number; y: number; trades: Trade[]; candleStats?: CandleSizeStats } | null>(null);
+  // Window for the click popup's "candle size vs average" (Session Settings → Bar range lookback).
+  const barRangeLookback = useSessionStore((s) => s.autoBacktestConfig.barRangeLookback ?? 20);
   // A leg/pullback segment the user clicked in the Trade Record popup's Leg Sequence strip —
   // highlighted on the chart (canvas band over its candles) and expanded to its tracked values.
   const [selectedSegment, setSelectedSegment] = useState<LegSegment | null>(null);
+  // Chart trade popup display settings (Session Settings → Chart Trade Popup).
+  const showTradeConditions = useSessionStore((s) => s.autoBacktestConfig.showTradeConditions ?? true);
+  const showLegInfo = useSessionStore((s) => s.autoBacktestConfig.showLegInfo ?? false);
+  // Hiding leg info must also drop the highlighted segment band it drives on the canvas.
+  useEffect(() => { if (!showLegInfo) setSelectedSegment(null); }, [showLegInfo]);
 
   const candles = useSessionStore((s) => s.candles);
   const currentIndex = useSessionStore((s) => s.currentIndex);
@@ -142,8 +157,37 @@ export function AdvancedChart({
   // Memoize heavy calculations
   const memoizedPivots = useMemo(() => {
     if (!activeIndicators.includes('pivotPoints') || visibleCandles.length === 0) return [];
-    return calculatePivotPoints(visibleCandles);
-  }, [visibleCandles, activeIndicators]);
+    return calculatePivotPoints(visibleCandles, minPivotGapBars);
+  }, [visibleCandles, activeIndicators, minPivotGapBars]);
+
+  // EXPERIMENTAL market-structure layer — computed only while its indicator is on. The
+  // primary replay chart classifies the FULL candles array (timeline cached once per array,
+  // look-ahead safe) and cuts at currentIndex, instead of re-running on every new slice.
+  const structureSource = !isSecondary && !isLiveMode ? candles : visibleCandles;
+  const memoizedStructure = useMemo(() => {
+    if (!activeIndicators.includes('marketStructure') || structureSource.length === 0) return [];
+    const end = structureSource === candles ? currentIndex : structureSource.length - 1;
+    return getStructureSegments(structureSource, autoBacktestConfig)
+      .filter(s => s.startIndex <= end)
+      .map(s => (s.endIndex > end ? { ...s, endIndex: end } : s));
+  }, [activeIndicators, structureSource, candles, currentIndex, autoBacktestConfig]);
+
+  // Pivot trendlines as of the last shown bar — same full-array source as the structure layer.
+  const memoizedTrendlines = useMemo(() => {
+    if (!activeIndicators.includes('trendlines') || structureSource.length === 0) return null;
+    const end = structureSource === candles ? currentIndex : structureSource.length - 1;
+    return getTrendlinesAt(structureSource, end, autoBacktestConfig);
+  }, [activeIndicators, structureSource, candles, currentIndex, autoBacktestConfig]);
+
+  // Major swing points as of the last shown bar, at Session Settings → Trendlines → Swing
+  // degree — the same points ctx.swings(degree) gives hooks. Look-ahead safe: the newest
+  // point of each type waits until the next same-type swing confirms it.
+  const memoizedMajorSwings = useMemo(() => {
+    if (!activeIndicators.includes('majorSwings') || structureSource.length === 0) return [];
+    const end = structureSource === candles ? currentIndex : structureSource.length - 1;
+    const degree = resolveTrendlineParams(autoBacktestConfig).degree;
+    return getSwingPointsAt(structureSource, end, 0, autoBacktestConfig, degree);
+  }, [activeIndicators, structureSource, candles, currentIndex, autoBacktestConfig]);
 
   const memoizedAlBrooks = useMemo(() => {
     if (!activeIndicators.includes('alBrooks') || visibleCandles.length === 0) return [];
@@ -342,7 +386,22 @@ export function AdvancedChart({
         ctx.restore();
       }
     }
-  }, [chart, series, visibleCandles, activeIndicators, showMarkers, showPivotRR, memoizedPivots, isSecondary, secondaryTimeframe, chartId, highlightTimestamp, selectedSegment]);
+
+    // 5. EXPERIMENTAL — pivot market-structure bands (Indicators → Market Structure).
+    if (memoizedStructure.length > 0) {
+      drawMarketStructure(ctx, chart, series, structureSource, memoizedStructure);
+    }
+
+    // 6. Pivot trendlines (Indicators → Trendlines).
+    if (memoizedTrendlines) {
+      drawTrendlines(ctx, chart, series, structureSource, memoizedTrendlines);
+    }
+
+    // 7. Major swing points (Indicators → Major Swings).
+    if (memoizedMajorSwings.length > 0) {
+      drawMajorSwings(ctx, chart, series, structureSource, memoizedMajorSwings);
+    }
+  }, [chart, series, visibleCandles, activeIndicators, showMarkers, showPivotRR, memoizedPivots, isSecondary, secondaryTimeframe, chartId, highlightTimestamp, selectedSegment, memoizedStructure, memoizedTrendlines, memoizedMajorSwings, structureSource]);
 
   const {
     clearDrawings,
@@ -702,15 +761,17 @@ export function AdvancedChart({
         return;
       }
       const clickedTrades = useSessionStore.getState().trades.filter((t) => t.timestamp === param.time);
-      if (clickedTrades.length === 0) {
+      const idx = visibleCandles.findIndex((c) => c.timestamp === param.time);
+      const candleStats = idx !== -1 ? candleSizeVsAverage(visibleCandles, idx, barRangeLookback) : undefined;
+      if (clickedTrades.length === 0 && !candleStats) {
         setExecPopup(null);
         return;
       }
-      setExecPopup({ x: param.point.x, y: param.point.y, trades: clickedTrades });
+      setExecPopup({ x: param.point.x, y: param.point.y, trades: clickedTrades, candleStats });
     };
     chart.subscribeClick(handleClick);
     return () => chart.unsubscribeClick(handleClick);
-  }, [chart, isSecondary, activeTool]);
+  }, [chart, isSecondary, activeTool, visibleCandles, barRangeLookback]);
 
   // Close the execution popup once playback moves — it refers to a specific candle click,
   // not a persistent state, so stepping/jumping should not leave it stranded on screen.
@@ -1330,6 +1391,7 @@ export function AdvancedChart({
         '8': 'text',
         '9': 'callout',
         '0': 'channel',
+        'm': 'measure',
       };
 
       const key = e.key.toLowerCase();
@@ -1454,21 +1516,43 @@ export function AdvancedChart({
         {execPopup && (
           <div
             ref={execPopupRef}
-            className="absolute bg-white border border-gray-200 rounded-lg shadow-xl text-xs w-[26rem] max-h-[28rem] overflow-y-auto"
+            className={`absolute bg-white border border-gray-200 rounded-lg shadow-xl text-xs overflow-y-auto ${execPopup.trades.length > 0 ? 'w-[26rem] max-h-[28rem]' : 'w-64'}`}
             style={{
-              left: Math.min(execPopup.x + 12, (chartContainerRef.current?.clientWidth ?? 800) - 440),
-              top: Math.min(execPopup.y + 12, (chartContainerRef.current?.clientHeight ?? 500) - 400),
+              left: Math.min(execPopup.x + 12, (chartContainerRef.current?.clientWidth ?? 800) - (execPopup.trades.length > 0 ? 440 : 272)),
+              top: Math.min(execPopup.y + 12, (chartContainerRef.current?.clientHeight ?? 500) - (execPopup.trades.length > 0 ? 400 : 120)),
               zIndex: 300,
             }}
           >
             <div className="flex items-center justify-between px-3 py-2 border-b bg-gray-50 sticky top-0">
               <span className="font-bold text-gray-700">
-                Trade Record{execPopup.trades.length > 1 ? `s (${execPopup.trades.length})` : ''}
+                {execPopup.trades.length === 0 ? 'Candle' : <>Trade Record{execPopup.trades.length > 1 ? `s (${execPopup.trades.length})` : ''}</>}
               </span>
               <button onClick={() => { setExecPopup(null); setSelectedSegment(null); }} className="text-gray-400 hover:text-gray-700">
                 <X size={14} />
               </button>
             </div>
+            {execPopup.candleStats && (() => {
+              const cs = execPopup.candleStats;
+              const f2 = (v?: number) => (v === undefined || !Number.isFinite(v) ? '—' : v.toFixed(2));
+              const xCls = (x?: number) => x === undefined ? 'text-gray-400' : x >= 1.5 ? 'font-bold text-blue-700' : x < 0.5 ? 'text-gray-500' : 'text-gray-800';
+              const row = (label: string, v: number, avg?: number, x?: number) => (
+                <div className="grid grid-cols-[3rem_1fr_1fr_3.5rem] gap-1 items-baseline">
+                  <span className="text-gray-500">{label}</span>
+                  <span className="font-mono text-gray-800">{f2(v)}</span>
+                  <span className="font-mono text-gray-500">avg {f2(avg)}</span>
+                  <span className={`font-mono text-right ${xCls(x)}`}>{x === undefined ? '—' : `${x.toFixed(2)}×`}</span>
+                </div>
+              );
+              return (
+                <div className="px-3 py-2 border-b space-y-0.5">
+                  <div className="text-[10px] uppercase tracking-wide text-gray-400 mb-1">
+                    Size vs last {cs.lookback} bars{cs.barsUsed < cs.lookback ? ` (only ${cs.barsUsed} available)` : ''}
+                  </div>
+                  {row('Range', cs.range, cs.avgRange, cs.rangeX)}
+                  {row('Body', cs.body, cs.avgBody, cs.bodyX)}
+                </div>
+              );
+            })()}
             <div className="divide-y divide-gray-100">
               {execPopup.trades.map((t) => (
                 <div key={t.id} className="p-3">
@@ -1476,18 +1560,73 @@ export function AdvancedChart({
                     <span className={`font-bold ${t.type === 'BUY' ? 'text-green-600' : 'text-red-600'}`}>
                       {t.type}{t.optionType ? ` ${t.optionType}` : ''} @ {formatCurrency(t.price)}
                     </span>
-                    {t.exitReason && t.exitReason !== 'MANUAL' && (
+                    {!showTradeConditions && t.exitReason && t.exitReason !== 'MANUAL' && (
                       <span className={`px-1.5 py-0.5 rounded text-[9px] font-bold ${exitReasonBadge(t.exitReason).cls}`}>
                         {exitReasonBadge(t.exitReason).label}
                       </span>
                     )}
                   </div>
+                  {showTradeConditions && (() => {
+                    // An exit fill carries pnl; an entry fill doesn't. A flip fill is both.
+                    const isExit = t.pnl !== undefined;
+                    const entrySign = t.journal?.entrySign;
+                    const isEntry = !isExit || !!entrySign;
+                    const f2 = (v?: number) => (v === undefined || !Number.isFinite(v) ? '—' : v.toFixed(2));
+                    const risk = t.stopLoss !== undefined ? Math.abs(t.price - t.stopLoss) : undefined;
+                    const reward = t.target !== undefined ? Math.abs(t.target - t.price) : undefined;
+                    const rr = risk && reward !== undefined ? reward / risk : undefined;
+                    return (
+                      <>
+                        {isEntry && (
+                          <div className="mb-2 rounded border border-blue-200 bg-blue-50/50 p-2">
+                            <div className="text-[9px] font-semibold text-blue-500 uppercase tracking-wider mb-1">Entry Conditions</div>
+                            {entrySign ? (
+                              <div className="grid grid-cols-[auto_1fr] gap-x-2 gap-y-0.5 text-[10px]">
+                                {parseEntryReason(entrySign).map((row, i) => (
+                                  <div key={i} className="contents">
+                                    <span className="text-gray-400">{row.label}</span>
+                                    <span className="text-gray-700 font-medium break-words">{row.value}</span>
+                                  </div>
+                                ))}
+                              </div>
+                            ) : (
+                              <div className="text-[10px] text-gray-500 italic">Manual entry</div>
+                            )}
+                            <div className="mt-1 pt-1 border-t border-blue-100 text-[10px] text-gray-600 flex flex-wrap gap-x-3">
+                              <span>SL <b>{f2(t.stopLoss)}</b></span>
+                              <span>TP <b>{f2(t.target)}</b></span>
+                              <span>RR <b>{rr === undefined ? '—' : rr.toFixed(2)}</b></span>
+                              <span>Qty <b>{t.quantity}</b></span>
+                            </div>
+                          </div>
+                        )}
+                        {isExit && (
+                          <div className="mb-2 rounded border border-amber-200 bg-amber-50/50 p-2">
+                            <div className="flex items-center justify-between mb-1">
+                              <span className="text-[9px] font-semibold text-amber-600 uppercase tracking-wider">Exit Condition</span>
+                              <span className={`px-1.5 py-0.5 rounded text-[9px] font-bold ${exitReasonBadge(t.exitReason ?? 'MANUAL').cls}`}>
+                                {exitReasonBadge(t.exitReason ?? 'MANUAL').label}
+                              </span>
+                            </div>
+                            <div className="text-[10px] text-gray-700 font-medium break-words">
+                              {t.exitDetail ?? (t.exitReason === 'MANUAL' || !t.exitReason ? 'Manual exit' : '—')}
+                            </div>
+                            <div className="mt-1 pt-1 border-t border-amber-100 text-[10px] text-gray-600 flex flex-wrap gap-x-3">
+                              <span>Fill <b>{f2(t.price)}</b></span>
+                              <span>P&amp;L <b className={(t.pnl ?? 0) >= 0 ? 'text-green-600' : 'text-red-600'}>{formatCurrency(t.pnl ?? 0)}</b></span>
+                              {t.slTrailed && <span className="text-gray-500">SL trailed</span>}
+                            </div>
+                          </div>
+                        )}
+                      </>
+                    );
+                  })()}
                   {/* Recent-price-action context: the last N Al Brooks impulse legs + the
                       pullbacks between them (newest→oldest, left→right — leftmost is closest
                       to entry). Leg = solid chip, pullback = dashed; green = bull move, red =
                       bear move. Click a chip to highlight its candles on the chart and expand
                       its tracked values. */}
-                  {t.legSequenceAtEntry && t.legSequenceAtEntry.length > 0 && (
+                  {showLegInfo && t.legSequenceAtEntry && t.legSequenceAtEntry.length > 0 && (
                     <div className="mb-2">
                       <div className="text-[9px] font-semibold text-gray-400 uppercase tracking-wider mb-1">
                         Leg Sequence ({t.legSequenceAtEntry.length}) · click a segment to locate it on the chart
@@ -1503,7 +1642,7 @@ export function AdvancedChart({
                             <button
                               key={i}
                               onClick={() => setSelectedSegment(isSel ? null : seg)}
-                              title={`${seg.kind} ${seg.direction} · bars ${seg.startIndex}–${seg.endIndex} (${seg.barCount}) · move ${seg.movePct.toFixed(2)}% · H ${seg.high.toFixed(2)} L ${seg.low.toFixed(2)} · BRR ${seg.brrAvg.toFixed(2)} CLV ${seg.clvAvg.toFixed(2)} UWR ${seg.uwrAvg.toFixed(2)} LWR ${seg.lwrAvg.toFixed(2)} · H/L breaks ${seg.highBreakCount}/${seg.lowBreakCount}${seg.bullBear ? ` · bull/bear ${seg.bullBear.join('')}` : ''}`}
+                              title={`${seg.kind} ${seg.direction} · bars ${seg.startIndex}–${seg.endIndex} (${seg.barCount}) · move ${seg.movePct.toFixed(2)}% · H ${seg.high.toFixed(2)} L ${seg.low.toFixed(2)} · BRR ${seg.brrAvg.toFixed(2)} CLV ${seg.clvAvg.toFixed(2)} UWR ${seg.uwrAvg.toFixed(2)} LWR ${seg.lwrAvg.toFixed(2)} · H/L breaks ${seg.highBreakCount}/${seg.lowBreakCount}${seg.bullBear ? ` · bull/bear ${seg.bullBear.join('')}` : ''}${seg.hlSeq ? ` · Brooks H/L ${seg.hlSeq}` : ''}`}
                               className={`shrink-0 rounded px-1.5 py-1 text-[9px] leading-tight text-center min-w-[3rem] cursor-pointer transition-all ${
                                 bull ? 'text-green-700' : 'text-red-700'
                               } ${
@@ -1542,14 +1681,25 @@ export function AdvancedChart({
                               <span>Bull/bear bars: <b>{Number.isFinite(s.bullCount) ? `${s.bullCount}/${s.barCount - s.bullCount}` : '—'}</b></span>
                               <span>Avg BRR {fmt(s.brrAvg)} · CLV {fmt(s.clvAvg)}</span>
                               <span>Avg UWR {fmt(s.uwrAvg)} · LWR {fmt(s.lwrAvg)}</span>
+                              {/* Al Brooks pullback labels — distinct from "H/L breaks" above.
+                                  typeof (not === undefined) because hlSeq is a required field:
+                                  it's only absent on trades restored from older sessions. */}
+                              <span className="col-span-2">Brooks H/L: <b>{typeof s.hlSeq === 'string' ? (s.hlSeq === '' ? 'none' : s.hlSeq) : '—'}</b></span>
                             </div>
+                            {/* overflow-auto + whitespace-nowrap: 11 columns (4 of them raw
+                                prices) don't fit the 26rem popup — scroll rather than wrap. */}
                             {s.brr && s.brr.length > 0 && (
-                              <div className="mt-1.5 max-h-40 overflow-y-auto">
-                                <table className="w-full text-[9px] tabular-nums">
+                              <div className="mt-1.5 max-h-40 overflow-auto">
+                                <table className="w-full text-[9px] tabular-nums whitespace-nowrap">
                                   <thead className="text-gray-400 sticky top-0 bg-inherit">
                                     <tr className="text-left">
                                       <th className="pr-2 font-semibold">Bar</th>
                                       <th className="pr-2 font-semibold">Dir</th>
+                                      <th className="pr-2 font-semibold">H/L</th>
+                                      <th className="pr-2 font-semibold">O</th>
+                                      <th className="pr-2 font-semibold">H</th>
+                                      <th className="pr-2 font-semibold">L</th>
+                                      <th className="pr-2 font-semibold">C</th>
                                       <th className="pr-2 font-semibold">BRR</th>
                                       <th className="pr-2 font-semibold">CLV</th>
                                       <th className="pr-2 font-semibold">UWR</th>
@@ -1563,6 +1713,17 @@ export function AdvancedChart({
                                         <td className={`pr-2 font-bold ${s.bullBear?.[k] === 1 ? 'text-green-600' : 'text-red-600'}`}>
                                           {s.bullBear === undefined ? '—' : s.bullBear[k] === 1 ? '▲' : '▼'}
                                         </td>
+                                        {/* Blank on the many bars with no signal — a dash on
+                                            every row would drown out the few that fired. */}
+                                        <td className={`pr-2 font-bold ${s.hl?.[k]?.startsWith('H') ? 'text-green-600' : 'text-red-600'}`}>
+                                          {s.hl === undefined ? '—' : (s.hl[k] ?? '')}
+                                        </td>
+                                        {/* Raw prices of the bar — dashes on segments
+                                            stored before o/h/l/c existed. */}
+                                        <td className="pr-2 text-gray-500">{fmt(s.o?.[k])}</td>
+                                        <td className="pr-2 text-gray-500">{fmt(s.h?.[k])}</td>
+                                        <td className="pr-2 text-gray-500">{fmt(s.l?.[k])}</td>
+                                        <td className="pr-2 text-gray-500">{fmt(s.c?.[k])}</td>
                                         <td className="pr-2">{fmt(s.brr?.[k])}</td>
                                         <td className="pr-2">{fmt(s.clv?.[k])}</td>
                                         <td className="pr-2">{fmt(s.uwr?.[k])}</td>
@@ -1582,9 +1743,12 @@ export function AdvancedChart({
                   {/* Raw object dump — full trade record (journal + every *AtEntry instrumentation
                       field, including legSequenceAtEntry's per-leg brr/clv/uwr/lwr) so values can be
                       eyeballed directly, the same way you'd inspect an object in the console. */}
-                  <pre className="bg-gray-50 border border-gray-100 rounded p-2 text-[10px] leading-snug text-gray-700 whitespace-pre-wrap break-words">
-                    {JSON.stringify(t, null, 2)}
-                  </pre>
+                  <details className="text-[10px]">
+                    <summary className="cursor-pointer text-gray-400 hover:text-gray-600 select-none">Raw record</summary>
+                    <pre className="mt-1 bg-gray-50 border border-gray-100 rounded p-2 text-[10px] leading-snug text-gray-700 whitespace-pre-wrap break-words">
+                      {JSON.stringify(t, null, 2)}
+                    </pre>
+                  </details>
                 </div>
               ))}
             </div>

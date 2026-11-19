@@ -69,11 +69,12 @@ Identifies a potential upward trend reversal.
     - 2-Back is Bearish
     - (Previous Low < 2-Back Low) OR (2-Back Low < 3-Back Low) OR (Current Low < Previous Low)
 3.  **Confirmation:**
-    - 2-Back is Bearish AND ((Previous Low < 2-Back Low) OR (2-Back Low < 3-Back Low) OR (Current Low < Previous Low))
+    - 2-Back is Bearish AND Previous is Bullish AND ((Previous Low < 2-Back Low) OR (2-Back Low < 3-Back Low) OR (Current Low < Previous Low))
 
 **Logic:**
 - A signal is valid if `(Condition 1 OR Condition 2) AND Condition 3` is met.
-- Prevents consecutive signals by checking if the previous candle was already a Bullish Pivot.
+- Condition 2 additionally requires that the previous candle was not itself an emitted Bullish Pivot.
+- A valid signal is only **emitted** if it also clears the Min Pivot Gap (see below).
 
 **Stop Loss Calculation:**
 - `MinLow = Min(Current Low, Previous Low)`
@@ -93,15 +94,47 @@ Identifies a potential downward trend reversal.
     - 2-Back is Bullish
     - (Previous High > 2-Back High) OR (2-Back High > 3-Back High) OR (Current High > Previous High)
 3.  **Confirmation:**
-    - 2-Back is Bullish AND ((Previous High > 2-Back High) OR (2-Back High > 3-Back High) OR (Current High > Previous High))
+    - 2-Back is Bullish AND Previous is Bearish AND ((Previous High > 2-Back High) OR (2-Back High > 3-Back High) OR (Current High > Previous High))
 
 **Logic:**
 - A signal is valid if `(Condition 1 OR Condition 2) AND Condition 3` is met.
-- Prevents consecutive signals by checking if the previous candle was already a Bearish Pivot.
+- Condition 2 additionally requires that the previous candle was not itself an emitted Bearish Pivot.
+- A valid signal is only **emitted** if it also clears the Min Pivot Gap (see below).
 
 **Stop Loss Calculation:**
 - `MaxHigh = Max(Current High, Previous High)`
 - `SL Distance = abs(Current Close - MaxHigh) + 2` (padding)
+
+### Why Confirmation requires the previous bar's colour
+
+Both pivot types need a two-bar turn: `bull → bear → bear` for bearish and `bear → bull → bull` for bullish. Without the previous-bar check, **Simple Break** could fire on the *first* opposite bar, such as bull, bull, then a red bar that breaks the low. That bar only starts the turn. The next bar of the same colour often makes the real extreme, so the pivot landed one bar early, at the wrong price and with the wrong HH/LH label. For example, on NIFTY 15m, 21-Dec-2018 09:30 came after a green 09:15, and the real top was 09:45. With Min Pivot Gap = 1, both bars printed: "LH" on 09:30 and "HH" on 09:45.
+
+### Min Pivot Gap (same-type separation)
+
+Both branches above can fire on consecutive bars. In an uninterrupted impulse the **Simple Break**
+branch fires on nearly every bar, so without a separation rule one continuous move prints a pivot on
+bar `i` and another on bar `i+1` — and the second one gets a full `HL` / `HH` label purely because
+that bar's low/high sat above the previous *bar's*, not because any retracement happened.
+
+`Min Pivot Gap` (Session Settings → Instrumentation Lookbacks, `AutoBacktestConfig.minPivotGapBars`,
+default **2**, range 1–10, `1` = off/legacy) enforces a minimum bar separation between two pivots of
+the **same type**:
+
+- **Keep-first.** The first bar of a run of qualifying same-type signals is emitted; every later
+  signal within `minPivotGapBars` of it is dropped outright. The surviving pivot is never moved to a
+  different bar, and its `price` / `slDistance` are unchanged.
+- **Per type.** Bullish and bearish are tracked independently, so a genuine fast reversal (swing low
+  then swing high two bars later) still comes through. Cross-type adjacency is allowed by design.
+- **Labels follow the survivors.** `lastBullPrice` / `lastBearPrice` advance only on emit, so an
+  `HL` / `LL` / `HH` / `LH` label always compares against the previous *surviving* same-type pivot,
+  never against a suppressed bar.
+- **Still causal.** Suppression only reads `lastBull/BearBarIndex`, written at emits on bars strictly
+  before `i`. The function remains a left-to-right fold, so a pivot once emitted is never moved or
+  withdrawn and `getPivotPointsUpTo(candles, i)` still equals a fresh recompute on
+  `candles.slice(0, i + 1)`. The memoization in `indicators.ts` depends on this.
+
+Raising the gap yields a sparser structure skeleton. Because `analyzeMarketStructure` classifies off
+the last **4** pivots, the gap also widens the bar span that regime read covers.
 
 ---
 

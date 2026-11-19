@@ -4,7 +4,7 @@
 // they access these actions via get() at runtime.
 
 import { saveTradeSession } from '../utils/tradeStorage';
-import { groupTradesIntoPositions, calculatePerformanceStats, recalculateTradesPnL } from '../utils/tradeAnalysis';
+import { groupTradesIntoPositions, calculatePerformanceStats, recalculateTradesPnL, describeSlTpExit } from '../utils/tradeAnalysis';
 import {
   saveSession, loadSession, restoreBackup, saveSnapshot,
   listSnapshots, listHistory, deleteSnapshot, updateCurrentSessionDrawings,
@@ -15,6 +15,7 @@ import { calculatePivotPoints, getPivotPointsUpTo } from '../utils/indicators';
 import { analyzeMarketStructure, analyzeMarketStructureAt } from '../utils/pivotAnalysis';
 import { buildEntryInstrumentation } from '../utils/entryInstrumentation';
 import { buildNetPositionMirror, rebuildOpenPositionsFromTrades } from '../utils/netPosition';
+import { setHookDebugMode as persistHookDebugMode } from '../utils/hookDebugMode';
 import {
   executeLiveOrder,
   registerMonitorIfNeeded,
@@ -23,7 +24,7 @@ import {
 } from '../services/liveExecutionService';
 import type { Trade, Position, OpenPosition, TradeJournal, ExitReason } from '../types';
 import type { SessionStore, SessionConfig, StoreSet, StoreGet } from './sessionStore';
-import { isMultiTradeMode, type EntryMetricsSnapshot, type RegimeKey } from '../utils/autoBacktestEngine';
+import { isMultiTradeMode, resolveMinPivotGapBars, type EntryMetricsSnapshot, type RegimeKey } from '../utils/autoBacktestEngine';
 
 const generateTradeId = () =>
   `${Date.now()}-${Math.random().toString(36).substring(2, 11)}`;
@@ -193,7 +194,13 @@ export function createSharedActions(set: StoreSet, get: StoreGet) {
         if (autoExitSLEnabled) autoExitSL = true;
         else dialogToTrigger = 'SL';
         nextSlDialogShown = true;
-        fillPriceForTrigger = fillMode === 'exact' ? sl : effectiveClose;
+        // Exact mode: a candle that opens beyond the SL (overnight gap) fills at that open.
+        // Live ticks (currentPrice) have no bar open, so they keep the SL price.
+        const gapOpen = !currentPrice && candle ? candle.open : undefined;
+        const exactSlFill = gapOpen === undefined
+          ? sl
+          : (isLong ? Math.min(sl, gapOpen) : Math.max(sl, gapOpen));
+        fillPriceForTrigger = fillMode === 'exact' ? exactSlFill : effectiveClose;
       } else if (tpFires && !nextTpDialogShown) {
         dialogToTrigger = 'TP';
         nextTpDialogShown = true;
@@ -206,6 +213,17 @@ export function createSharedActions(set: StoreSet, get: StoreGet) {
         nextHitFirst !== position.hitFirst ||
         nextSlDialogShown !== position.slDialogShown ||
         nextTpDialogShown !== position.tpDialogShown;
+
+      // Exit condition text for the chart popup (Trade.exitDetail).
+      const firedKind: 'SL' | 'TP' | null = autoExitSL || dialogToTrigger === 'SL' ? 'SL'
+        : autoExitTP || dialogToTrigger === 'TP' ? 'TP' : null;
+      const exitDetail = firedKind
+        ? describeSlTpExit(
+            firedKind, isLong, firedKind === 'SL' ? sl : tp, fillPriceForTrigger,
+            { high: effectiveHigh, low: effectiveLow, close: effectiveClose },
+            fillMode, position.slTrailed,
+          )
+        : undefined;
 
       if (hasChanged || dialogToTrigger || autoExitTP || autoExitSL) {
         const updatedPosition = {
@@ -221,14 +239,14 @@ export function createSharedActions(set: StoreSet, get: StoreGet) {
           set({ position: updatedPosition });
           useNotificationStore
             .getState()
-            .notify(`Stop Loss Hit at ${sl.toFixed(2)}. Auto Exiting.`, 'warning');
-          get().executeTrade(isLong ? 'SELL' : 'BUY', Math.abs(position.quantity), undefined, undefined, fillPriceForTrigger, 'SL');
+            .notify(`Stop Loss Hit at ${fillPriceForTrigger.toFixed(2)}. Auto Exiting.`, 'warning');
+          get().executeTrade(isLong ? 'SELL' : 'BUY', Math.abs(position.quantity), undefined, undefined, fillPriceForTrigger, 'SL', undefined, undefined, undefined, exitDetail);
         } else if (autoExitTP) {
           set({ position: updatedPosition });
           useNotificationStore
             .getState()
             .notify(`Target Hit at ${tp.toFixed(2)}. Auto Exiting based on Risk settings.`, 'success');
-          get().executeTrade(isLong ? 'SELL' : 'BUY', Math.abs(position.quantity), undefined, undefined, fillPriceForTrigger, 'TP');
+          get().executeTrade(isLong ? 'SELL' : 'BUY', Math.abs(position.quantity), undefined, undefined, fillPriceForTrigger, 'TP', undefined, undefined, undefined, exitDetail);
         } else if (dialogToTrigger) {
           set({
             isPlaying: false,
@@ -236,6 +254,7 @@ export function createSharedActions(set: StoreSet, get: StoreGet) {
               type: dialogToTrigger,
               price: fillPriceForTrigger,
               spotPrice: close,
+              detail: exitDetail,
             },
             position: updatedPosition,
           });
@@ -256,7 +275,9 @@ export function createSharedActions(set: StoreSet, get: StoreGet) {
       entryMetricsOverride?: EntryMetricsSnapshot,
       // Present only when the auto engine opened this trade — stamps the position
       // so the exit engine (runAutoTrailStop/runAutoExitCheck) manages it.
-      autoMeta?: { auto: true; regime: RegimeKey; barIndex: number }
+      autoMeta?: { auto: true; regime: RegimeKey; barIndex: number; hookId?: string },
+      // Human-readable exit condition, stamped on reducing fills only (Trade.exitDetail).
+      exitDetail?: string
     ) => {
       const { candles, currentIndex, trades, position, instrument, sessionConfig, isLiveMode, livePrice, autoBacktestConfig } = get();
       const currentCandle = candles[currentIndex];
@@ -351,7 +372,10 @@ export function createSharedActions(set: StoreSet, get: StoreGet) {
         isInitialWith = instrumentation.isInitialWith;
       } else {
         const visibleCandlesForEntry = candles.slice(0, currentIndex + 1);
-        const { ltMarket } = analyzeMarketStructure(visibleCandlesForEntry, calculatePivotPoints(visibleCandlesForEntry));
+        const { ltMarket } = analyzeMarketStructure(
+          visibleCandlesForEntry,
+          calculatePivotPoints(visibleCandlesForEntry, resolveMinPivotGapBars(autoBacktestConfig)),
+        );
         isInitialWith =
           (type === 'BUY' && ltMarket.startsWith('Bull')) ||
           (type === 'SELL' && ltMarket.startsWith('Bear'));
@@ -392,6 +416,7 @@ export function createSharedActions(set: StoreSet, get: StoreGet) {
         stopLoss: tradeStopLoss,
         target: tradeTarget,
         exitReason,
+        exitDetail: isReducing ? exitDetail : undefined,
         slHit: position?.slHit || exitReason === 'SL',
         tpHit: position?.tpHit || exitReason === 'TP',
         slDialogShown: position?.slDialogShown || exitReason === 'SL',
@@ -404,6 +429,8 @@ export function createSharedActions(set: StoreSet, get: StoreGet) {
         journal: journal || undefined,
         // Every `*AtEntry` field — present only on non-reducing fills.
         ...(instrumentation?.fields ?? {}),
+        // Auto-engine attribution (entry fills only) — read by the Strategy Report.
+        ...(autoMeta && !isReducing ? { entryRegime: autoMeta.regime, ...(autoMeta.hookId ? { entryHookId: autoMeta.hookId } : {}) } : {}),
         interval: sessionConfig?.interval || '5',
       };
 
@@ -533,7 +560,7 @@ export function createSharedActions(set: StoreSet, get: StoreGet) {
       // every bar of the step() pipeline while a position is open, so re-deriving
       // pivots/EMA from a fresh candles.slice(0, index + 1) here every bar was the
       // same O(n)-per-bar cost as the auto-backtest engine's equivalent checks.
-      const pivots = getPivotPointsUpTo(candles, index);
+      const pivots = getPivotPointsUpTo(candles, index, resolveMinPivotGapBars(state.autoBacktestConfig));
       const { ltMarket } = analyzeMarketStructureAt(candles, index, pivots);
       const direction = position.quantity > 0 ? 'LONG' : 'SHORT';
 
@@ -651,7 +678,7 @@ export function createSharedActions(set: StoreSet, get: StoreGet) {
       };
       set({ isLoading: true });
       try {
-        await saveSession({ ...state, securityId: sessionConfig.securityId, exchangeSegment: sessionConfig.exchangeSegment, dataSource: sessionConfig.dataSource, instrumentType: sessionConfig.instrumentType || 'EQUITY' } as any);
+        await saveSession({ ...state, securityId: sessionConfig.securityId, exchangeSegment: sessionConfig.exchangeSegment, dataSource: sessionConfig.dataSource, instrumentType: sessionConfig.instrumentType || 'EQUITY', ...(sessionConfig.localDatasetId ? { localDatasetId: sessionConfig.localDatasetId } : {}) } as any);
         useNotificationStore.getState().notify('Session saved to cloud successfully!', 'success');
       } catch (e: any) {
         useNotificationStore.getState().notify(`Failed to save session: ${e.message}`, 'error');
@@ -673,6 +700,7 @@ export function createSharedActions(set: StoreSet, get: StoreGet) {
           fromDate: state.fromDate,
           toDate: state.toDate,
           dataSource: (state as any).dataSource || 'local',
+          localDatasetId: (state as any).localDatasetId,
         };
         return {
           config,
@@ -840,6 +868,13 @@ export function createSharedActions(set: StoreSet, get: StoreGet) {
     },
 
     setTradeQuantity: (tradeQuantity: number) => set({ tradeQuantity }),
+
+    // Persists to localStorage as well as the store — see utils/hookDebugMode for why it
+    // lives there rather than in autoBacktestConfig or uiSettings.
+    setHookDebugMode: (on: boolean) => {
+      persistHookDebugMode(on);
+      set({ hookDebugMode: on });
+    },
     setRiskPerTrade: (riskPerTrade: number) => set({ riskPerTrade }),
     setManualLevels: (manualLevels: SessionStore['manualLevels']) => set({ manualLevels }),
 

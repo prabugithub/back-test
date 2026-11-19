@@ -1,5 +1,4 @@
 import { useState } from 'react';
-import type { Trade } from '../types';
 import type { GroupedPosition } from '../utils/tradeAnalysis';
 import { getRegimeKey, REGIME_LABELS, type RegimeKey } from '../utils/autoBacktestEngine';
 
@@ -58,47 +57,22 @@ function atrBucket(d: number): string {
   return '>2';
 }
 
-const EXIT_ORDER = ['TP', 'SL', 'REVERSAL', 'OPP_SIGNAL', 'LEG_DECAY', 'TIME_OVER', 'MANUAL'];
+// LEG_DECAY is retired (see ExitReason in types/index.ts) but stays in both maps — trades
+// booked before the custom exit hook replaced it are still in the log.
+const EXIT_ORDER = ['TP', 'SL', 'REVERSAL', 'OPP_SIGNAL', 'TRENDLINE_BREAK', 'EXIT_HOOK', 'LEG_DECAY', 'TIME_OVER', 'MANUAL'];
 const EXIT_LABEL: Record<string, string> = {
   TP: 'TP Hit',
   SL: 'SL Hit',
   REVERSAL: 'Reversal',
   OPP_SIGNAL: 'Opp Signal',
+  TRENDLINE_BREAK: 'TL Break',
+  EXIT_HOOK: 'Exit Hook',
   LEG_DECAY: 'Leg Decay',
   TIME_OVER: 'Time Out',
   MANUAL: 'Manual',
 };
 
 // ─── Data helpers ─────────────────────────────────────────────────────────────
-
-function pairTrades(trades: Trade[]): RoundTrip[] {
-  const result: RoundTrip[] = [];
-  let pending: Trade | null = null;
-  for (const t of trades) {
-    if (t.journal && t.pnl === undefined) {
-      pending = t;
-    } else if (t.pnl !== undefined && pending) {
-      const regimeKey = getRegimeKey(pending.journal!.ltMarket || '');
-      result.push({
-        entryPos: pending.journal!.entryPosition || '—',
-        ltMarket: pending.journal!.ltMarket || '—',
-        htMarket: pending.journal!.htMarket || '—',
-        ltRegime: REGIME_LABELS[regimeKey],
-        llhhPivot: pending.journal!.llhhPivot || '—',
-        direction: pending.type === 'BUY' ? 'Long' : 'Short',
-        pnl: t.pnl,
-        won: t.pnl > 0,
-        exitReason: t.exitReason || '—',
-        entryPrice: pending.price,
-        sl: pending.stopLoss ?? 0,
-        tp: pending.target ?? 0,
-        atrDepth: pending.atrDepthAtEntry ?? 0,
-      });
-      pending = null;
-    }
-  }
-  return result;
-}
 
 function groupBy<K extends string>(trips: RoundTrip[], key: (t: RoundTrip) => K): Map<K, GroupStats> {
   const map = new Map<K, GroupStats>();
@@ -663,11 +637,6 @@ function DashboardCore({ trips, compact = false }: { trips: RoundTrip[]; compact
 }
 
 // ─── Public exports ───────────────────────────────────────────────────────────
-
-export function EntryMetricsDashboard({ trades }: { trades: Trade[] }) {
-  const trips = pairTrades(trades);
-  return <DashboardCore trips={trips} compact />;
-}
 
 export function EntryMetricsDashboardFromPositions({ positions }: { positions: GroupedPosition[] }) {
   const trips = positionsToRoundTrips(positions);
