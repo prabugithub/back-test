@@ -372,6 +372,31 @@ The **Strategy Report** section of the Auto-Backtest panel replaces *Entry Posit
 - **Breakdown.** Pick any dimension: exit rule, regime, direction, entry trigger (H1/H2/L1…), entry stack, month, year, weekday, entry hour, bars held, R-multiple bucket, LT/HT market or exit reason.
   - Add an optional second dimension to get a heatmap. Each cell shows average P&L as colour, plus win% and count.
   - Click a row or cell to drill in.
+- **Profit giveback.** Shows how much open profit trades reached and how much of it they handed back.
+  - **Peak (open profit):** the best high (long) or low (short) on the bars **after the entry bar and before the exit bar**.
+    - The exit bar is left out because one candle can't show whether its extreme came before the stop.
+    - Peak is never below 0.
+    - It is measured from the loaded candles. Trades with no initial stop, or outside the loaded candles, are *Not measurable*.
+    - All ₹ in this section are **gross** of charges.
+  - **Good profit** = peak ≥ **T R**. T defaults to 1R and is set with the input at the top of the section (remembered in this browser).
+  - **Totals:**
+    - Peak profit available (sum of every trade's peak).
+    - Realized gross.
+    - **Given back to market** = Σ (peak − profit kept); a loser's whole peak counts.
+    - Capture % = realized ÷ peak.
+    - How many trades reached T, and how much those trades gave back.
+  - **Scenarios.** Trades that reached T split into:
+    - *→ full stop*: final ≤ −0.8R.
+    - *→ loss*.
+    - *→ breakeven*: within ±0.1R.
+    - *→ small profit*: kept < 50% of the peak.
+    - *→ kept most*.
+    - Trades whose peak stayed below T are *Peak < T → win / loss*.
+  - Per scenario the table shows: trades, average peak R, average final R, profit given back, swing to exit (also counts the loss beyond entry), net P&L, bars to peak, and bars from peak to exit.
+  - Click a scenario to drill in. *Giveback scenario* is also a slicer and a Breakdown dimension, e.g. exit rule × scenario.
+  - **Scatter chart:** peak R against final R. The diagonal means "exited at the peak"; the further below it, the more was given back. Click a point to open the trade on the chart.
+  - The component scorecard adds **Avg peak**, **Given back** and **Capture** columns. The trade list adds **Peak**, **Given back** and **Peak→exit** bars.
+  - A TP that fills on the exit bar can show capture above 100%, because its peak excludes that bar.
 - **Distribution.** A histogram of R-multiples in 0.5R bins, and the equity curve of the filtered trades.
 - **Trades.** The list of filtered trades (drill-through). It can be sorted by entry time, bars held, R or P&L.
   - Click a trade to pan the chart to its entry candle and switch to the chart page. Playback is not moved.

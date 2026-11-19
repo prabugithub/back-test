@@ -1,9 +1,9 @@
 import { useMemo, useState } from 'react';
 import { ArrowDown, ArrowUp, Crosshair } from 'lucide-react';
-import { type ReportTrade, fmtMoney, fmtR, regimeLabel, stackLabel, pnlColor } from '../../utils/strategyReport';
+import { type ReportTrade, fmtMoney, fmtR, givebackLabel, regimeLabel, stackLabel, pnlColor } from '../../utils/strategyReport';
 
 
-type SortKey = 'entryTs' | 'pnl' | 'r' | 'barsHeld';
+type SortKey = 'entryTs' | 'pnl' | 'r' | 'barsHeld' | 'mfeR' | 'givebackRs';
 const PAGE = 50;
 
 /** Drill-through: the trades behind whatever is filtered. Clicking a row jumps the chart. */
@@ -40,6 +40,9 @@ export function TradeList({ rows, onJump }: { rows: ReportTrade[]; onJump: (tsSe
             {header('barsHeld', 'Bars')}
             {header('r', 'R')}
             {header('pnl', 'P&L')}
+            {header('mfeR', 'Peak')}
+            {header('givebackRs', 'Given back')}
+            <th className="text-right font-medium pb-1" title="Bars from the peak bar to the exit">Peak→exit</th>
             <th className="text-left font-medium pb-1 pl-3">Exit detail</th>
           </tr>
         </thead>
@@ -63,6 +66,9 @@ export function TradeList({ rows, onJump }: { rows: ReportTrade[]; onJump: (tsSe
               <td className="py-0.5 text-right tabular-nums text-gray-600">{t.barsHeld ?? '—'}</td>
               <td className={`py-0.5 text-right tabular-nums ${t.r === null ? 'text-gray-300' : pnlColor(t.r)}`}>{fmtR(t.r)}</td>
               <td className={`py-0.5 text-right tabular-nums font-semibold ${pnlColor(t.pnl)}`}>{fmtMoney(t.pnl)}</td>
+              <td className="py-0.5 text-right tabular-nums text-gray-600" title={t.mfeRs === null ? 'Not measurable' : `Peak open profit ${fmtMoney(t.mfeRs)}`}>{fmtR(t.mfeR)}</td>
+              <td className="py-0.5 text-right tabular-nums text-red-600" title={givebackLabel(t.scenario)}>{t.givebackRs ? fmtMoney(-t.givebackRs) : '—'}</td>
+              <td className="py-0.5 text-right tabular-nums text-gray-600">{t.barsPeakToExit ?? '—'}</td>
               <td className="py-0.5 pl-3 text-gray-400 max-w-[260px] truncate" title={t.exitDetail}>{t.exitDetail || '—'}</td>
             </tr>
           ))}

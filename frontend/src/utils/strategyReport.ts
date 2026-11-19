@@ -8,7 +8,7 @@
  *
  * No React here — everything is a function of (trades, config).
  */
-import type { Trade } from '../types';
+import type { Candle, Trade } from '../types';
 import { groupTradesIntoPositions } from './tradeAnalysis';
 import { computePositionsCharges, toNetPositions, type ChargesConfig } from './charges';
 import {
@@ -45,6 +45,20 @@ export interface ReportTrade {
   qty: number;
   exitDetail: string;
   entryReason: string;
+  /** Gross P&L — `pnl` may be net of charges; giveback is a market measure, always gross. */
+  grossPnl: number;
+  /** |entry − initial SL| in points; null without a stop. */
+  riskPts: number | null;
+  // ── Excursion fields — filled by attachExcursions (null until then, or when the
+  //    trade's candles are not loaded). ──
+  mfePts: number | null;       // best favorable move from entry, points (≥ 0)
+  mfeRs: number | null;        // mfePts × qty — peak open profit, gross ₹
+  mfeR: number | null;         // mfePts ÷ riskPts
+  finalR: number | null;       // grossPnl ÷ (riskPts × qty)
+  barsToPeak: number | null;   // bars from entry to the peak bar
+  barsPeakToExit: number | null;
+  givebackRs: number | null;   // profit given back = mfeRs − max(grossPnl, 0)
+  scenario: GivebackScenario;
 }
 
 const REGIME_BY_LABEL: Record<string, RegimeKey> = Object.fromEntries(
@@ -98,6 +112,7 @@ function intervalMinutes(interval: string | undefined): number | null {
 /** One row per CLOSED position. With chargesConfig, pnl (and R) are net of charges. */
 export function buildReportRows(trades: Trade[], chargesConfig?: ChargesConfig): ReportTrade[] {
   let positions = groupTradesIntoPositions(trades).filter(p => p.status === 'CLOSED');
+  const grossById = new Map(positions.map(p => [p.id, p.realizedPnL]));
   if (chargesConfig) {
     const { byPositionId } = computePositionsCharges(positions, chargesConfig);
     positions = toNetPositions(positions, byPositionId);
@@ -136,8 +151,178 @@ export function buildReportRows(trades: Trade[], chargesConfig?: ChargesConfig):
       qty: p.totalQuantity,
       exitDetail: exit?.exitDetail ?? '',
       entryReason: entry?.journal?.entrySign ?? '',
+      grossPnl: grossById.get(p.id) ?? p.realizedPnL,
+      riskPts: risk > 0 ? risk / p.totalQuantity : null,
+      mfePts: null, mfeRs: null, mfeR: null, finalR: null,
+      barsToPeak: null, barsPeakToExit: null, givebackRs: null,
+      scenario: 'not measurable',
     };
   });
+}
+
+// ─── Profit giveback (peak open profit vs what was kept) ───────────────────────
+
+export type GivebackScenario =
+  | 'peak→stop' | 'peak→loss' | 'peak→breakeven' | 'peak→small profit' | 'peak→kept most'
+  | 'below T→win' | 'below T→loss' | 'not measurable';
+
+export const GIVEBACK_ORDER: GivebackScenario[] = [
+  'peak→stop', 'peak→loss', 'peak→breakeven', 'peak→small profit', 'peak→kept most',
+  'below T→win', 'below T→loss', 'not measurable',
+];
+
+/** Bands (in R / capture fraction) that split the trades which reached the threshold. */
+export const GIVEBACK_BANDS = {
+  stopR: -0.8,        // final ≤ this = gave it all back and took (about) the full stop
+  breakevenR: 0.1,    // |final| ≤ this = scratched at breakeven
+  keptCapture: 0.5,   // kept ≥ this share of the peak = "kept most"
+};
+
+export const DEFAULT_GIVEBACK_THRESHOLD_R = 1;
+
+export function givebackLabel(v: string, thresholdR?: number): string {
+  const t = thresholdR === undefined ? 'T' : `${thresholdR}R`;
+  switch (v as GivebackScenario) {
+    case 'peak→stop': return 'Good profit → full stop';
+    case 'peak→loss': return 'Good profit → loss';
+    case 'peak→breakeven': return 'Good profit → breakeven';
+    case 'peak→small profit': return 'Good profit → small profit';
+    case 'peak→kept most': return 'Good profit → kept most';
+    case 'below T→win': return `Peak < ${t} → win`;
+    case 'below T→loss': return `Peak < ${t} → loss`;
+    default: return 'Not measurable';
+  }
+}
+
+/** Last index with candles[i].timestamp <= ts (candles ascending, seconds). −1 if none. */
+function indexAtOrBefore(candles: Candle[], ts: number): number {
+  let lo = 0, hi = candles.length - 1, ans = -1;
+  while (lo <= hi) {
+    const mid = (lo + hi) >> 1;
+    if (candles[mid].timestamp <= ts) { ans = mid; lo = mid + 1; } else hi = mid - 1;
+  }
+  return ans;
+}
+
+function classify(mfeR: number, finalR: number, capture: number | null, t: number): GivebackScenario {
+  if (mfeR < t) return finalR > 0 ? 'below T→win' : 'below T→loss';
+  if (finalR <= GIVEBACK_BANDS.stopR) return 'peak→stop';
+  if (finalR < -GIVEBACK_BANDS.breakevenR) return 'peak→loss';
+  if (finalR <= GIVEBACK_BANDS.breakevenR) return 'peak→breakeven';
+  if (capture !== null && capture < GIVEBACK_BANDS.keptCapture) return 'peak→small profit';
+  return 'peak→kept most';
+}
+
+/**
+ * Fill each row's excursion fields from the loaded candles.
+ *
+ * Peak = best high (long) / low (short) over the bars strictly AFTER the entry bar and
+ * strictly BEFORE the exit bar. The entry bar is skipped because entries fill at its close;
+ * the exit bar is skipped because one OHLC bar cannot say whether its extreme printed
+ * before or after the stop — counting it would overstate the giveback of every stop-out.
+ * Peak is floored at 0 (a trade that never went green has MFE 0).
+ *
+ * Rows whose entry/exit bar is not in `candles` (another symbol or range loaded) or that
+ * have no initial stop (no R) stay 'not measurable'.
+ */
+export function attachExcursions(rows: ReportTrade[], candles: Candle[], thresholdR: number): ReportTrade[] {
+  if (candles.length === 0) return rows;
+  const first = candles[0].timestamp;
+  const last = candles[candles.length - 1].timestamp;
+  return rows.map(t => {
+    const exitSec = t.exitTs > 1e11 ? Math.round(t.exitTs / 1000) : t.exitTs;
+    if (t.riskPts === null || t.entryTsSec < first || exitSec > last) return t;
+    const ei = indexAtOrBefore(candles, t.entryTsSec);
+    const xi = indexAtOrBefore(candles, exitSec);
+    if (ei < 0 || xi < ei || candles[ei].timestamp !== t.entryTsSec) return t;
+
+    const isLong = t.direction === 'Long';
+    let best = 0, bestIdx = ei;
+    for (let i = ei + 1; i < xi; i++) {
+      const move = isLong ? candles[i].high - t.entryPrice : t.entryPrice - candles[i].low;
+      if (move > best) { best = move; bestIdx = i; }
+    }
+    const mfeRs = best * t.qty;
+    const riskRs = t.riskPts * t.qty;
+    const mfeR = best / t.riskPts;
+    const finalR = t.grossPnl / riskRs;
+    const capture = mfeRs > 0 ? t.grossPnl / mfeRs : null;
+    return {
+      ...t,
+      mfePts: best,
+      mfeRs,
+      mfeR,
+      finalR,
+      barsToPeak: best > 0 ? bestIdx - ei : null,
+      barsPeakToExit: best > 0 ? xi - bestIdx : null,
+      givebackRs: Math.max(0, mfeRs - Math.max(t.grossPnl, 0)),
+      scenario: classify(mfeR, finalR, capture, thresholdR),
+    };
+  });
+}
+
+export interface ScenarioStats {
+  scenario: GivebackScenario;
+  n: number;
+  net: number;
+  avgPeakR: number | null;
+  avgFinalR: number | null;
+  givebackRs: number;      // Σ profit given back
+  swingRs: number;         // Σ max(0, peak − final) — also counts the loss beyond entry. Exits that
+                           // fill beyond the measured peak (TP on the excluded exit bar) count 0.
+  avgBarsToPeak: number | null;
+  avgBarsPeakToExit: number | null;
+}
+
+export interface GivebackSummary {
+  measured: number;
+  notMeasurable: number;
+  peakRs: number;          // Σ peak open profit available
+  realizedGross: number;   // Σ gross P&L of the measured trades
+  givebackRs: number;      // Σ profit given back
+  reachedT: number;        // trades whose peak reached the threshold
+  reachedTGivebackRs: number;
+  capture: number | null;  // realizedGross ÷ peakRs
+  scenarios: ScenarioStats[];
+}
+
+const mean = (xs: number[]): number | null => (xs.length ? xs.reduce((a, b) => a + b, 0) / xs.length : null);
+
+export function computeGiveback(rows: ReportTrade[]): GivebackSummary {
+  const measured = rows.filter(t => t.mfeRs !== null);
+  const by = new Map<GivebackScenario, ReportTrade[]>();
+  for (const t of rows) {
+    const l = by.get(t.scenario);
+    if (l) l.push(t); else by.set(t.scenario, [t]);
+  }
+  const peakRs = measured.reduce((a, t) => a + t.mfeRs!, 0);
+  const realizedGross = measured.reduce((a, t) => a + t.grossPnl, 0);
+  const reached = measured.filter(t => t.scenario.startsWith('peak→'));
+  return {
+    measured: measured.length,
+    notMeasurable: rows.length - measured.length,
+    peakRs,
+    realizedGross,
+    givebackRs: measured.reduce((a, t) => a + t.givebackRs!, 0),
+    reachedT: reached.length,
+    reachedTGivebackRs: reached.reduce((a, t) => a + t.givebackRs!, 0),
+    capture: peakRs > 0 ? realizedGross / peakRs : null,
+    scenarios: GIVEBACK_ORDER.filter(sc => by.has(sc)).map(sc => {
+      const l = by.get(sc)!;
+      const m = l.filter(t => t.mfeRs !== null);
+      return {
+        scenario: sc,
+        n: l.length,
+        net: l.reduce((a, t) => a + t.pnl, 0),
+        avgPeakR: mean(m.map(t => t.mfeR!)),
+        avgFinalR: mean(m.map(t => t.finalR!)),
+        givebackRs: m.reduce((a, t) => a + t.givebackRs!, 0),
+        swingRs: m.reduce((a, t) => a + Math.max(0, t.mfeRs! - t.grossPnl), 0),
+        avgBarsToPeak: mean(m.filter(t => t.barsToPeak !== null).map(t => t.barsToPeak!)),
+        avgBarsPeakToExit: mean(m.filter(t => t.barsPeakToExit !== null).map(t => t.barsPeakToExit!)),
+      };
+    }),
+  };
 }
 
 // ─── Statistics ───────────────────────────────────────────────────────────────
@@ -160,6 +345,10 @@ export interface Stats {
   rCount: number;
   maxDD: number;            // positive ₹, from cumulative P&L in exit order
   maxConsecLosses: number;
+  // Giveback aggregates over the rows that have excursions attached (null when none do).
+  avgPeakR: number | null;
+  givebackRs: number | null;
+  capture: number | null;   // Σ gross ÷ Σ peak
 }
 
 /** Wilson score interval — honest for small n and for win rates near 0/100. */
@@ -181,6 +370,8 @@ export function computeStats(rows: ReportTrade[]): Stats {
   }
   const n = rows.length;
   const losses = n - wins;
+  const measured = rows.filter(t => t.mfeRs !== null);
+  const peakSum = measured.reduce((a, t) => a + t.mfeRs!, 0);
   const [ciLow, ciHigh] = wilson(wins, n);
 
   let cum = 0, peak = 0, maxDD = 0, run = 0, maxRun = 0;
@@ -206,6 +397,9 @@ export function computeStats(rows: ReportTrade[]): Stats {
     rCount,
     maxDD,
     maxConsecLosses: maxRun,
+    avgPeakR: measured.length ? measured.reduce((a, t) => a + t.mfeR!, 0) / measured.length : null,
+    givebackRs: measured.length ? measured.reduce((a, t) => a + t.givebackRs!, 0) : null,
+    capture: peakSum > 0 ? measured.reduce((a, t) => a + t.grossPnl, 0) / peakSum : null,
   };
 }
 
@@ -216,7 +410,7 @@ export const LOW_SAMPLE = 20;
 
 export type DimKey =
   | 'regime' | 'direction' | 'trigger' | 'entryStack' | 'exitRule' | 'exitReason' | 'result'
-  | 'year' | 'month' | 'weekday' | 'hour' | 'ltMarket' | 'htMarket' | 'barsHeld' | 'rBucket';
+  | 'year' | 'month' | 'weekday' | 'hour' | 'ltMarket' | 'htMarket' | 'barsHeld' | 'rBucket' | 'giveback';
 
 export interface Dimension {
   key: DimKey;
@@ -281,11 +475,12 @@ export const DIMENSIONS: Record<DimKey, Dimension> = {
   htMarket: { key: 'htMarket', label: 'HT market', get: t => t.htMarket },
   barsHeld: { key: 'barsHeld', label: 'Bars held', get: t => barsBucket(t.barsHeld), order: BARS_ORDER },
   rBucket: { key: 'rBucket', label: 'R-multiple', get: t => rBucket(t.r), order: R_ORDER },
+  giveback: { key: 'giveback', label: 'Giveback scenario', get: t => t.scenario, format: v => givebackLabel(v), order: GIVEBACK_ORDER },
 };
 
 /** Dimensions offered in the Breakdown picker, in menu order. */
 export const BREAKDOWN_DIMS: DimKey[] = [
-  'exitRule', 'regime', 'direction', 'trigger', 'entryStack', 'month', 'year', 'weekday', 'hour',
+  'exitRule', 'giveback', 'regime', 'direction', 'trigger', 'entryStack', 'month', 'year', 'weekday', 'hour',
   'barsHeld', 'rBucket', 'ltMarket', 'htMarket', 'exitReason',
 ];
 
@@ -556,6 +751,10 @@ export function fmtMoney(n: number): string {
 export function fmtPF(pf: number): string {
   if (pf === Infinity) return '∞';
   return pf === 0 ? '—' : pf.toFixed(2);
+}
+
+export function fmtPct(f: number | null): string {
+  return f === null ? '—' : `${Math.round(f * 100)}%`;
 }
 
 export function fmtR(r: number | null): string {

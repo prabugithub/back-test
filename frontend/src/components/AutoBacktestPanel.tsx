@@ -574,6 +574,7 @@ export function AutoBacktestPanel({ onNavigate, hidden }: AutoBacktestPanelProps
                 chargesConfig={showCharges ? chargesConfig : undefined}
                 declines={lastHookDiagnostics?.declines}
                 onJump={jumpToTrade}
+                candles={candles}
               />
             </div>
           )}

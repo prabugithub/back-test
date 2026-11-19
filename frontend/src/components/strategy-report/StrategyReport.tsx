@@ -1,11 +1,11 @@
 import { useMemo, useState } from 'react';
 import { ChevronRight, X } from 'lucide-react';
-import type { Trade } from '../../types';
+import type { Candle, Trade } from '../../types';
 import type { AutoBacktestConfig } from '../../utils/autoBacktestEngine';
 import type { ChargesConfig } from '../../utils/charges';
 import {
   type DimKey, type ReportFilter, type Stats,
-  DIMENSIONS, applyFilters, buildReportRows, buildScorecard, computeStats, fmtMoney, fmtPF, fmtR,
+  DIMENSIONS, DEFAULT_GIVEBACK_THRESHOLD_R, applyFilters, attachExcursions, buildReportRows, buildScorecard, computeStats, fmtMoney, fmtPF, fmtR,
   formatDimValue, groupRows, pushFilters, sortDimValues,
   pfColor, pnlColor,
 } from '../../utils/strategyReport';
@@ -13,6 +13,7 @@ import { ComponentScorecard } from './ComponentScorecard';
 import { BreakdownPanel } from './BreakdownPanel';
 import { Distribution } from './Distribution';
 import { TradeList } from './TradeList';
+import { GivebackSection } from './GivebackSection';
 import { SectionTitle } from './shared';
 
 interface Props {
@@ -22,10 +23,19 @@ interface Props {
   /** hookDiagnostics.declines of the latest run in this session (undefined after a restore). */
   declines?: Record<string, number>;
   onJump: (tsSec: number) => void;
+  /** Loaded candles — the peak-profit (giveback) measures are read off these. */
+  candles: Candle[];
 }
 
 /** Slicers in the filter bar, in order. Everything else is reachable by drilling. */
-const SLICERS: DimKey[] = ['regime', 'direction', 'entryStack', 'exitRule', 'result', 'year'];
+const SLICERS: DimKey[] = ['regime', 'direction', 'entryStack', 'exitRule', 'giveback', 'result', 'year'];
+
+const THRESHOLD_KEY = 'bt.report.givebackR';
+
+function readThreshold(): number {
+  const v = Number(localStorage.getItem(THRESHOLD_KEY));
+  return Number.isFinite(v) && v > 0 ? v : DEFAULT_GIVEBACK_THRESHOLD_R;
+}
 
 function Kpi({ label, value, sub, tone = 'text-gray-800' }: { label: string; value: string; sub?: string; tone?: string }) {
   return (
@@ -53,11 +63,18 @@ function KpiStrip({ s, net }: { s: Stats; net: boolean }) {
   );
 }
 
-export function StrategyReport({ trades, config, chargesConfig, declines, onJump }: Props) {
+export function StrategyReport({ trades, config, chargesConfig, declines, onJump, candles }: Props) {
   const [filters, setFilters] = useState<ReportFilter[]>([]);
   const [showTrades, setShowTrades] = useState(true);
+  const [thresholdR, setThresholdR] = useState(readThreshold);
+  const changeThreshold = (r: number) => {
+    setThresholdR(r);
+    localStorage.setItem(THRESHOLD_KEY, String(r));
+  };
 
-  const allRows = useMemo(() => buildReportRows(trades, chargesConfig), [trades, chargesConfig]);
+  const baseRows = useMemo(() => buildReportRows(trades, chargesConfig), [trades, chargesConfig]);
+  // Separate memo so moving the threshold re-classifies without re-pairing the fills.
+  const allRows = useMemo(() => attachExcursions(baseRows, candles, thresholdR), [baseRows, candles, thresholdR]);
   const rows = useMemo(() => applyFilters(allRows, filters), [allRows, filters]);
   const stats = useMemo(() => computeStats(rows), [rows]);
   const sections = useMemo(() => buildScorecard(config, rows, declines), [config, rows, declines]);
@@ -136,6 +153,9 @@ export function StrategyReport({ trades, config, chargesConfig, declines, onJump
             Configured components — what fired and what it earned
           </SectionTitle>
           <ComponentScorecard sections={sections} scale={scale} hasDeclines={!!declines} onDrill={drill} />
+
+          <SectionTitle>Profit giveback — good profit handed back to the market</SectionTitle>
+          <GivebackSection rows={rows} thresholdR={thresholdR} onThresholdChange={changeThreshold} onDrill={drill} onJump={onJump} />
 
           <SectionTitle>Breakdown</SectionTitle>
           <BreakdownPanel rows={rows} pinned={filters.map(f => f.dim)} onDrill={drill} />

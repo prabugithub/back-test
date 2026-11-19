@@ -802,6 +802,14 @@ This replaces the auto-BT use of `EntryMetricsDashboard`. That file now exports 
   - **When you add or rename an exit hook**, update `EXIT_HOOK_RULES` (which rules each hook can emit, so 0-hit rules are listed) and `RULE_PARAMS`.
   - **When you add a guard with settings**, update `HOOK_PARAMS`.
 - **New `ExitReason`:** add a label in `EXIT_REASON_LABEL`. If it is a configurable built-in, add a row in `buildScorecard`.
+- **Profit giveback reads candles.** `StrategyReport` takes a `candles` prop (from `AutoBacktestPanel`). `attachExcursions(rows, candles, thresholdR)` fills `mfe*`, `finalR`, `barsToPeak`, `barsPeakToExit`, `givebackRs` and `scenario`.
+  - It binary-searches `entryTsSec` and the exit time in seconds. The entry candle must match exactly.
+  - It scans the bars strictly between the entry and exit bars.
+  - Rows stay `'not measurable'` when the loaded candles don't cover the trade (another symbol or range on the chart) or when the trade has no initial SL.
+  - Giveback uses `ReportTrade.grossPnl` (captured before `toNetPositions`), not `pnl`.
+  - `computeStats` now also returns `avgPeakR`, `givebackRs` and `capture` over the attached rows.
+  - Scenario bands: `GIVEBACK_BANDS`. Threshold: localStorage `bt.report.givebackR`.
+  - If candle timestamps or the seconds/ms convention change, recheck `indexAtOrBefore`.
 
 ---
 
