@@ -93,9 +93,9 @@ const EXIT_REASON_LABEL: Record<string, string> = {
 
 /** Finer exit attribution. Exit-hook details all start with `<rule>: …` (climax:,
  *  climax-body:, climax reversal:, double top:, double bottom:, leg decay:, time stop:). */
-export function deriveExitRule(reason: string | undefined, detail: string | undefined, slTrailed?: boolean): string {
+export function deriveExitRule(reason: string | undefined, detail: string | undefined, slTrailed?: boolean, slTrailSource?: string): string {
   if (!reason) return '—';
-  if (reason === 'SL') return slTrailed ? 'SL (trailed)' : 'SL (initial)';
+  if (reason === 'SL') return !slTrailed ? 'SL (initial)' : slTrailSource === 'rlock' ? 'SL (R lock)' : 'SL (trailed)';
   if (reason === 'EXIT_HOOK') {
     const m = /^\s*([^:|]{1,40}):/.exec(detail ?? '');
     return m ? m[1].trim().toLowerCase() : 'exit hook (other)';
@@ -136,7 +136,7 @@ export function buildReportRows(trades: Trade[], chargesConfig?: ChargesConfig):
       trigger: parsed.trigger ?? '—',
       entryStack: hookId ?? (isAuto ? 'built-in' : '—'),
       exitReason: p.exitReason ?? '—',
-      exitRule: deriveExitRule(p.exitReason, exit?.exitDetail, exit?.slTrailed),
+      exitRule: deriveExitRule(p.exitReason, exit?.exitDetail, exit?.slTrailed, exit?.slTrailSource),
       pnl: p.realizedPnL,
       r: risk > 0 ? p.realizedPnL / risk : null,
       barsHeld: mins && p.durationMinutes !== undefined ? Math.round(p.durationMinutes / mins) : null,
@@ -724,6 +724,9 @@ export function buildScorecard(
       addRule('SL (initial)', 'Built-in', [slSummary(r)]);
       if (r.exitTrailPivot || r.exitTrailTrendline) {
         addRule('SL (trailed)', 'Built-in', [r.exitTrailPivot ? 'pivot trail' : '', r.exitTrailTrendline ? 'trendline trail' : ''].filter(Boolean));
+      }
+      if (r.exitTrailR) {
+        addRule('SL (R lock)', 'Built-in', [`start ${r.exitTrailRStartR ?? 2}R · step ${r.exitTrailRStepR ?? 1}R · gap ${r.exitTrailRGapR ?? 1}R`]);
       }
       if (r.exitOnReversal) addRule('Reversal', 'Built-in', [`confirm ${r.exitReversalConfirmBars ?? 1} bar(s)`]);
       if (r.exitOnOppSignal) addRule('Opposite signal', 'Built-in');

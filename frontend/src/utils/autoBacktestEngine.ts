@@ -273,6 +273,18 @@ export interface RegimeRules {
   exitTrailTrendline?: boolean;
   exitTrailTrendlineBufferPoints?: number; // default 2
 
+  // 3c. Profit Lock (R trail) — a step ladder on the trade's own risk. Once the best price
+  //    since entry (bars after the entry bar through the PRIOR bar) reaches Start R, the SL
+  //    is locked at entry + (floor(peakR / Step R) × Step R − Gap R) × initial risk.
+  //    Defaults 2/1/1: +2R locks +1R, +3R locks +2R, … Start 1 / Gap 1 = breakeven at +1R.
+  //    Ratchet only; with the pivot/trendline trails also on, the tighter stop wins. Needs
+  //    the position's initialRiskPoints (stamped at open) — restored positions without it
+  //    are left alone. Exits as SL, attributed 'SL (R lock)' in the Strategy Report.
+  exitTrailR?: boolean;
+  exitTrailRStartR?: number;              // default 2
+  exitTrailRStepR?: number;               // default 1
+  exitTrailRGapR?: number;                // default 1
+
   // 4. Custom exit hook — a user-authored TypeScript function that manages the open
   //    trade bar by bar: hold it, move its stop/target, or close it. Where the three
   //    mechanisms above are declarative switches, this runs arbitrary code, and it is
@@ -2103,6 +2115,7 @@ export interface AutoExitPositionInfo {
   exitWithTrendSeen?: boolean;
   exitAgainstBars?: number;
   slTrailed?: boolean;
+  initialRiskPoints?: number;     // |entry − SL| at open — the Profit Lock's 1R
   id?: string;                    // multi-trade mode — lets a hook key ctx.state per trade
 }
 
@@ -2162,17 +2175,20 @@ const resolveExitRules = (
 export function evaluateTrailStop(
   candles: Candle[],
   currentIndex: number,
-  position: Pick<AutoExitPositionInfo, 'quantity' | 'stopLoss' | 'entryRegime' | 'entryBarIndex'>,
+  position: Pick<AutoExitPositionInfo, 'quantity' | 'stopLoss' | 'entryRegime' | 'entryBarIndex' | 'averagePrice' | 'initialRiskPoints'>,
   config: AutoBacktestConfig
-): { newStopLoss: number } | null {
+): { newStopLoss: number; source: TrailSource } | null {
   if (currentIndex < 5 || position.quantity === 0) return null;
   const rules = resolveExitRules(candles, currentIndex, position.entryRegime, config);
-  if (!rules.exitTrailPivot && !rules.exitTrailTrendline) return null;
+  if (!rules.exitTrailPivot && !rules.exitTrailTrendline && !rules.exitTrailR) return null;
 
   const isLong = position.quantity > 0;
-  const tighter = (a: number | null, b: number | null) =>
-    a === null ? b : b === null ? a : isLong ? Math.max(a, b) : Math.min(a, b);
   let candidate: number | null = null;
+  let source: TrailSource = 'pivot';
+  // Keep the tighter of the running candidate and `b`, remembering which mechanism won.
+  const offer = (b: number, src: TrailSource) => {
+    if (candidate === null || (isLong ? b > candidate : b < candidate)) { candidate = b; source = src; }
+  };
 
   if (rules.exitTrailPivot) {
     const pivots = getPivotPointsUpTo(candles, currentIndex - 1, resolveMinPivotGapBars(config));
@@ -2183,9 +2199,9 @@ export function evaluateTrailStop(
     if (pivot && pivot.barIndex >= 2) {
       const buffer = rules.exitTrailPivotBufferPoints ?? 2;
       const b = pivot.barIndex;
-      candidate = isLong
+      offer(isLong
         ? Math.min(candles[b].low, candles[b - 1].low, candles[b - 2].low) - buffer
-        : Math.max(candles[b].high, candles[b - 1].high, candles[b - 2].high) + buffer;
+        : Math.max(candles[b].high, candles[b - 1].high, candles[b - 2].high) + buffer, 'pivot');
     }
   }
 
@@ -2197,13 +2213,55 @@ export function evaluateTrailStop(
     if (line) {
       const pad = line.tolerance + (rules.exitTrailTrendlineBufferPoints ?? 2);
       const at = trendlinePriceAt(line, currentIndex);
-      candidate = tighter(candidate, isLong ? at - pad : at + pad);
+      offer(isLong ? at - pad : at + pad, 'trendline');
     }
   }
 
-  if (candidate === null || candidate <= 0) return null;
-  if (position.stopLoss !== undefined && (isLong ? candidate <= position.stopLoss : candidate >= position.stopLoss)) return null;
-  return { newStopLoss: candidate };
+  // Profit Lock (R trail) — step ladder on the initial risk, peak read from the bars after
+  // the entry bar through the PRIOR bar (same peak the Profit Giveback report measures).
+  if (rules.exitTrailR) {
+    const lock = rLockStop(candles, currentIndex, position, isLong, rules);
+    if (lock !== null) offer(lock, 'rlock');
+  }
+
+  const c = candidate as number | null;
+  if (c === null || c <= 0) return null;
+  if (position.stopLoss !== undefined && (isLong ? c <= position.stopLoss : c >= position.stopLoss)) return null;
+  return { newStopLoss: c, source };
+}
+
+/** Which built-in trail moved a stop ('hook' = a custom exit hook's sl adjust). */
+export type TrailSource = 'pivot' | 'trendline' | 'rlock' | 'hook';
+export const TRAIL_SOURCE_LABEL: Record<TrailSource, string> = {
+  pivot: 'behind latest pivot', trendline: 'along trendline', rlock: 'profit lock', hook: 'exit hook',
+};
+
+/** The Profit Lock stop for this bar, or null when not armed / not measurable. */
+function rLockStop(
+  candles: Candle[],
+  currentIndex: number,
+  position: Pick<AutoExitPositionInfo, 'entryBarIndex' | 'averagePrice' | 'initialRiskPoints'>,
+  isLong: boolean,
+  rules: RegimeRules
+): number | null {
+  const risk = position.initialRiskPoints;
+  const entry = position.averagePrice;
+  const ei = position.entryBarIndex;
+  if (!risk || risk <= 0 || entry === undefined || ei === undefined) return null;
+  const startR = rules.exitTrailRStartR ?? 2;
+  const stepR = rules.exitTrailRStepR ?? 1;
+  const gapR = rules.exitTrailRGapR ?? 1;
+  if (stepR <= 0) return null;
+  let best = 0;
+  for (let i = ei + 1; i < currentIndex; i++) {
+    const move = isLong ? candles[i].high - entry : entry - candles[i].low;
+    if (move > best) best = move;
+  }
+  const peakR = best / risk;
+  if (peakR < startR) return null;
+  // Small epsilon so 2.9999999 from float division still counts as 3 steps.
+  const lockR = Math.floor(peakR / stepR + 1e-9) * stepR - gapR;
+  return isLong ? entry + lockR * risk : entry - lockR * risk;
 }
 
 /** The line managing a trade at bar `refIndex`: the best support (long) / resistance (short)
@@ -2457,7 +2515,7 @@ function runExitHookAt(
 
 // Count of exit mechanisms switched on for a regime — UI badge helper.
 export function countActiveExitMechanisms(rules: RegimeRules): number {
-  return [rules.exitOnReversal, rules.exitOnOppSignal, rules.exitTrailPivot, rules.exitOnTrendlineBreak, rules.exitTrailTrendline, exitHookActive(rules)]
+  return [rules.exitOnReversal, rules.exitOnOppSignal, rules.exitTrailPivot, rules.exitOnTrendlineBreak, rules.exitTrailTrendline, rules.exitTrailR, exitHookActive(rules)]
     .filter(Boolean).length;
 }
 

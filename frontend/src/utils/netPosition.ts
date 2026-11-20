@@ -49,6 +49,8 @@ export function buildNetPositionMirror(
     exitWithTrendSeen: single?.exitWithTrendSeen,
     exitAgainstBars: single?.exitAgainstBars,
     slTrailed: single?.slTrailed,
+    slTrailSource: single?.slTrailSource,
+    initialRiskPoints: single?.initialRiskPoints,
   };
 }
 

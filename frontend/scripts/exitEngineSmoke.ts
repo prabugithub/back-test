@@ -103,6 +103,42 @@ const cfg = (uptrend: Partial<RegimeRules>): AutoBacktestConfig => ({
     'inert when exitTrailPivot is off');
 }
 
+// ─── 1b. Profit Lock (R trail) ───────────────────────────────────────────────
+{
+  console.log('\n[1b] evaluateTrailStop — Profit Lock (R step ladder)');
+  // Flat bars at 100 (H 101 / L 99); entry bar 10 at 100, 1R = 10 pts.
+  const flat = (): Candle[] => Array.from({ length: 30 }, (_, k) => ({
+    timestamp: 1_700_000_000 + k * 60, open: 100, close: 100, high: 101, low: 99, volume: 1000,
+  }));
+  const config = cfg({ exitTrailR: true }); // defaults: start 2, step 1, gap 1
+  const long = { quantity: 1, stopLoss: 90, entryRegime: 'uptrend' as const, entryBarIndex: 10, averagePrice: 100, initialRiskPoints: 10 };
+
+  const c1 = flat(); c1[12] = { ...c1[12], high: 125, close: 120 }; // peak +2.5R on bar 12
+  assert(evaluateTrailStop(c1, 12, long, config) === null, 'peak bar itself is not read (prior bars only)');
+  const t1 = evaluateTrailStop(c1, 13, long, config);
+  assert(t1 !== null && Math.abs(t1.newStopLoss - 110) < 1e-9 && t1.source === 'rlock', '+2.5R peak locks +1R (110), source rlock');
+  assert(evaluateTrailStop(c1, 13, { ...long, stopLoss: 110 }, config) === null, 'ratchet only — same level not re-issued');
+  assert(evaluateTrailStop(c1, 13, { ...long, stopLoss: 112 }, config) === null, 'never loosens a tighter stop');
+
+  const c2 = flat(); c2[12] = { ...c2[12], high: 130 }; // exactly +3R
+  const t2 = evaluateTrailStop(c2, 14, long, config);
+  assert(t2 !== null && Math.abs(t2.newStopLoss - 120) < 1e-9, 'exactly +3R locks +2R (120)');
+
+  const c3 = flat(); c3[12] = { ...c3[12], high: 119 }; // +1.9R
+  assert(evaluateTrailStop(c3, 14, long, config) === null, 'below Start R → not armed');
+  const be = cfg({ exitTrailR: true, exitTrailRStartR: 1, exitTrailRGapR: 1 });
+  const t3 = evaluateTrailStop(c3, 14, long, be);
+  assert(t3 !== null && Math.abs(t3.newStopLoss - 100) < 1e-9, 'start 1 / gap 1 → breakeven at +1R');
+
+  assert(evaluateTrailStop(c1, 13, { ...long, initialRiskPoints: undefined }, config) === null,
+    'no initialRiskPoints (restored position) → inert');
+
+  const short = { ...long, quantity: -1, stopLoss: 110 };
+  const c4 = flat(); c4[12] = { ...c4[12], low: 75 }; // short peak +2.5R
+  const t4 = evaluateTrailStop(c4, 13, short, config);
+  assert(t4 !== null && Math.abs(t4.newStopLoss - 90) < 1e-9, 'short mirror: +2.5R locks +1R (90)');
+}
+
 // ─── 2. Reversal exit ─────────────────────────────────────────────────────────
 {
   console.log('\n[2] evaluateAutoExitSignal — REVERSAL on structure against the position');

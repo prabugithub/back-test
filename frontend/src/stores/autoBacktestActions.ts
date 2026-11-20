@@ -4,7 +4,7 @@ import type { StoreSet, StoreGet } from './sessionStore';
 import {
   type AutoBacktestConfig, type AutoSignal, type RegimeKey,
   MULTI_TRADE_DEFAULT_CAP, isMultiTradeMode,
-  evaluateAutoSignals, evaluateTrailStop, evaluateAutoExitSignal,
+  evaluateAutoSignals, evaluateTrailStop, evaluateAutoExitSignal, TRAIL_SOURCE_LABEL,
   resolveTradeQuantity, resolveEntryHook, resolveExitHook, defaultAutoBacktestConfig,
 } from '../utils/autoBacktestEngine';
 import { runBatchSimulation, type BatchSimResult } from '../utils/batchBacktestSimulator';
@@ -300,6 +300,7 @@ export function createAutoBacktestActions(set: StoreSet, get: StoreGet) {
         autoEntry: true,
         entryRegime: signal.regime,
         entryBarIndex: index,
+        initialRiskPoints: signal.sl !== undefined && signal.sl > 0 ? Math.abs(entryPrice - signal.sl) : undefined,
       };
 
       set({ trades: [...state.trades, trade] });
@@ -335,6 +336,7 @@ export function createAutoBacktestActions(set: StoreSet, get: StoreGet) {
         tpHit: reason === 'TP',
         hitFirst: reason === 'SL' || reason === 'TP' ? reason : undefined,
         slTrailed: pos.slTrailed || undefined,
+        slTrailSource: pos.slTrailed ? pos.slTrailSource : undefined,
         withTrendSeen: pos.withTrendSeen,
         interval: state.sessionConfig?.interval || '5',
       };
@@ -380,12 +382,12 @@ export function createAutoBacktestActions(set: StoreSet, get: StoreGet) {
         if (!slTpOnly) {
           const trail = evaluateTrailStop(state.candles, index, current, config);
           if (trail) {
-            current = { ...current, stopLoss: trail.newStopLoss, slTrailed: true };
+            current = { ...current, stopLoss: trail.newStopLoss, slTrailed: true, slTrailSource: trail.source };
             syncNetPositionMirror({
               openPositions: get().openPositions.map(p => (p.id === id ? current : p)),
             });
             useNotificationStore.getState().notify(
-              `Trailing SL → ${trail.newStopLoss.toFixed(2)} (behind latest pivot)`, 'info'
+              `Trailing SL → ${trail.newStopLoss.toFixed(2)} (${TRAIL_SOURCE_LABEL[trail.source]})`, 'info'
             );
           }
         }
@@ -444,7 +446,7 @@ export function createAutoBacktestActions(set: StoreSet, get: StoreGet) {
           current = {
             ...current,
             ...exitState,
-            ...(slMoved ? { stopLoss: adjust!.stopLoss, slTrailed: true } : {}),
+            ...(slMoved ? { stopLoss: adjust!.stopLoss, slTrailed: true, slTrailSource: 'hook' as const } : {}),
             ...(tpMoved ? { target: adjust!.target } : {}),
           };
           syncNetPositionMirror({
@@ -572,6 +574,7 @@ export function createAutoBacktestActions(set: StoreSet, get: StoreGet) {
           ...position,
           stopLoss: trail.newStopLoss,
           slTrailed: true,
+          slTrailSource: trail.source,
           // SL level changed — re-arm the SL trigger (same convention as
           // updatePositionTarget resetting tpHit/tpDialogShown).
           slHit: undefined,
@@ -580,7 +583,7 @@ export function createAutoBacktestActions(set: StoreSet, get: StoreGet) {
       });
       useNotificationStore
         .getState()
-        .notify(`Trailing SL → ${trail.newStopLoss.toFixed(2)} (behind latest pivot)`, 'info');
+        .notify(`Trailing SL → ${trail.newStopLoss.toFixed(2)} (${TRAIL_SOURCE_LABEL[trail.source]})`, 'info');
     },
 
     // Phase 2 of the auto exit engine — price-action exit signals evaluated on
@@ -616,7 +619,7 @@ export function createAutoBacktestActions(set: StoreSet, get: StoreGet) {
             ...exitState,
             // Re-arm the triggers whenever a level moves — same convention as
             // runAutoTrailStop and updatePositionTarget.
-            ...(slMoved ? { stopLoss: adjust!.stopLoss, slTrailed: true, slHit: undefined, slDialogShown: undefined } : {}),
+            ...(slMoved ? { stopLoss: adjust!.stopLoss, slTrailed: true, slTrailSource: 'hook' as const, slHit: undefined, slDialogShown: undefined } : {}),
             ...(tpMoved ? { target: adjust!.target, tpHit: undefined, tpDialogShown: undefined } : {}),
           },
         });

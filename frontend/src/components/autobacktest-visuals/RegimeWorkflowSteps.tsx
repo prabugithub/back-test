@@ -1012,6 +1012,49 @@ export function ExitStep({ rules, up, meta, isShort, config, onOpenSessionSettin
         </div>
       </CardShell>
 
+      <CardShell title="Profit Lock (R trail)">
+        {(() => {
+          const startR = rules.exitTrailRStartR ?? 2;
+          const stepR = rules.exitTrailRStepR ?? 1;
+          const gapR = rules.exitTrailRGapR ?? 1;
+          const lockAt = (peak: number) => (stepR > 0 ? Math.floor(peak / stepR + 1e-9) * stepR - gapR : NaN);
+          const fmt = (v: number) => `${v >= 0 ? '+' : ''}${Number(v.toFixed(2))}R`;
+          const field = (label: string, value: number, key: 'exitTrailRStartR' | 'exitTrailRStepR' | 'exitTrailRGapR') => (
+            <div className="flex items-center gap-1">
+              <span className="text-[10px] text-gray-500">{label}</span>
+              <input
+                type="number" min={0} step={0.5} value={value}
+                onChange={e => up({ [key]: Number(e.target.value) })}
+                className="w-12 px-1 py-0.5 text-[10px] border rounded text-center"
+              />
+            </div>
+          );
+          return (
+            <div className="space-y-1.5">
+              <div className="flex items-center justify-between gap-2 flex-wrap">
+                <label className="flex items-center gap-2 cursor-pointer select-none"
+                  title="Once the best price since entry reaches Start R (multiples of the initial risk), the SL is locked at entry + (floor(peak ÷ Step) × Step − Gap) × risk, and climbs as the peak makes new steps. Peak is read from bars after entry through the prior bar. Never loosens; with the pivot/trendline trails on, the tighter stop wins. Report row: SL (R lock).">
+                  <ToggleSwitch checked={rules.exitTrailR ?? false} onChange={v => up({ exitTrailR: v })} activeColor={meta.activeBg} />
+                  <span className={`text-xs font-semibold ${rules.exitTrailR ? meta.color : 'text-gray-400'}`}>
+                    {rules.exitTrailR ? 'On' : 'Off'}
+                  </span>
+                </label>
+                <div className="flex items-center gap-2 flex-wrap">
+                  {field('Start R:', startR, 'exitTrailRStartR')}
+                  {field('Step R:', stepR, 'exitTrailRStepR')}
+                  {field('Gap R:', gapR, 'exitTrailRGapR')}
+                </div>
+              </div>
+              {stepR > 0 && (
+                <p className="text-[10px] text-gray-500">
+                  {[startR, startR + stepR, startR + 2 * stepR].map(p => `${fmt(p)} → lock ${fmt(lockAt(p))}`).join(' · ')}
+                </p>
+              )}
+            </div>
+          );
+        })()}
+      </CardShell>
+
       <CustomExitHookCard rules={rules} up={up} />
 
       <CardShell muted>

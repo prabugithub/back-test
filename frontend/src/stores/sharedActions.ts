@@ -426,6 +426,7 @@ export function createSharedActions(set: StoreSet, get: StoreGet) {
         trendReversedPnL: position?.trendReversedPnL,
         withTrendSeen: isSameSide ? position?.withTrendSeen || isInitialWith : isInitialWith,
         slTrailed: isReducing ? position?.slTrailed || undefined : undefined,
+        slTrailSource: isReducing && position?.slTrailed ? position?.slTrailSource : undefined,
         journal: journal || undefined,
         // Every `*AtEntry` field — present only on non-reducing fills.
         ...(instrumentation?.fields ?? {}),
@@ -491,6 +492,11 @@ export function createSharedActions(set: StoreSet, get: StoreGet) {
         exitWithTrendSeen: currentQty === 0 || isFlip ? undefined : position?.exitWithTrendSeen,
         exitAgainstBars: currentQty === 0 || isFlip ? undefined : position?.exitAgainstBars,
         slTrailed: currentQty === 0 || isFlip ? undefined : position?.slTrailed,
+        slTrailSource: currentQty === 0 || isFlip ? undefined : position?.slTrailSource,
+        // Profit Lock's 1R — measured on the opening fill, kept through adds/reduces.
+        initialRiskPoints: currentQty === 0 || isFlip
+          ? (autoMeta?.auto && trade.stopLoss !== undefined && trade.stopLoss > 0 ? Math.abs(newAvgPrice - trade.stopLoss) : undefined)
+          : position?.initialRiskPoints,
         liveOptionToken: atmOptionToken || (position as any)?.liveOptionToken,
         pendingOrderId: pendingLiveOrderId,
       } as Position;

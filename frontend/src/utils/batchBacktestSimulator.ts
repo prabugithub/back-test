@@ -4,7 +4,7 @@ import type { Candle, Trade, BacktestPosition, OpenPosition, ExitReason } from '
 import type { TradeJournal } from '../types';
 import { describeSlTpExit } from './tradeAnalysis';
 import { DECLINES_STATE_KEY } from '../strategies/compose';
-import { type AutoBacktestConfig, type AutoSignal, type RegimeKey, MULTI_TRADE_DEFAULT_CAP, evaluateAutoSignals, evaluateTrailStop, evaluateAutoExitSignal, resolveTradeQuantity, resolveEntryHook, resolveExitHook } from './autoBacktestEngine';
+import { type AutoBacktestConfig, type AutoSignal, type RegimeKey, MULTI_TRADE_DEFAULT_CAP, evaluateAutoSignals, evaluateTrailStop, evaluateAutoExitSignal, type TrailSource, resolveTradeQuantity, resolveEntryHook, resolveExitHook } from './autoBacktestEngine';
 import { createHookRunState } from './entryHook';
 import { createExitHookRunState } from './exitHook';
 import { buildNetPositionMirror } from './netPosition';
@@ -27,6 +27,8 @@ interface SimPosition {
   exitWithTrendSeen?: boolean;
   exitAgainstBars?: number;
   slTrailed?: boolean;
+  slTrailSource?: TrailSource;
+  initialRiskPoints?: number; // |entry − SL| at open — the Profit Lock's 1R
   // Multi-trade mode only — pairs this trade's entry and exit fills. Absent in
   // single-position mode, where there is only ever one position to talk about.
   id?: string;
@@ -257,6 +259,10 @@ export function runBatchSimulation(
       exitWithTrendSeen: opensNewTrade ? undefined : position?.exitWithTrendSeen,
       exitAgainstBars: opensNewTrade ? undefined : position?.exitAgainstBars,
       slTrailed: opensNewTrade ? undefined : position?.slTrailed,
+      slTrailSource: opensNewTrade ? undefined : position?.slTrailSource,
+      initialRiskPoints: opensNewTrade
+        ? (newStopLoss !== undefined && newStopLoss > 0 ? Math.abs(newAvgPrice - newStopLoss) : undefined)
+        : position?.initialRiskPoints,
       id: positionId,
       entryTimestamp: candle.timestamp,
     } : null;
@@ -293,6 +299,7 @@ export function runBatchSimulation(
       slHit: reason === 'SL',
       tpHit: reason === 'TP',
       slTrailed: pos.slTrailed || undefined,
+      slTrailSource: pos.slTrailed ? pos.slTrailSource : undefined,
       interval,
     });
     if (multi) multiRealizedPnL += pnl;
@@ -312,6 +319,7 @@ export function runBatchSimulation(
     if (trail) {
       pos.stopLoss = trail.newStopLoss;
       pos.slTrailed = true;
+      pos.slTrailSource = trail.source;
     }
 
     // ── 1. SL/TP check ───────────────────────────────────────────────────────
@@ -358,6 +366,7 @@ export function runBatchSimulation(
       if (adjust.stopLoss !== undefined) {
         pos.stopLoss = adjust.stopLoss;
         pos.slTrailed = true;
+        pos.slTrailSource = 'hook';
       }
       if (adjust.target !== undefined) pos.target = adjust.target;
     }

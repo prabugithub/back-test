@@ -111,6 +111,9 @@ export interface Trade {
   // "LT:Bear against for 2 bar(s)"). Exit fills only; absent on older trades.
   exitDetail?: string;
   slTrailed?: boolean; // SL had been ratcheted by the pivot trail before this exit
+  // Which mechanism last moved the SL before this exit — 'rlock' = Profit Lock (R trail),
+  // 'hook' = a custom exit hook. Exit fills only; absent on older trades.
+  slTrailSource?: 'pivot' | 'trendline' | 'rlock' | 'hook';
   slHit?: boolean;
   tpHit?: boolean;
   slDialogShown?: boolean;
@@ -196,6 +199,8 @@ interface PositionBase {
   exitWithTrendSeen?: boolean;
   exitAgainstBars?: number;
   slTrailed?: boolean;
+  slTrailSource?: 'pivot' | 'trendline' | 'rlock' | 'hook'; // last mechanism that moved the SL
+  initialRiskPoints?: number; // |entry − SL| at open — the Profit Lock's 1R; kept through adds/reduces
 }
 
 // Backtest position: broker fields must never be present
