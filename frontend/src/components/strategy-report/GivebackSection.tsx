@@ -1,4 +1,4 @@
-import { useMemo } from 'react';
+import { useMemo, useState } from 'react';
 import { CartesianGrid, Cell, ReferenceLine, ResponsiveContainer, Scatter, ScatterChart, Tooltip, XAxis, YAxis } from 'recharts';
 import {
   type ReportFilter, type ReportTrade,
@@ -50,9 +50,15 @@ function ScatterTip({ active, payload, thresholdR }: { active?: boolean; payload
  */
 export function GivebackSection({ rows, thresholdR, onThresholdChange, onDrill, onJump }: Props) {
   const g = useMemo(() => computeGiveback(rows), [rows]);
-  const points = useMemo<Point[]>(
+  // Scatter-only filter: show trades that gave back ≥ minGivebackR (peak − profit kept, in R). 0 = all.
+  const [minGivebackR, setMinGivebackR] = useState(0);
+  const allPoints = useMemo<Point[]>(
     () => rows.filter(t => t.mfeR !== null && t.finalR !== null).map(t => ({ x: t.mfeR!, y: t.finalR!, t })),
     [rows],
+  );
+  const points = useMemo(
+    () => minGivebackR > 0 ? allPoints.filter(p => p.x - Math.max(p.y, 0) >= minGivebackR) : allPoints,
+    [allPoints, minGivebackR],
   );
   const maxX = points.reduce((m, p) => Math.max(m, p.x), 0);
 
@@ -149,8 +155,20 @@ export function GivebackSection({ rows, thresholdR, onThresholdChange, onDrill, 
       </div>
 
       <div className="mt-3">
-        <div className="text-[10px] text-gray-500 mb-1">
-          Peak R vs final R <span className="text-gray-400">— the diagonal is "exited at the peak"; the further below it, the more was given back. Dashed line = {thresholdR}R.</span>
+        <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-[10px] text-gray-500 mb-1">
+          <span>
+            Peak R vs final R <span className="text-gray-400">— the diagonal is "exited at the peak"; the further below it, the more was given back. Dashed line = {thresholdR}R.</span>
+          </span>
+          <label className="flex items-center gap-1 ml-auto" title="Show only trades whose peak − profit kept is at least this many R (a loser's whole peak counts). 0 = all trades.">
+            Given back ≥
+            <input
+              type="number" min={0} step={0.5} value={minGivebackR}
+              onChange={e => { const v = Number(e.target.value); if (v >= 0) setMinGivebackR(v); }}
+              className="w-14 border border-gray-300 rounded px-1 py-0.5 text-[10px] text-gray-800"
+            />
+            R
+            <span className="text-gray-400 tabular-nums">· {points.length}/{allPoints.length} trades</span>
+          </label>
         </div>
         <ResponsiveContainer width="100%" height={220}>
           <ScatterChart margin={{ top: 6, right: 8, left: -16, bottom: 4 }}>
