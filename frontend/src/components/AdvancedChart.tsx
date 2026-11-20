@@ -31,6 +31,17 @@ import { exitReasonBadge, parseEntryReason } from '../utils/tradeAnalysis';
 import { candleSizeVsAverage, type CandleSizeStats } from '../utils/pivotAnalysis';
 import { X } from 'lucide-react';
 
+// "Mon, 15 Jan 2024, 09:30" in the browser's local timezone — shared by the crosshair
+// time label and the candle-click popup so both read identically.
+const DAY_NAMES = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+const MONTH_NAMES = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+function formatCandleTime(time: number): string {
+  const date = new Date(time * 1000);
+  const hours = date.getHours().toString().padStart(2, '0');
+  const minutes = date.getMinutes().toString().padStart(2, '0');
+  return `${DAY_NAMES[date.getDay()]}, ${date.getDate()} ${MONTH_NAMES[date.getMonth()]} ${date.getFullYear()}, ${hours}:${minutes}`;
+}
+
 export interface ChartCallbacks {
   clearDrawings?: () => void;
   deleteSelected?: () => void;
@@ -85,7 +96,7 @@ export function AdvancedChart({
   const [pendingTextPoint, setPendingTextPoint] = useState<Point | null>(null);
   const [pendingCalloutPoints, setPendingCalloutPoints] = useState<{ p1: Point, p2: Point } | null>(null);
   const [isUploadingScreenshot, setIsUploadingScreenshot] = useState(false);
-  const [execPopup, setExecPopup] = useState<{ x: number; y: number; trades: Trade[]; candleStats?: CandleSizeStats } | null>(null);
+  const [execPopup, setExecPopup] = useState<{ x: number; y: number; time: number; trades: Trade[]; candleStats?: CandleSizeStats } | null>(null);
   // Window for the click popup's "candle size vs average" (Session Settings → Bar range lookback).
   const barRangeLookback = useSessionStore((s) => s.autoBacktestConfig.barRangeLookback ?? 20);
   // A leg/pullback segment the user clicked in the Trade Record popup's Leg Sequence strip —
@@ -494,23 +505,7 @@ export function AdvancedChart({
         },
       },
       localization: {
-        timeFormatter: (time: any) => {
-          const date = new Date(time * 1000);
-          const dayNames = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
-          const monthNames = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
-
-          // Use local methods to show time in the user's timezone (e.g. IST)
-          const dayName = dayNames[date.getDay()];
-          const day = date.getDate();
-          const month = monthNames[date.getMonth()];
-          const year = date.getFullYear();
-          const hours = date.getHours().toString().padStart(2, '0');
-          const minutes = date.getMinutes().toString().padStart(2, '0');
-
-          // Format: "Mon, 15 Jan 2024, 09:30"
-          const formatted = `${dayName}, ${day} ${month} ${year}, ${hours}:${minutes}`;
-          return formatted;
-        },
+        timeFormatter: (time: any) => formatCandleTime(time),
       },
       crosshair: {
         mode: 0, // Normal crosshair - follows mouse pointer exactly (not magnet mode)
@@ -767,7 +762,7 @@ export function AdvancedChart({
         setExecPopup(null);
         return;
       }
-      setExecPopup({ x: param.point.x, y: param.point.y, trades: clickedTrades, candleStats });
+      setExecPopup({ x: param.point.x, y: param.point.y, time: param.time as number, trades: clickedTrades, candleStats });
     };
     chart.subscribeClick(handleClick);
     return () => chart.unsubscribeClick(handleClick);
@@ -1516,9 +1511,9 @@ export function AdvancedChart({
         {execPopup && (
           <div
             ref={execPopupRef}
-            className={`absolute bg-white border border-gray-200 rounded-lg shadow-xl text-xs overflow-y-auto ${execPopup.trades.length > 0 ? 'w-[26rem] max-h-[28rem]' : 'w-64'}`}
+            className={`absolute bg-white border border-gray-200 rounded-lg shadow-xl text-xs overflow-y-auto ${execPopup.trades.length > 0 ? 'w-[26rem] max-h-[28rem]' : 'w-72'}`}
             style={{
-              left: Math.min(execPopup.x + 12, (chartContainerRef.current?.clientWidth ?? 800) - (execPopup.trades.length > 0 ? 440 : 272)),
+              left: Math.min(execPopup.x + 12, (chartContainerRef.current?.clientWidth ?? 800) - (execPopup.trades.length > 0 ? 440 : 304)),
               top: Math.min(execPopup.y + 12, (chartContainerRef.current?.clientHeight ?? 500) - (execPopup.trades.length > 0 ? 400 : 120)),
               zIndex: 300,
             }}
@@ -1526,6 +1521,7 @@ export function AdvancedChart({
             <div className="flex items-center justify-between px-3 py-2 border-b bg-gray-50 sticky top-0">
               <span className="font-bold text-gray-700">
                 {execPopup.trades.length === 0 ? 'Candle' : <>Trade Record{execPopup.trades.length > 1 ? `s (${execPopup.trades.length})` : ''}</>}
+                <span className="ml-2 font-mono font-normal text-gray-500">{formatCandleTime(execPopup.time)}</span>
               </span>
               <button onClick={() => { setExecPopup(null); setSelectedSegment(null); }} className="text-gray-400 hover:text-gray-700">
                 <X size={14} />
